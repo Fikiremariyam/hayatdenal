@@ -1,0 +1,17 @@
+{
+ "doctype": "Page",
+ "name": "perio_comparison",
+ "title": "Perio Comparison",
+ "module": "Dental Clinic",
+ "page_name": "perio_comparison",
+ "standard": "Yes",
+ "system_page": 0,
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Healthcare User"
+  }
+ ]
+}

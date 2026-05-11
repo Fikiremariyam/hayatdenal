@@ -1,0 +1,148 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-05-02 23:44:46.303678",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "tooth_code",
+  "tootch_code_fdi",
+  "teeth_type",
+  "healthy",
+  "missing",
+  "implant",
+  "bridge_pointic",
+  "restorations_column",
+  "crown",
+  "root_canal",
+  "veneer",
+  "pathology_column",
+  "decay",
+  "fracture",
+  "mobility",
+  "abscees",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "tooth_code",
+   "fieldtype": "Link",
+   "label": "Tooth Code Universal",
+   "options": "Teeth code"
+  },
+  {
+   "fetch_from": "tooth_code.teeth_name1",
+   "fieldname": "teeth_type",
+   "fieldtype": "Data",
+   "label": "Teeth Type ",
+   "no_copy": 1,
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "healthy",
+   "fieldtype": "Check",
+   "label": "Healthy"
+  },
+  {
+   "default": "0",
+   "fieldname": "missing",
+   "fieldtype": "Check",
+   "label": "Missing"
+  },
+  {
+   "default": "0",
+   "fieldname": "implant",
+   "fieldtype": "Check",
+   "label": "Implant"
+  },
+  {
+   "default": "0",
+   "fieldname": "bridge_pointic",
+   "fieldtype": "Check",
+   "label": "Bridge pointic "
+  },
+  {
+   "fieldname": "crown",
+   "fieldtype": "Select",
+   "label": "crown",
+   "options": "\nAll\nM\nO/I\nD\nB/F\nLP"
+  },
+  {
+   "fieldname": "root_canal",
+   "fieldtype": "Select",
+   "label": "Root canal",
+   "options": "\nAll\nM\nO/I\nD\nB/F\nLP"
+  },
+  {
+   "fieldname": "veneer",
+   "fieldtype": "Select",
+   "label": "Veneer",
+   "options": "\nAll\nM\nO/I\nD\nB/F\nLP"
+  },
+  {
+   "fieldname": "decay",
+   "fieldtype": "Select",
+   "label": "Decay",
+   "options": "\nAll\nM\nO/I\nD\nB/F\nLP"
+  },
+  {
+   "fieldname": "fracture",
+   "fieldtype": "Select",
+   "label": "Fracture",
+   "options": "\nAll\nM\nO/I\nD\nB/F\nLP"
+  },
+  {
+   "fieldname": "mobility",
+   "fieldtype": "Data",
+   "label": "Mobility",
+   "options": "\nAll\nM\nO/I\nD\nB/F\nLP"
+  },
+  {
+   "fieldname": "abscees",
+   "fieldtype": "Select",
+   "label": "Abscees",
+   "options": "\nAll\nM\nO/I\nD\nB/F\nLP"
+  },
+  {
+   "fieldname": "restorations_column",
+   "fieldtype": "Column Break",
+   "label": "Restorations"
+  },
+  {
+   "fieldname": "pathology_column",
+   "fieldtype": "Column Break",
+   "label": "Pathology"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "teeth Details",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "tootch_code_fdi",
+   "fieldtype": "Data",
+   "label": "Tootch code FDI"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-05-06 11:10:41.604951",
+ "modified_by": "Administrator",
+ "module": "Dental Clinic",
+ "name": "teeth Details",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

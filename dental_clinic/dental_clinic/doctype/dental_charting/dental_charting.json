@@ -1,0 +1,78 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:patient",
+ "creation": "2026-04-29 20:49:37.311455",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "patient",
+  "provider",
+  "chart_date",
+  "clinical_notes",
+  "treatment_paln",
+  "teeth_details"
+ ],
+ "fields": [
+  {
+   "fieldname": "patient",
+   "fieldtype": "Link",
+   "label": "Patient",
+   "options": "Patient",
+   "unique": 1
+  },
+  {
+   "fieldname": "provider",
+   "fieldtype": "Link",
+   "label": "Provider",
+   "options": "Healthcare Practitioner"
+  },
+  {
+   "default": "Today",
+   "fieldname": "chart_date",
+   "fieldtype": "Date",
+   "label": "Chart Date"
+  },
+  {
+   "fieldname": "teeth_details",
+   "fieldtype": "Table",
+   "label": "Teeth Details",
+   "options": "teeth Details"
+  },
+  {
+   "fieldname": "clinical_notes",
+   "fieldtype": "Data",
+   "label": "Clinical Notes"
+  },
+  {
+   "fieldname": "treatment_paln",
+   "fieldtype": "Data",
+   "label": "Treatment Paln"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-06 11:08:55.377220",
+ "modified_by": "Administrator",
+ "module": "Dental Clinic",
+ "name": "Dental charting",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
