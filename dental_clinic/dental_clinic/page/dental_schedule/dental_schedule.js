@@ -79,7 +79,7 @@ async function load_events(assignments) {
         let doc = res.message;
 
         // 🔴 CHANGE THIS to your real child table fieldname
-        let rows = doc.duty_child_table || [];
+        let rows = doc.branch_schedule_assignment || [];
 
         rows.forEach(r => {
 
