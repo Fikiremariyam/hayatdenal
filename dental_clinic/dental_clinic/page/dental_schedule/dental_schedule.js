@@ -368,6 +368,7 @@
 // }
 
 
+
 frappe.pages['dental-schedule'].on_page_load = function (wrapper) {
 
     let page = frappe.ui.make_app_page({
@@ -377,6 +378,16 @@ frappe.pages['dental-schedule'].on_page_load = function (wrapper) {
     });
 
     $(wrapper).html(`
+        <div id="dental_header" style="
+            font-size:20px;
+            font-weight:800;
+            padding:10px 14px;
+            background:#ffffff;
+            border-radius:10px;
+            margin-bottom:10px;
+        ">
+            Dental Schedule
+        </div>
         <div id="filter_bar" style="
             display:flex;
             gap:12px;
