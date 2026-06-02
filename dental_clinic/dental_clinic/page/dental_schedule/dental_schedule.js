@@ -62,6 +62,51 @@ function init_calendar() {
 /* ---------------------------
    LOAD CHILD TABLE → FLATTEN EVENTS
 ----------------------------*/
+// async function load_events(assignments) {
+
+//     let events = [];
+
+//     for (let a of assignments) {
+
+//         let res = await frappe.call({
+//             method: "frappe.client.get",
+//             args: {
+//                 doctype: "Duty Assignment",
+//                 name: a.name
+//             }
+//         });
+
+//         let doc = res.message;
+
+//         // 🔴 your child table fieldname
+//         let rows = doc.branch_schedule_assignment || [];
+
+//         rows.forEach(r => {
+
+//             if (!r.date) return;
+
+//             events.push({
+//                 id: `${a.name}-${r.date}-${r.branch}`,
+
+//                 start: `${r.date}T08:00:00`,
+//                 end: `${r.date}T17:00:00`,
+
+//                 title: `${a.employee_full_name || a.employee} • ${r.branch}`,
+
+//                 extendedProps: {
+//                     employee: a.name,
+//                     branch: r.branch
+//                 },
+
+//                 backgroundColor: get_color(a.name),
+//                 borderColor: "#ffffff",
+//                 textColor: "#1e3a8a"
+//             });
+//         });
+//     }
+
+//     return events;
+// }
 async function load_events(assignments) {
 
     let events = [];
@@ -78,12 +123,60 @@ async function load_events(assignments) {
 
         let doc = res.message;
 
-        // 🔴 your child table fieldname
         let rows = doc.branch_schedule_assignment || [];
 
+        // 🧠 STEP 1: GET EMPLOYEE
+        let employee = doc.employee;
+
+        let crew_data = null;
+        let working_map = new Map();
+
+        // 🧠 STEP 2: GET EMPLOYEE DOC (to access Crew)
+        if (employee) {
+
+            let emp_res = await frappe.call({
+                method: "frappe.client.get",
+                args: {
+                    doctype: "Employee",
+                    name: employee
+                }
+            });
+
+            let emp_doc = emp_res.message;
+
+            // 🧠 STEP 3: GET CREW FROM EMPLOYEE
+            if (emp_doc && emp_doc.crew) {
+
+                let crew_res = await frappe.call({
+                    method: "frappe.client.get",
+                    args: {
+                        doctype: "Crew",
+                        name: emp_doc.crew
+                    }
+                });
+
+                crew_data = crew_res.message;
+
+                // 🧠 STEP 4: BUILD WORKING DAYS MAP
+                if (crew_data && crew_data.working_days) {
+                    crew_data.working_days.forEach(w => {
+                        working_map.set(w.date, w.shift_type);
+                    });
+                }
+            }
+        }
+
+        // 🧠 STEP 5: BUILD EVENTS
         rows.forEach(r => {
 
             if (!r.date) return;
+
+            // 🚫 SKIP IF NOT IN WORKING DAYS (STRICT ENFORCEMENT)
+            if (working_map.size > 0 && !working_map.has(r.date)) {
+                return;
+            }
+
+            let shift = working_map.get(r.date) || "";
 
             events.push({
                 id: `${a.name}-${r.date}-${r.branch}`,
@@ -91,11 +184,12 @@ async function load_events(assignments) {
                 start: `${r.date}T08:00:00`,
                 end: `${r.date}T17:00:00`,
 
-                title: `${a.employee_full_name || a.employee} • ${r.branch}`,
+                title: `${a.employee_full_name || a.employee} • ${r.branch}${shift ? " • " + shift : ""}`,
 
                 extendedProps: {
-                    employee: a.name,
-                    branch: r.branch
+                    employee: a.employee,
+                    branch: r.branch,
+                    shift_type: shift
                 },
 
                 backgroundColor: get_color(a.name),
@@ -107,7 +201,6 @@ async function load_events(assignments) {
 
     return events;
 }
-
 
 /* ---------------------------
    SIMPLE COLOR (PINK / BLUE ONLY)
