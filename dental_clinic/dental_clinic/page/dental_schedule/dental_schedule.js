@@ -358,7 +358,7 @@
 //         }
 
 //         .fc-timegrid-now-indicator-arrow {
-//             border-color: #2563eb;
+//             border-color: #9ea1a8ff;
 //         }
 
 //         .fc-timegrid-slot {
@@ -378,39 +378,52 @@ frappe.pages['dental-schedule'].on_page_load = function (wrapper) {
     });
 
     $(wrapper).html(`
-        <div id="dental_header" style="
-            font-size:20px;
-            font-weight:800;
-            padding:10px 14px;
-            background:#ffffff;
-            border-radius:10px;
-            margin-bottom:10px;
-        ">
-            Dental Schedule
-        </div>
-        <div id="filter_bar" style="
-            display:flex;
-            gap:12px;
-            padding:10px;
-            background:#fff;
-            border-radius:10px;
-            margin-bottom:10px;
+       <!-- FIXED TOP WRAPPER -->
+        <div id="top_bar" style="
             position: sticky;
             top: 0;
-            z-index: 1000;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            z-index: 2000;
+            background: #969090ff;
+            padding: 10px 0;
         ">
 
-            <select id="service_unit_filter" style="padding:6px; border:1px solid #ddd; border-radius:6px;">
-                <option value="">All Service Units</option>
-            </select>
+            <!-- HEADER (CENTERED) -->
+            <div id="dental_header" style="
+                font-size:22px;
+                font-weight:800;
+                text-align:center;
+                padding:10px 14px;
+                background:#9ea1a8ff;
+                border-radius:10px;
+                margin: 0 12px 10px 12px;
+            ">
+                Dental Schedule
+            </div>
 
-            <select id="employee_filter" style="padding:6px; border:1px solid #ddd; border-radius:6px;">
-                <option value="">All Employees</option>
-            </select>
+            <!-- FILTER BAR -->
+            <div id="filter_bar" style="
+                display:flex;
+                justify-content:center;
+                gap:12px;
+                padding:10px;
+                background:#fff;
+                border-radius:10px;
+                margin: 0 12px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            ">
 
+                <select id="service_unit_filter" style="padding:6px; border:1px solid #ddd; border-radius:6px;">
+                    <option value="">All Service Units</option>
+                </select>
+
+                <select id="employee_filter" style="padding:6px; border:1px solid #ddd; border-radius:6px;">
+                    <option value="">All Employees</option>
+                </select>
+
+            </div>
         </div>
 
+        <!-- CALENDAR -->
         <div id="calendar"></div>
     `);
 
