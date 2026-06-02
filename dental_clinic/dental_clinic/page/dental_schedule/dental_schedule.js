@@ -377,7 +377,18 @@ frappe.pages['dental-schedule'].on_page_load = function (wrapper) {
     });
 
     $(wrapper).html(`
-        <div style="display:flex; gap:12px; padding:10px; background:#fff; border-radius:10px; margin-bottom:10px;">
+        <div id="filter_bar" style="
+            display:flex;
+            gap:12px;
+            padding:10px;
+            background:#fff;
+            border-radius:10px;
+            margin-bottom:10px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        ">
 
             <select id="service_unit_filter" style="padding:6px; border:1px solid #ddd; border-radius:6px;">
                 <option value="">All Service Units</option>
@@ -442,7 +453,7 @@ function init_calendar() {
 
 
 /* ---------------------------
-   LOAD EVENTS (Duty + Crew + Working Days)
+   LOAD EVENTS (Crew + Working Days logic)
 ----------------------------*/
 async function load_events(assignments) {
 
@@ -459,13 +470,14 @@ async function load_events(assignments) {
         });
 
         let doc = res.message;
-
         let rows = doc.branch_schedule_assignment || [];
 
         let employee = doc.employee;
         let working_map = new Map();
 
-        // Employee → Crew → Working Days
+        /* ---------------------------
+           Employee → Crew → Working Days
+        ----------------------------*/
         if (employee) {
 
             let emp_res = await frappe.call({
@@ -498,11 +510,14 @@ async function load_events(assignments) {
             }
         }
 
+        /* ---------------------------
+           BUILD EVENTS
+        ----------------------------*/
         rows.forEach(r => {
 
             if (!r.date) return;
 
-            // skip if not working day
+            // skip non-working days
             if (working_map.size > 0 && !working_map.has(r.date)) return;
 
             let shift = working_map.get(r.date) || "";
@@ -513,10 +528,11 @@ async function load_events(assignments) {
                 start: `${r.date}T08:00:00`,
                 end: `${r.date}T17:00:00`,
 
-                title: `${a.employee_full_name || a.employee} • ${r.branch}${shift ? " • " + shift : ""}`,
+                title: `${a.employee_full_name} • ${r.branch}${shift ? " • " + shift : ""}`,
 
                 extendedProps: {
-                    employee: a.employee,
+                    employee_id: a.employee,
+                    employee_name: a.employee_full_name,
                     branch: r.branch
                 },
 
@@ -537,9 +553,9 @@ async function load_events(assignments) {
 function get_color(id) {
 
     let colors = [
-        "#bfdbfe", // blue
-        "#fbcfe8", // pink
-        "#ffffff", // white
+        "#bfdbfe",
+        "#fbcfe8",
+        "#ffffff",
         "#dbeafe",
         "#f9a8d4"
     ];
@@ -597,6 +613,7 @@ function render_calendar(events) {
 
     calendar.render();
 
+
     /* ---------------------------
        FILTER LOGIC
     ----------------------------*/
@@ -615,7 +632,7 @@ function render_calendar(events) {
             }
 
             if (employee) {
-                ok_employee = e.extendedProps.employee === employee;
+                ok_employee = e.extendedProps.employee_id === employee;
             }
 
             return ok_service && ok_employee;
@@ -627,22 +644,36 @@ function render_calendar(events) {
 
     $("#service_unit_filter, #employee_filter").on("change", apply_filters);
 
+
     /* ---------------------------
        POPULATE FILTERS
     ----------------------------*/
     let service_units = [...new Set(events.map(e => e.extendedProps.branch))];
-    let employees = [...new Set(events.map(e => e.extendedProps.employee))];
+
+    let employee_map = new Map();
+
+    events.forEach(e => {
+        if (e.extendedProps.employee_id) {
+            employee_map.set(
+                e.extendedProps.employee_id,
+                e.extendedProps.employee_name
+            );
+        }
+    });
 
     service_units.forEach(s => {
-        if (s) $("#service_unit_filter").append(`<option value="${s}">${s}</option>`);
+        if (s) {
+            $("#service_unit_filter").append(`<option value="${s}">${s}</option>`);
+        }
     });
 
-    employees.forEach(e => {
-        if (e) $("#employee_filter").append(`<option value="${e}">${e}</option>`);
+    employee_map.forEach((name, id) => {
+        $("#employee_filter").append(`<option value="${id}">${name}</option>`);
     });
+
 
     /* ---------------------------
-       UI THEME (BLUE / PINK / WHITE)
+       🎨 CLINIC UI (BLUE / PINK / WHITE)
     ----------------------------*/
     frappe.dom.set_style(`
 
