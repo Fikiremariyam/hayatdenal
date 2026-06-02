@@ -115,7 +115,7 @@ function get_color(id) {
 
     let colors = [
         "#ffedd5",
-        "#227cf1ff",
+        "#dadee4ff",
         "#dcfce7",
         "#fce7f3",
         "#643b0bff"
@@ -185,25 +185,86 @@ function render_calendar(events) {
     /* -----------------------
        CLINIC STYLE IMPROVEMENT
     ------------------------*/
-    frappe.dom.set_style(`
-        #calendar {
-            padding: 10px;
-            background: white;
-        }
+  frappe.dom.set_style(`
+    /* MAIN BACKGROUND */
+    #calendar {
+        padding: 12px;
+        background: #532c2cff;
+        border-radius: 10px;
+    }
 
-        .fc-event {
-            font-size: 12px;
-            padding: 2px;
-            border-radius: 6px;
-        }
+    /* TIME GRID BACKGROUND */
+    .fc {
+        background: #ffffff;
+        font-family: Arial, sans-serif;
+    }
 
-        /* makes it feel like columns */
-        .fc-timegrid-slot {
-            border-color: #f1f1f1;
-        }
+    /* HEADER */
+    .fc-toolbar {
+        margin-bottom: 10px;
+    }
 
-        .fc-timegrid-axis {
-            background: #3e23d8ff;
-        }
-    `);
+    .fc-toolbar-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #1f2937;
+    }
+
+    /* TIME COLUMN (LEFT SIDE) */
+    .fc-timegrid-axis {
+        background: #f8fafc;
+        color: #475569;
+        font-size: 12px;
+        border-right: 1px solid #e5e7eb;
+    }
+
+    /* GRID LINES */
+    .fc-timegrid-slot {
+        border-color: #f1f5f9 !important;
+    }
+
+    .fc-timegrid-slot-lane {
+        border-color: #f1f5f9 !important;
+    }
+
+    /* DAY HEADER */
+    .fc-col-header-cell {
+        background: #f8fafc;
+        border-color: #e5e7eb;
+        font-weight: 600;
+        color: #334155;
+    }
+
+    /* EVENTS (APPOINTMENTS) */
+    .fc-event {
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 4px 6px;
+        font-size: 12px;
+        font-weight: 500;
+        color: #1f2937 !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    /* HOVER EFFECT */
+    .fc-event:hover {
+        transform: scale(1.01);
+        transition: 0.1s ease-in-out;
+        cursor: pointer;
+    }
+
+    /* CURRENT TIME LINE */
+    .fc-timegrid-now-indicator-line {
+        border-color: #ef4444;
+    }
+
+    .fc-timegrid-now-indicator-arrow {
+        border-color: #ef4444;
+    }
+
+    /* SLOT HEIGHT CLEANER */
+    .fc-timegrid-slot {
+        height: 28px !important;
+    }
+`);
 }
