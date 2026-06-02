@@ -115,10 +115,10 @@ function get_color(id) {
 
     let colors = [
         "#ffedd5",
-        "#dbeafe",
+        "#227cf1ff",
         "#dcfce7",
         "#fce7f3",
-        "#fef9c3"
+        "#643b0bff"
     ];
 
     let index = Math.abs(hashCode(id)) % colors.length;
@@ -203,7 +203,7 @@ function render_calendar(events) {
         }
 
         .fc-timegrid-axis {
-            background: #fafafa;
+            background: #3e23d8ff;
         }
     `);
 }
