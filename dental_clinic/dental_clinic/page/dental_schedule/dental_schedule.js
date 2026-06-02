@@ -1,11 +1,14 @@
 frappe.pages['dental-schedule'].on_page_load = function (wrapper) {
+
     let page = frappe.ui.make_app_page({
         parent: wrapper,
         title: 'Dental Schedule',
         single_column: true
     });
 
-    $(wrapper).html(`<div id="calendar"></div>`);
+    $(wrapper).html(`
+        <div id="calendar"></div>
+    `);
 
     load_dependencies().then(() => {
         init_calendar();
@@ -14,7 +17,7 @@ frappe.pages['dental-schedule'].on_page_load = function (wrapper) {
 
 
 /* ---------------------------
-   LOAD FULLCALENDAR CDN
+   LOAD FULLCALENDAR (CORE ONLY)
 ----------------------------*/
 function load_dependencies() {
     return new Promise((resolve) => {
@@ -34,7 +37,7 @@ function load_dependencies() {
 
 
 /* ---------------------------
-   INIT CALENDAR
+   INIT
 ----------------------------*/
 function init_calendar() {
 
@@ -48,21 +51,16 @@ function init_calendar() {
 
             let assignments = r.message || [];
 
-            let resources = assignments.map(d => ({
-                id: d.name,
-                title: d.employee_full_name || d.employee
-            }));
-
             let events = await load_events(assignments);
 
-            render_calendar(resources, events);
+            render_calendar(events);
         }
     });
 }
 
 
 /* ---------------------------
-   LOAD EVENTS FROM CHILD TABLE
+   LOAD CHILD TABLE → FLATTEN EVENTS
 ----------------------------*/
 async function load_events(assignments) {
 
@@ -80,29 +78,28 @@ async function load_events(assignments) {
 
         let doc = res.message;
 
-        // ⚠️ CHANGE THIS to your actual child table fieldname
+        // 🔴 CHANGE THIS to your real child table fieldname
         let rows = doc.duty_child_table || [];
 
         rows.forEach(r => {
 
             if (!r.date) return;
 
-            // simple full-day block (upgrade later if you add time fields)
-            let start = `${r.date}T08:00:00`;
-            let end = `${r.date}T17:00:00`;
-
             events.push({
                 id: `${a.name}-${r.date}-${r.branch}`,
-                resourceId: a.name,
 
-                title: r.branch || "Duty",
+                start: `${r.date}T08:00:00`,
+                end: `${r.date}T17:00:00`,
 
-                start: start,
-                end: end,
+                title: `${a.employee_full_name || a.employee} • ${r.branch}`,
 
-                backgroundColor: "#ffedd5",
-                borderColor: "#f97316",
-                textColor: "#111"
+                extendedProps: {
+                    employee: a.name,
+                    branch: r.branch
+                },
+
+                backgroundColor: get_color(a.name),
+                borderColor: "#ddd"
             });
         });
     }
@@ -112,24 +109,49 @@ async function load_events(assignments) {
 
 
 /* ---------------------------
-   RENDER CALENDAR
+   SIMPLE COLOR PER EMPLOYEE
 ----------------------------*/
-function render_calendar(resources, events) {
+function get_color(id) {
+
+    let colors = [
+        "#ffedd5",
+        "#dbeafe",
+        "#dcfce7",
+        "#fce7f3",
+        "#fef9c3"
+    ];
+
+    let index = Math.abs(hashCode(id)) % colors.length;
+    return colors[index];
+}
+
+function hashCode(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0;
+    }
+    return hash;
+}
+
+
+/* ---------------------------
+   RENDER CALENDAR (TIME GRID ONLY)
+----------------------------*/
+function render_calendar(events) {
 
     let calendarEl = document.getElementById('calendar');
 
     let calendar = new FullCalendar.Calendar(calendarEl, {
 
-        initialView: 'resourceTimeGridDay',
-        schedulerLicenseKey: 'GPL-My-Project-Is-Open-Source',
+        initialView: 'timeGridDay',
 
         headerToolbar: {
             left: 'prev,next today',
             center: 'title',
-            right: 'resourceTimeGridDay,resourceTimeGridWeek'
+            right: 'timeGridDay,timeGridWeek'
         },
 
-        resources: resources,
         events: events,
 
         editable: true,
@@ -142,67 +164,27 @@ function render_calendar(resources, events) {
         height: "auto",
 
         /* -----------------------
-           DRAG / RESIZE
-        ------------------------*/
-        eventDrop: function (info) {
-            frappe.show_alert("Drag detected (needs backend save if required)");
-        },
-
-        eventResize: function (info) {
-            frappe.show_alert("Resize detected (needs backend save if required)");
-        },
-
-        /* -----------------------
            CLICK TO CREATE
         ------------------------*/
         dateClick: function (info) {
 
-            frappe.prompt([
-                {
-                    fieldname: "branch",
-                    label: "Branch / Service",
-                    fieldtype: "Data",
-                    reqd: 1
-                }
-            ], (values) => {
+            frappe.show_alert("Clicked " + info.dateStr);
+        },
 
-                frappe.call({
-                    method: "frappe.client.get",
-                    args: {
-                        doctype: "Duty Assignment",
-                        name: info.resource.id
-                    },
-                    callback: function (r) {
-
-                        let doc = r.message;
-
-                        // ⚠️ CHANGE THIS to your child table fieldname
-                        doc.duty_child_table = doc.duty_child_table || [];
-
-                        doc.duty_child_table.push({
-                            date: info.dateStr,
-                            day_name: "",
-                            branch: values.branch
-                        });
-
-                        frappe.call({
-                            method: "frappe.client.save",
-                            args: {
-                                doc: doc
-                            },
-                            callback: function () {
-                                frappe.show_alert("Added to schedule");
-                                location.reload();
-                            }
-                        });
-                    }
-                });
-            });
+        /* -----------------------
+           DRAG
+        ------------------------*/
+        eventDrop: function (info) {
+            frappe.show_alert("Moved event (you can persist later)");
         }
     });
 
     calendar.render();
 
+
+    /* -----------------------
+       CLINIC STYLE IMPROVEMENT
+    ------------------------*/
     frappe.dom.set_style(`
         #calendar {
             padding: 10px;
@@ -211,13 +193,17 @@ function render_calendar(resources, events) {
 
         .fc-event {
             font-size: 12px;
-            border-radius: 6px;
             padding: 2px;
+            border-radius: 6px;
         }
 
-        .fc-toolbar-title {
-            font-size: 16px;
-            font-weight: 600;
+        /* makes it feel like columns */
+        .fc-timegrid-slot {
+            border-color: #f1f1f1;
+        }
+
+        .fc-timegrid-axis {
+            background: #fafafa;
         }
     `);
 }
