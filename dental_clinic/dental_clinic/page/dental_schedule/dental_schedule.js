@@ -78,7 +78,7 @@ async function load_events(assignments) {
 
         let doc = res.message;
 
-        // 🔴 CHANGE THIS to your real child table fieldname
+        // 🔴 your child table fieldname
         let rows = doc.branch_schedule_assignment || [];
 
         rows.forEach(r => {
@@ -99,7 +99,8 @@ async function load_events(assignments) {
                 },
 
                 backgroundColor: get_color(a.name),
-                borderColor: "#ddd"
+                borderColor: "#ffffff",
+                textColor: "#1e3a8a"
             });
         });
     }
@@ -109,16 +110,16 @@ async function load_events(assignments) {
 
 
 /* ---------------------------
-   SIMPLE COLOR PER EMPLOYEE
+   SIMPLE COLOR (PINK / BLUE ONLY)
 ----------------------------*/
 function get_color(id) {
 
     let colors = [
-        "#ffedd5",
-        "#dadee4ff",
-        "#dcfce7",
-        "#fce7f3",
-        "#643b0bff"
+        "#bfdbfe", // light blue
+        "#fbcfe8", // pink
+        "#ffffff", // white
+        "#dbeafe", // soft blue
+        "#f9a8d4"  // deeper pink
     ];
 
     let index = Math.abs(hashCode(id)) % colors.length;
@@ -136,7 +137,7 @@ function hashCode(str) {
 
 
 /* ---------------------------
-   RENDER CALENDAR (TIME GRID ONLY)
+   RENDER CALENDAR
 ----------------------------*/
 function render_calendar(events) {
 
@@ -163,108 +164,112 @@ function render_calendar(events) {
 
         height: "auto",
 
-        /* -----------------------
-           CLICK TO CREATE
-        ------------------------*/
         dateClick: function (info) {
-
             frappe.show_alert("Clicked " + info.dateStr);
         },
 
-        /* -----------------------
-           DRAG
-        ------------------------*/
-        eventDrop: function (info) {
-            frappe.show_alert("Moved event (you can persist later)");
+        eventDrop: function () {
+            frappe.show_alert("Moved event");
         }
     });
 
     calendar.render();
 
 
-    /* -----------------------
-       CLINIC STYLE IMPROVEMENT
-    ------------------------*/
-  frappe.dom.set_style(`
-    /* MAIN BACKGROUND */
-    #calendar {
-        padding: 12px;
-        background: #532c2cff;
-        border-radius: 10px;
-    }
+    /* ---------------------------
+       🎨 CLINIC UI THEME (BLUE / PINK / WHITE ONLY)
+    ----------------------------*/
+    frappe.dom.set_style(`
 
-    /* TIME GRID BACKGROUND */
-    .fc {
-        background: #ffffff;
-        font-family: Arial, sans-serif;
-    }
+        /* PAGE BACKGROUND */
+        #calendar {
+            padding: 14px;
+            background: #ffffff;
+            border-radius: 12px;
+        }
 
-    /* HEADER */
-    .fc-toolbar {
-        margin-bottom: 10px;
-    }
+        .fc {
+            font-family: "Inter", Arial, sans-serif;
+            font-size: 14px;
+            background: #ffffff;
+        }
 
-    .fc-toolbar-title {
-        font-size: 16px;
-        font-weight: 600;
-        color: #1f2937;
-    }
+        /* 🔵 HEADER */
+        .fc-toolbar {
+            background: #2563eb;
+            padding: 12px;
+            border-radius: 10px;
+            margin-bottom: 12px;
+        }
 
-    /* TIME COLUMN (LEFT SIDE) */
-    .fc-timegrid-axis {
-        background: #f8fafc;
-        color: #475569;
-        font-size: 12px;
-        border-right: 1px solid #e5e7eb;
-    }
+        .fc-toolbar-title {
+            color: #ffffff !important;
+            font-size: 18px;
+            font-weight: 700;
+        }
 
-    /* GRID LINES */
-    .fc-timegrid-slot {
-        border-color: #f1f5f9 !important;
-    }
+        .fc-button {
+            background: #ffffff !important;
+            border: none !important;
+            color: #2563eb !important;
+            font-weight: 600;
+            border-radius: 8px !important;
+        }
 
-    .fc-timegrid-slot-lane {
-        border-color: #f1f5f9 !important;
-    }
+        .fc-button:hover {
+            background: #dbeafe !important;
+        }
 
-    /* DAY HEADER */
-    .fc-col-header-cell {
-        background: #f8fafc;
-        border-color: #e5e7eb;
-        font-weight: 600;
-        color: #334155;
-    }
+        .fc-button-active {
+            background: #bfdbfe !important;
+        }
 
-    /* EVENTS (APPOINTMENTS) */
-    .fc-event {
-        border: none !important;
-        border-radius: 8px !important;
-        padding: 4px 6px;
-        font-size: 12px;
-        font-weight: 500;
-        color: #1f2937 !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    }
+        /* GRID AREA */
+        .fc-timegrid-slot,
+        .fc-timegrid-slot-lane {
+            border-color: #e5e7eb !important;
+        }
 
-    /* HOVER EFFECT */
-    .fc-event:hover {
-        transform: scale(1.01);
-        transition: 0.1s ease-in-out;
-        cursor: pointer;
-    }
+        .fc-col-header-cell {
+            background: #eff6ff;
+            color: #1e3a8a;
+            font-weight: 700;
+        }
 
-    /* CURRENT TIME LINE */
-    .fc-timegrid-now-indicator-line {
-        border-color: #ef4444;
-    }
+        .fc-timegrid-axis {
+            background: #f8fafc;
+            color: #1e3a8a;
+            font-weight: 600;
+        }
 
-    .fc-timegrid-now-indicator-arrow {
-        border-color: #ef4444;
-    }
+        /* 🩷 EVENTS */
+        .fc-event {
+            border: none !important;
+            border-radius: 10px !important;
+            padding: 5px 6px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #1e3a8a !important;
+            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.15);
+        }
 
-    /* SLOT HEIGHT CLEANER */
-    .fc-timegrid-slot {
-        height: 28px !important;
-    }
-`);
+        .fc-event:hover {
+            transform: scale(1.02);
+            transition: 0.15s ease-in-out;
+            cursor: pointer;
+        }
+
+        /* CURRENT TIME LINE */
+        .fc-timegrid-now-indicator-line {
+            border-color: #2563eb;
+        }
+
+        .fc-timegrid-now-indicator-arrow {
+            border-color: #2563eb;
+        }
+
+        .fc-timegrid-slot {
+            height: 30px !important;
+        }
+    `);
 }
