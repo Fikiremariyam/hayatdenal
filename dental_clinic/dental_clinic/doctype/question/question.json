@@ -1,0 +1,100 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-06-03 00:59:27.306631",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_oivz",
+  "label",
+  "help_text",
+  "question_type",
+  "section",
+  "idx",
+  "is_required",
+  "min_value",
+  "max_value",
+  "max_length",
+  "section_break_cst3",
+  "question_option"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_oivz",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Label"
+  },
+  {
+   "fieldname": "help_text",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Help Text"
+  },
+  {
+   "fieldname": "question_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Question Type",
+   "options": "\nText\nNumber\nSelect\nMulti-select\nDate\nRating\nFile Upload\nParagraph"
+  },
+  {
+   "fieldname": "section",
+   "fieldtype": "Data",
+   "label": "Section"
+  },
+  {
+   "fieldname": "idx",
+   "fieldtype": "Int",
+   "label": "Idx"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_required",
+   "fieldtype": "Check",
+   "label": "Is Required"
+  },
+  {
+   "fieldname": "min_value",
+   "fieldtype": "Float",
+   "label": "Min Value"
+  },
+  {
+   "fieldname": "max_value",
+   "fieldtype": "Float",
+   "label": "Max Value"
+  },
+  {
+   "fieldname": "max_length",
+   "fieldtype": "Int",
+   "label": "Max Length"
+  },
+  {
+   "fieldname": "section_break_cst3",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "question_option",
+   "fieldtype": "Table",
+   "label": "Question Option",
+   "options": "Question Option"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-03 01:08:24.035106",
+ "modified_by": "Administrator",
+ "module": "Dental Clinic",
+ "name": "Question",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

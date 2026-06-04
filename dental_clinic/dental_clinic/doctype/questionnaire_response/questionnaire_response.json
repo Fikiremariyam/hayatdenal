@@ -1,0 +1,73 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-06-03 21:23:09.507280",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_hkgy",
+  "questionnaire",
+  "respondent",
+  "respondent_name",
+  "submitted_at",
+  "total_score"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_hkgy",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "questionnaire",
+   "fieldtype": "Link",
+   "label": "Questionnaire",
+   "options": "Questionnaire"
+  },
+  {
+   "fieldname": "respondent",
+   "fieldtype": "Link",
+   "label": "Respondent",
+   "options": "User"
+  },
+  {
+   "fieldname": "respondent_name",
+   "fieldtype": "Data",
+   "label": "Respondent Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Submitted At"
+  },
+  {
+   "fieldname": "total_score",
+   "fieldtype": "Float",
+   "label": "Total Score"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-04 08:01:39.814011",
+ "modified_by": "Administrator",
+ "module": "Dental Clinic",
+ "name": "Questionnaire Response",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

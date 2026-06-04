@@ -1,0 +1,25 @@
+{
+ "content": null,
+ "creation": "2026-06-04 07:58:59.119373",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2026-06-04 07:58:59.119373",
+ "modified_by": "Administrator",
+ "module": "Dental Clinic",
+ "name": "questionnaire-form",
+ "owner": "Administrator",
+ "page_name": "questionnaire-form",
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "healthcare user"
+  }
+ ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 0
+}

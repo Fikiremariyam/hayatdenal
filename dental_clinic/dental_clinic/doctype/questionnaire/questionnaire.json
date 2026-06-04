@@ -1,0 +1,103 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-06-03 00:52:48.754876",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_9dmo",
+  "title",
+  "name1",
+  "status",
+  "description",
+  "is_scored",
+  "total_possible_score",
+  "passing_score",
+  "thank_you_message",
+  "section_break_zesg",
+  "question"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_9dmo",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title"
+  },
+  {
+   "fieldname": "name1",
+   "fieldtype": "Data",
+   "label": "Name"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "\nDraft\nPublished\nClosed\nArchived"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text Editor",
+   "label": "Description"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_scored",
+   "fieldtype": "Check",
+   "label": "Is Scored"
+  },
+  {
+   "fieldname": "total_possible_score",
+   "fieldtype": "Float",
+   "label": "Total Possible Score",
+   "read_only": 1
+  },
+  {
+   "fieldname": "passing_score",
+   "fieldtype": "Float",
+   "label": "Passing Score"
+  },
+  {
+   "fieldname": "thank_you_message",
+   "fieldtype": "Text Editor",
+   "label": "Thank You Message"
+  },
+  {
+   "fieldname": "section_break_zesg",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "question",
+   "fieldtype": "Table",
+   "label": "Question",
+   "options": "Question"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-03 01:05:12.850263",
+ "modified_by": "Administrator",
+ "module": "Dental Clinic",
+ "name": "Questionnaire",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
