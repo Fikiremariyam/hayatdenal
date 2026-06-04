@@ -266,14 +266,14 @@ function submitResponse(q, answers, app) {
                 status: 'Submitted',
                 submitted_at: frappe.datetime.now_datetime(),
                 total_score: Math.round(totalScore * 10) / 10,
-                answers: answerRows
+                custom_answers: answerRows
             }
         },
         callback: function() {
             app.html(
                 '<div style="text-align:center;padding:60px 20px">'
                 + '<div style="font-size:52px;color:green">✓</div>'
-                + '<h2>' + (q.thank_you_message || 'Thank you!') + '</h2>'
+                + '<h2>' + (q.custom_thank_you_message || 'Thank you!') + '</h2>'
                 + '</div>'
             );
         }
