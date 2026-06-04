@@ -273,7 +273,7 @@ function submitResponse(q, answers, app) {
             app.html(
                 '<div style="text-align:center;padding:60px 20px">'
                 + '<div style="font-size:52px;color:green">✓</div>'
-                + '<h2>' + (q.custom_thank_you_message || 'Thank you!') + '</h2>'
+                + '<h2>' + (q.thank_you_message || 'Thank you!') + '</h2>'
                 + '</div>'
             );
         }
