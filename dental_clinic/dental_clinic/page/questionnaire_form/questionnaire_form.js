@@ -158,6 +158,22 @@ function renderQuestionnaire(app, q) {
 
                 qblock.append(starWrap);
             }
+			else if (question.question_type === 'Date') {
+
+    var inp = $(
+        '<input type="date" class="form-control" style="max-width:220px" />'
+    );
+
+    if (saved) {
+        inp.val(saved);
+    }
+
+    inp.on('input', function() {
+        answers[question.name] = this.value;
+    });
+
+    qblock.append(inp);
+}
 
             else {
                 var inp = $('<input class="form-control" />');
