@@ -278,14 +278,70 @@ function submitResponse(q, answers, app) {
         var answerText   = Array.isArray(val) ? val.join(', ') : String(val);
         var scoreAwarded = 0;
 
-        if (question.question_type === 'Select' || question.question_type === 'Multi-select') {
-            (question.options || []).forEach(function(opt) {
-                var match = Array.isArray(val)
-                    ? val.indexOf(opt.value) !== -1
-                    : val === opt.value;
-                if (match) scoreAwarded += (opt.score || 0);
+       if (question.question_type === 'Select') {
+
+    var sel = $('<select class="form-control" style="max-width:420px"></select>');
+    sel.append('<option value="">— choose —</option>');
+
+    var options = (question.options || '')
+        .split('\n')
+        .map(function(opt) { return opt.trim(); })
+        .filter(function(opt) { return opt; });
+
+    options.forEach(function(opt) {
+        sel.append(
+            '<option value="' + opt + '"'
+            + (saved === opt ? ' selected' : '') + '>'
+            + opt +
+            '</option>'
+        );
+    });
+
+    sel.on('change', function() {
+        answers[question.name] = this.value;
+    });
+
+    qblock.append(sel);
+}
+else if (question.question_type === 'Multi-select') {
+
+    var wrap = $('<div></div>');
+
+    var options = (question.options || '')
+        .split('\n')
+        .map(function(opt) { return opt.trim(); })
+        .filter(function(opt) { return opt; });
+
+    options.forEach(function(opt) {
+
+        var checked =
+            Array.isArray(saved) &&
+            saved.indexOf(opt) !== -1;
+
+        var row = $(
+            '<div style="display:flex;align-items:center;gap:8px;padding:7px 12px;'
+            + 'border:0.5px solid var(--border-color);border-radius:6px;margin-bottom:6px;cursor:pointer">'
+            + '<input type="checkbox" value="' + opt + '"' + (checked ? ' checked' : '') + '>'
+            + '<label style="margin:0;cursor:pointer">' + opt + '</label>'
+            + '</div>'
+        );
+
+        row.on('change', function() {
+            var vals = [];
+
+            wrap.find('input:checked').each(function() {
+                vals.push(this.value);
             });
-        } else if (question.question_type === 'Rating') {
+
+            answers[question.name] = vals;
+        });
+
+        wrap.append(row);
+    });
+
+    qblock.append(wrap);
+}
+ else if (question.question_type === 'Rating') {
             var max = question.max_value || 5;
             scoreAwarded = (parseFloat(val) / max) * (question.score_weight || 0);
         } else if (question.correct_answer && answerText === question.correct_answer) {
