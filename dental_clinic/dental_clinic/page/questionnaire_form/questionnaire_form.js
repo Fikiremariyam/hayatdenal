@@ -245,10 +245,13 @@ function submitResponse(q, answers, app) {
         totalScore += scoreAwarded;
 
         answerRows.push({
-            question: question.name,
-            question_label: question.label,
-            answer_text: answerText,
-            score_awarded: scoreAwarded
+            custom_question: question.name,
+             custom_question_label: question.label,
+              custom_answer_text: answerText,
+             custom_answer_option:
+        question.question_type === "Select"
+            ? answerText
+            : null
         });
     });
 
