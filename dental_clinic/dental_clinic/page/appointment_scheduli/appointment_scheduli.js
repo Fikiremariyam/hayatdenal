@@ -765,7 +765,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 				fields: [
 					'name', 'title', 'status', 'appointment_type',
 					'appointment_for', 'practitioner', 'practitioner_name',
-					'department', 'service_unit', 'appointment_date',
+					'department', 'service_unit', 'appointment_date','appointment_time',
 					'patient', 'patient_name', 'company'
 				],
 				filters: filters,
@@ -863,6 +863,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 				<div class="appt-time">
 					${status_dot(a.status)} ${a.appointment_date || ''}
 				</div>
+				<div class="appt-time">${a.appointment_time ||  '—'}</div>
+
 				<div class="appt-patient">${a.patient_name || a.patient || '—'}</div>
 				<div class="appt-type">${type_label}</div>
 				<div class="appt-meta">
@@ -885,6 +887,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 				${row('Appointment ID', `<a href="/app/patient-appointment/${a.name}" target="_blank">${a.name}</a>`)}
 				${row('Status',          badge(a.status))}
 				${row('Date',            a.appointment_date || '—')}
+				${row('Time',            a.appointment_time || '-')}
 				${row('Type',            a.appointment_type || '—')}
 				${row('Appointment For', a.appointment_for  || '—')}
 				${row('Practitioner',    a.practitioner_name || a.practitioner || '—')}
