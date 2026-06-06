@@ -932,33 +932,18 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     var from_date = frappe.datetime.get_today();
     var to_date   = frappe.datetime.get_today();
 
-    // ── Toolbar filters ────────────────────────────────────────
-    page.add_field({
-        fieldname: 'from_date', label: 'From Date', fieldtype: 'Date', default: from_date,
-        change() { from_date = this.get_value() || frappe.datetime.get_today(); load_schedule(); }
-    });
-    page.add_field({
-        fieldname: 'to_date', label: 'To Date', fieldtype: 'Date', default: to_date,
-        change() { to_date = this.get_value() || frappe.datetime.get_today(); load_schedule(); }
-    });
-    page.add_field({
-        fieldname: 'service_unit_filter', label: 'Service Unit',
-        fieldtype: 'Link', options: 'Healthcare Service Unit',
-        change() { load_schedule(); }
-    });
-    page.add_field({
-        fieldname: 'practitioner_filter', label: 'Practitioner',
-        fieldtype: 'Link', options: 'Healthcare Practitioner',
-        change() { load_schedule(); }
-    });
-
     // ── Styles ─────────────────────────────────────────────────
     if (!document.getElementById('cal-sched-styles')) {
         var style = document.createElement('style');
         style.id = 'cal-sched-styles';
         style.textContent = `
             .cal-page { background: var(--bg-color); padding: 0; }
-            .cal-stat-bar { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; padding: 14px 20px; background: var(--subtle-bg); border-bottom: 1px solid var(--border-color); }
+            .cal-filter-bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--card-bg); border-bottom: 1px solid var(--border-color); flex-wrap: wrap; }
+            .cal-filter-group { display: flex; align-items: center; gap: 6px; }
+            .cal-filter-lbl { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+            .cal-filter-input { font-size: 12px; padding: 5px 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--card-bg); color: var(--text-color); }
+            .cal-filter-sep { width: 1px; height: 24px; background: var(--border-color); margin: 0 4px; }
+            .cal-stat-bar { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; padding: 12px 16px; background: var(--subtle-bg); border-bottom: 1px solid var(--border-color); }
             .cal-stat { background: var(--card-bg); border-radius: 8px; padding: 10px 14px; border: 1px solid var(--border-color); }
             .cal-stat-num { font-size: 24px; font-weight: 600; }
             .cal-stat-lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
@@ -966,9 +951,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-stat.s-open  .cal-stat-num { color: #854F0B; }
             .cal-stat.s-done  .cal-stat-num { color: #085041; }
             .cal-stat.s-cancel .cal-stat-num { color: #791F1F; }
-            .cal-nav-bar { display: flex; align-items: center; gap: 8px; padding: 10px 20px; background: var(--card-bg); border-bottom: 1px solid var(--border-color); }
+            .cal-nav-bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--card-bg); border-bottom: 1px solid var(--border-color); }
             .cal-nav-btn { padding: 5px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--card-bg); color: var(--text-color); cursor: pointer; font-size: 13px; }
-            .cal-range-lbl { flex: 1; text-align: center; font-size: 15px; font-weight: 600; color: var(--text-color); }
+            .cal-range-lbl { flex: 1; text-align: center; font-size: 14px; font-weight: 600; color: var(--text-color); }
             .cal-view-btns { display: flex; border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; }
             .cal-view-btn { padding: 5px 12px; border: none; background: var(--card-bg); color: var(--text-muted); cursor: pointer; font-size: 12px; }
             .cal-view-btn.active { background: var(--subtle-bg); color: var(--text-color); font-weight: 500; }
@@ -1008,11 +993,40 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         document.head.appendChild(style);
     }
 
-    // ── Page skeleton ──────────────────────────────────────────
+    // ── Page skeleton with filters INSIDE the page ─────────────
     $(wrapper).find('.layout-main-section').html(`
         <div class="cal-page">
+
+            <div class="cal-filter-bar">
+                <div class="cal-filter-group">
+                    <span class="cal-filter-lbl">From</span>
+                    <input type="date" class="cal-filter-input" id="filter-from" value="${from_date}">
+                </div>
+                <div class="cal-filter-group">
+                    <span class="cal-filter-lbl">To</span>
+                    <input type="date" class="cal-filter-input" id="filter-to" value="${to_date}">
+                </div>
+                <div class="cal-filter-sep"></div>
+                <div class="cal-filter-group">
+                    <span class="cal-filter-lbl">Service Unit</span>
+                    <input type="text" class="cal-filter-input" id="filter-service-unit"
+                        placeholder="All service units" style="width:180px">
+                </div>
+                <div class="cal-filter-group">
+                    <span class="cal-filter-lbl">Practitioner</span>
+                    <input type="text" class="cal-filter-input" id="filter-practitioner"
+                        placeholder="All practitioners" style="width:180px">
+                </div>
+                <button class="cal-nav-btn" id="btn-apply"
+                    style="background:#1a2340;color:#fff;border-color:#1a2340;margin-left:4px">
+                    Apply
+                </button>
+                <button class="cal-nav-btn" id="btn-clear">Clear</button>
+            </div>
+
             <div class="cal-stat-bar" id="cal-stats"></div>
-            <div class="cal-nav-bar" id="cal-nav">
+
+            <div class="cal-nav-bar">
                 <button class="cal-nav-btn" id="cal-prev">&#8249;</button>
                 <button class="cal-nav-btn" id="cal-next">&#8250;</button>
                 <button class="cal-nav-btn" id="cal-today">today</button>
@@ -1022,32 +1036,57 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     <button class="cal-view-btn active" id="view-week">week</button>
                 </div>
             </div>
+
             <div class="cal-wrap" id="cal-wrap">
                 <div class="cal-empty">Loading…</div>
             </div>
         </div>
     `);
 
-    // Nav button wiring
+    // ── Wire filter inputs ─────────────────────────────────────
+    document.getElementById('filter-from').addEventListener('change', function() {
+        from_date = this.value || frappe.datetime.get_today();
+        load_schedule();
+    });
+    document.getElementById('filter-to').addEventListener('change', function() {
+        to_date = this.value || frappe.datetime.get_today();
+        load_schedule();
+    });
+    document.getElementById('btn-apply').addEventListener('click', function() {
+        from_date = document.getElementById('filter-from').value || from_date;
+        to_date   = document.getElementById('filter-to').value   || to_date;
+        load_schedule();
+    });
+    document.getElementById('btn-clear').addEventListener('click', function() {
+        from_date = frappe.datetime.get_today();
+        to_date   = frappe.datetime.get_today();
+        document.getElementById('filter-from').value = from_date;
+        document.getElementById('filter-to').value   = to_date;
+        document.getElementById('filter-service-unit').value = '';
+        document.getElementById('filter-practitioner').value = '';
+        load_schedule();
+    });
+
+    // ── Nav buttons ────────────────────────────────────────────
     document.getElementById('cal-prev').onclick = function() {
         from_date = frappe.datetime.add_days(from_date, -7);
         to_date   = frappe.datetime.add_days(to_date,   -7);
-        page.fields_dict.from_date.set_value(from_date);
-        page.fields_dict.to_date.set_value(to_date);
+        document.getElementById('filter-from').value = from_date;
+        document.getElementById('filter-to').value   = to_date;
         load_schedule();
     };
     document.getElementById('cal-next').onclick = function() {
         from_date = frappe.datetime.add_days(from_date, 7);
         to_date   = frappe.datetime.add_days(to_date,   7);
-        page.fields_dict.from_date.set_value(from_date);
-        page.fields_dict.to_date.set_value(to_date);
+        document.getElementById('filter-from').value = from_date;
+        document.getElementById('filter-to').value   = to_date;
         load_schedule();
     };
     document.getElementById('cal-today').onclick = function() {
         from_date = frappe.datetime.get_today();
         to_date   = frappe.datetime.get_today();
-        page.fields_dict.from_date.set_value(from_date);
-        page.fields_dict.to_date.set_value(to_date);
+        document.getElementById('filter-from').value = from_date;
+        document.getElementById('filter-to').value   = to_date;
         load_schedule();
     };
 
@@ -1101,10 +1140,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             ['appointment_date', '>=', f],
             ['appointment_date', '<=', t]
         ];
-        var pf = page.fields_dict.practitioner_filter.get_value();
-        var sf = page.fields_dict.service_unit_filter.get_value();
-        if (pf) filters.push(['practitioner', '=', pf]);
-        if (sf) filters.push(['service_unit', '=', sf]);
+
+        var pf = (document.getElementById('filter-practitioner').value || '').trim();
+        var sf = (document.getElementById('filter-service-unit').value || '').trim();
+        if (pf) filters.push(['practitioner_name', 'like', '%' + pf + '%']);
+        if (sf) filters.push(['service_unit', 'like', '%' + sf + '%']);
 
         frappe.call({
             method: 'frappe.client.get_list',
@@ -1130,22 +1170,21 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 
     // ── Stats bar ──────────────────────────────────────────────
     function render_stats(appts, wrap) {
-        var total    = appts.length;
-        var open     = appts.filter(function(a) { return a.status === 'Open' || a.status === 'Scheduled'; }).length;
-        var closed   = appts.filter(function(a) { return a.status === 'Closed'; }).length;
-        var cancelled= appts.filter(function(a) { return a.status === 'Cancelled'; }).length;
+        var total     = appts.length;
+        var open      = appts.filter(function(a) { return a.status === 'Open' || a.status === 'Scheduled'; }).length;
+        var closed    = appts.filter(function(a) { return a.status === 'Closed'; }).length;
+        var cancelled = appts.filter(function(a) { return a.status === 'Cancelled'; }).length;
         wrap.innerHTML =
-            '<div class="cal-stat s-total"><div class="cal-stat-num">' + total + '</div><div class="cal-stat-lbl">Total</div></div>' +
-            '<div class="cal-stat s-open"><div class="cal-stat-num">' + open + '</div><div class="cal-stat-lbl">Upcoming</div></div>' +
-            '<div class="cal-stat s-done"><div class="cal-stat-num">' + closed + '</div><div class="cal-stat-lbl">Completed</div></div>' +
-            '<div class="cal-stat s-cancel"><div class="cal-stat-num">' + cancelled + '</div><div class="cal-stat-lbl">Cancelled</div></div>';
+            '<div class="cal-stat s-total"><div class="cal-stat-num">' + total    + '</div><div class="cal-stat-lbl">Total</div></div>' +
+            '<div class="cal-stat s-open"><div class="cal-stat-num">'  + open     + '</div><div class="cal-stat-lbl">Upcoming</div></div>' +
+            '<div class="cal-stat s-done"><div class="cal-stat-num">'  + closed   + '</div><div class="cal-stat-lbl">Completed</div></div>' +
+            '<div class="cal-stat s-cancel"><div class="cal-stat-num">'+ cancelled+ '</div><div class="cal-stat-lbl">Cancelled</div></div>';
     }
 
     // ── Calendar grid ──────────────────────────────────────────
     function render_calendar(appts, wrap, f, t) {
-        var dates  = get_week_dates(f, t);
-        var today  = frappe.datetime.get_today();
-        var cols   = dates.length + 1;
+        var dates    = get_week_dates(f, t);
+        var today    = frappe.datetime.get_today();
         var grid_tpl = '60px ' + dates.map(function() { return '1fr'; }).join(' ');
 
         if (!appts.length) {
@@ -1153,17 +1192,16 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             return;
         }
 
-        // Index appts by date + slot
         var by_date = {};
         var allday  = {};
         appts.forEach(function(a) {
-            var d = a.appointment_date;
-            if (!by_date[d]) by_date[d] = {};
+            var d    = a.appointment_date;
             var slot = time_to_slot(a.appointment_time);
-            if (slot < 0) {
+            if (slot < 0 || slot >= TIME_SLOTS.length) {
                 if (!allday[d]) allday[d] = [];
                 allday[d].push(a);
             } else {
+                if (!by_date[d]) by_date[d] = {};
                 if (!by_date[d][slot]) by_date[d][slot] = [];
                 by_date[d][slot].push(a);
             }
@@ -1171,7 +1209,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 
         var html = '<div class="cal-grid">';
 
-        // Header row
+        // Header
         html += '<div class="cal-head-row" style="grid-template-columns:' + grid_tpl + '">';
         html += '<div class="cal-head-cell"></div>';
         dates.forEach(function(d) {
@@ -1188,7 +1226,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             if (allday[d]) {
                 allday[d].forEach(function(a) {
                     html += '<div class="cal-allday-block">'
-                        + (a.patient_name || a.patient) + ' \u2022 ' + (a.service_unit || '')
+                        + (a.patient_name || a.patient || '—')
+                        + (a.service_unit ? ' \u2022 ' + a.service_unit : '')
                         + '</div>';
                 });
             }
@@ -1196,25 +1235,22 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         });
         html += '</div>';
 
-        // Body
+        // Body grid
         html += '<div class="cal-body-row" style="display:grid;grid-template-columns:' + grid_tpl + '">';
-
-        // Time column
         html += '<div class="cal-time-col">';
         TIME_SLOTS.forEach(function(ts) {
             html += '<div class="cal-time-slot">' + ts + '</div>';
         });
         html += '</div>';
 
-        // Day columns
         dates.forEach(function(d) {
             html += '<div class="cal-day-col' + (d === today ? ' today' : '') + '">';
             TIME_SLOTS.forEach(function(ts, si) {
                 html += '<div class="cal-day-slot">';
                 if (by_date[d] && by_date[d][si]) {
                     by_date[d][si].forEach(function(a) {
-                        html += '<div class="cal-appt ' + (a.status || 'Open') + '" data-name="'
-                            + a.name + '">'
+                        var status_class = (a.status || 'Open').replace(' ', '');
+                        html += '<div class="cal-appt ' + status_class + '" data-name="' + a.name + '">'
                             + (a.appointment_time ? a.appointment_time.substring(0,5) + ' ' : '')
                             + (a.patient_name || a.patient || '—')
                             + '</div>';
@@ -1228,7 +1264,6 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         html += '</div></div>';
         wrap.innerHTML = html;
 
-        // Click handlers
         wrap.querySelectorAll('.cal-appt[data-name]').forEach(function(el) {
             el.addEventListener('click', function() {
                 var a = appts.find(function(x) { return x.name === el.dataset.name; });
@@ -1244,7 +1279,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         bg.innerHTML =
             '<div class="cal-modal">' +
             '<h3>' + (a.patient_name || a.patient) + '</h3>' +
-            modal_row('ID', '<a href="/app/patient-appointment/' + a.name + '" target="_blank">' + a.name + '</a>') +
+            modal_row('ID',           '<a href="/app/patient-appointment/' + a.name + '" target="_blank">' + a.name + '</a>') +
             modal_row('Status',       a.status || '—') +
             modal_row('Date',         a.appointment_date || '—') +
             modal_row('Time',         a.appointment_time || '—') +
