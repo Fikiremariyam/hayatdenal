@@ -141,6 +141,9 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
   <!-- PATIENT BANNER -->
   <div class="dc-pt-bar">
     <div class="dc-pt-name" id="dc-pt-name"></div>
+
+    <div class="dc-doc-name" id="dc-doc-name"> </div>
+
     <div class="dc-pt-meta">
       <div>perio exam: <b id="dc-pt-dob">—</b></div>
       <div>Provider: <b id="dc-pt-prov">—</b></div>
@@ -506,26 +509,6 @@ class PatientInfo {
             render_input: true,
         });
 
-        this._ctrl = frappe.ui.form.make_control({
-            parent: $('.dc-pt-name'),
-            df: {
-                fieldtype  : 'Link',
-                options    : 'Patient',
-                label      : 'Patient',
-                fieldname  : 'patient',
-                placeholder: 'Search patient name or ID…',
-            },
-            render_input: true,
-        });
-
-        this.provider_ctrl.$input.on('change', () => {
-            const providerVal = this.provider_ctrl.get_value();
-            if (providerVal) {
-                this.provider = providerVal;
-                _set('dc-pt-prov', providerVal);
-                if (this._onProviderChangeCb) this._onProviderChangeCb(providerVal);
-            }
-        });
     }
 
     /** Currently linked patient ID (Frappe name). */
@@ -591,7 +574,7 @@ class PatientInfo {
         _set('dc-pt-dob',  this.dob);
         _set('dc-pt-prov', this.provider);
     }
-}
+}   
 
 
 /* ───────────────────────────────────────────────────────────────────────────
