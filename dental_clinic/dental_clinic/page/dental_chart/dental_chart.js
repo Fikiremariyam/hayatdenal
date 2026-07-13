@@ -166,7 +166,9 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         <button class="pal-btn"        data-cond="implant"  style="color:var(--c-implant)"><span class="pal-dot" style="background:var(--c-implant)"></span>Implant</button>
         <button class="pal-btn"        data-cond="bridge"   style="color:var(--c-bridge)"><span class="pal-dot" style="background:var(--c-bridge)"></span>Bridge Pontic</button>
       </div>
-      <div class="pal-sep"></div>
+      <div class="pal-sep">
+
+      </div>
 
       <div class="pal-section">
         <div class="pal-label">Restorations</div>
@@ -186,7 +188,9 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
       </div>
       <div class="pal-sep"></div>
 
-      <div class="pal-section"><div class="pal-label">Surface</div></div>
+      <div class="pal-section"><div class="pal-label">Surface</div>
+    
+    </div>
       <div class="surf-grid">
         <button class="surf-btn active" data-surf="all">All</button>
         <button class="surf-btn" data-surf="M">M</button>
@@ -235,7 +239,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         </div>
         <div class="teeth-row" id="dc-upper-row"></div>
       </div>
-
       <!-- LOWER ARCH -->
       <div class="arch-block">
         <div class="arch-bar">
@@ -244,9 +247,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         </div>
         <div class="teeth-row lower-row" id="dc-lower-row"></div>
       </div>
-
-   
-
       <!-- SUMMARY TABLE -->
       <div class="arch-block">
         <div class="arch-bar">
@@ -265,9 +265,9 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
           <span class="notes-lbl">Clinical Notes</span>
           <textarea class="dp-textarea" id="dc-notes-clinical" rows="3" placeholder="Clinical observations, exam findings…"></textarea>
         </div>
-     
-
-    </div><!-- /main -->
+        </div>
+    </div>
+    <!-- /main -->
 
     <!-- RIGHT DETAIL PANEL -->
     <div class="dc-detail">
@@ -323,21 +323,23 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         <textarea class="dp-textarea" id="dc-dp-notes" rows="4" placeholder="Observations for this tooth…"></textarea>
       </div>
 
+
+    <!-- STATUS BAR -->
+    <div class="dc-statusbar">
+        <div class="sb-chip"><div class="sb-dot" style="background:var(--c-healthy)"></div><span id="dc-sb-h">0</span> healthy</div>
+        <div class="sb-chip"><div class="sb-dot" style="background:var(--c-decay)"></div><span id="dc-sb-d">0</span> decay</div>
+        <div class="sb-chip"><div class="sb-dot" style="background:var(--c-missing)"></div><span id="dc-sb-m">0</span> missing</div>
+        <div class="sb-chip"><div class="sb-dot" style="background:var(--c-crown)"></div><span id="dc-sb-cr">0</span> crown</div>
+        <div class="sb-chip"><div class="sb-dot" style="background:var(--c-rct)"></div><span id="dc-sb-rct">0</span> rct</div>
+        <div class="sb-mode">Mode: <span id="dc-sb-mode">Healthy</span> · Surface: <span id="dc-sb-surf">All</span></div>
+    </div>
     </div><!-- /detail -->
+
 
   </div><!-- /body -->
 
-  <!-- STATUS BAR -->
-  <div class="dc-statusbar">
-    <div class="sb-chip"><div class="sb-dot" style="background:var(--c-healthy)"></div><span id="dc-sb-h">0</span> healthy</div>
-    <div class="sb-chip"><div class="sb-dot" style="background:var(--c-decay)"></div><span id="dc-sb-d">0</span> decay</div>
-    <div class="sb-chip"><div class="sb-dot" style="background:var(--c-missing)"></div><span id="dc-sb-m">0</span> missing</div>
-    <div class="sb-chip"><div class="sb-dot" style="background:var(--c-crown)"></div><span id="dc-sb-cr">0</span> crown</div>
-    <div class="sb-chip"><div class="sb-dot" style="background:var(--c-rct)"></div><span id="dc-sb-rct">0</span> rct</div>
-    <div class="sb-mode">Mode: <span id="dc-sb-mode">Healthy</span> · Surface: <span id="dc-sb-surf">All</span></div>
-  </div>
-
-</div><!-- /dc-root -->
+</div>
+<!-- /dc-root -->
     `);
 
     /* ── 4. BOOT ─────────────────────────────────────────────────────────── */
