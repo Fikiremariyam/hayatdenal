@@ -112,7 +112,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .stat-val      { font-size:18px;font-weight:700;font-family:'DM Mono',monospace;line-height:1; }
 #dc-root .stat-lbl      { font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted2); }
 /* notes row */
-#dc-root .notes-row     { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
+#dc-root .notes-row     { display:flex; }
 #dc-root .notes-card    { background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;box-shadow:var(--shadow); }
 #dc-root .notes-lbl     { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:7px;display:block; }
 /* status bar */
@@ -130,7 +130,8 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
     #dc-root .dc-palette,#dc-root .dc-detail,#dc-root .dc-statusbar,#dc-root .dc-pt-bar{ display:none!important; }
     #dc-root .dc-main{ padding:0; }
 }
-    `);
+`
+    );
 
     /* ── 3. HTML ─────────────────────────────────────────────────────────── */
     page.main.html(`
