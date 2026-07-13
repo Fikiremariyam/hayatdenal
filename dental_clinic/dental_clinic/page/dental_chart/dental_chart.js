@@ -141,9 +141,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
   <!-- PATIENT BANNER -->
   <div class="dc-pt-bar">
     <div class="dc-pt-name" id="dc-pt-name"></div>
-
-    <div class="dc-doc-name" id="dc-doc-name"> </div>
-
     <div class="dc-pt-meta">
       <div>perio exam: <b id="dc-pt-dob">—</b></div>
       <div>Provider: <b id="dc-pt-prov">—</b></div>
@@ -498,6 +495,7 @@ class PatientInfo {
             },
             render_input: true,
         });
+
         this.patinet_singnature_ctrl = frappe.ui.form.make_control({
             parent: $('.dc-pt-singnature'),
             df: {
@@ -538,6 +536,9 @@ class PatientInfo {
     /** Currently selected provider ID. */
     get providerValue() {
         return this.provider_ctrl.get_value() || null;
+    }
+    get singnatureValue() {
+        return this.patinet_singnature_ctrl.get_value() || null;
     }
 
     /** Set a callback that fires whenever the patient changes. */
@@ -1024,7 +1025,7 @@ class DentalChart {
 
     save() {
         const patientId = this.patient.value || frappe.utils.get_query_params().patient;
-        const signatureData = this.patinet_singnature_ctrl.get_value(); // base64 PNG or ""
+        const signatureData = this.patient.singnatureValue || null; // base64 PNG or ""
 
 
         if (!patientId) {
