@@ -265,13 +265,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         <div class="notes-card">
           <span class="notes-lbl">Clinical Notes</span>
           <textarea class="dp-textarea" id="dc-notes-clinical" rows="3" placeholder="Clinical observations, exam findings…"></textarea>
-            </div>
         </div>
-        <!--signature-->
-        <div>
-        patient signature  <b id="dc-pt-singnature">—</b>
-        </div>
-
         </div>
     </div>
     <!-- /main -->
@@ -479,7 +473,6 @@ class PatientInfo {
             },
             render_input: true,
         });
-        
 
         this._ctrl.$input.on('change', () => {
             const val = this._ctrl.get_value();
@@ -499,16 +492,14 @@ class PatientInfo {
             render_input: true,
         });
 
-        this.patinet_singnature_ctrl = frappe.ui.form.make_control({
-            parent: $('.dc-pt-singnature'),
-            df: {
-               fieldtype  : 'Signature',
-                label      : 'Patient Signature',
-                fieldname  : 'patient_signature',
-            },
-            render_input: true,
+        this.provider_ctrl.$input.on('change', () => {
+            const providerVal = this.provider_ctrl.get_value();
+            if (providerVal) {
+                this.provider = providerVal;
+                _set('dc-pt-prov', providerVal);
+                if (this._onProviderChangeCb) this._onProviderChangeCb(providerVal);
+            }
         });
-
     }
 
     /** Currently linked patient ID (Frappe name). */
@@ -519,9 +510,6 @@ class PatientInfo {
     /** Currently selected provider ID. */
     get providerValue() {
         return this.provider_ctrl.get_value() || null;
-    }
-    get singnatureValue() {
-        return this.patinet_singnature_ctrl.get_value() || null;
     }
 
     /** Set a callback that fires whenever the patient changes. */
@@ -574,7 +562,7 @@ class PatientInfo {
         _set('dc-pt-dob',  this.dob);
         _set('dc-pt-prov', this.provider);
     }
-}   
+}
 
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -1008,8 +996,6 @@ class DentalChart {
 
     save() {
         const patientId = this.patient.value || frappe.utils.get_query_params().patient;
-        const signatureData = this.patient.singnatureValue || null; // base64 PNG or ""
-
 
         if (!patientId) {
             frappe.msgprint({
@@ -1080,8 +1066,6 @@ class DentalChart {
                         clinical_notes  : clinicalNotes,
                         treatment_plan  : treatmentPlan,
                         tooth_conditions: rows,
-                        signature       : signatureData,
-
                     },
                 },
                 callback: (r) => {
