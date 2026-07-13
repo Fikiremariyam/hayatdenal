@@ -265,7 +265,13 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         <div class="notes-card">
           <span class="notes-lbl">Clinical Notes</span>
           <textarea class="dp-textarea" id="dc-notes-clinical" rows="3" placeholder="Clinical observations, exam findings…"></textarea>
+            </div>
         </div>
+        <!--signature-->
+        <div>
+        patient signature  <b id="dc-pt-singnature">—</b>
+        </div>
+
         </div>
     </div>
     <!-- /main -->
@@ -473,6 +479,7 @@ class PatientInfo {
             },
             render_input: true,
         });
+        
 
         this._ctrl.$input.on('change', () => {
             const val = this._ctrl.get_value();
@@ -488,6 +495,27 @@ class PatientInfo {
                 label      : 'Provider',
                 fieldname  : 'provider',
                 placeholder: 'Search provider name or ID…',
+            },
+            render_input: true,
+        });
+        this.patinet_singnature_ctrl = frappe.ui.form.make_control({
+            parent: $('.dc-pt-singnature'),
+            df: {
+               fieldtype  : 'Signature',
+                label      : 'Patient Signature',
+                fieldname  : 'patient_signature',
+            },
+            render_input: true,
+        });
+
+        this._ctrl = frappe.ui.form.make_control({
+            parent: $('.dc-pt-name'),
+            df: {
+                fieldtype  : 'Link',
+                options    : 'Patient',
+                label      : 'Patient',
+                fieldname  : 'patient',
+                placeholder: 'Search patient name or ID…',
             },
             render_input: true,
         });
@@ -996,6 +1024,8 @@ class DentalChart {
 
     save() {
         const patientId = this.patient.value || frappe.utils.get_query_params().patient;
+        const signatureData = this.patinet_singnature_ctrl.get_value(); // base64 PNG or ""
+
 
         if (!patientId) {
             frappe.msgprint({
@@ -1066,6 +1096,8 @@ class DentalChart {
                         clinical_notes  : clinicalNotes,
                         treatment_plan  : treatmentPlan,
                         tooth_conditions: rows,
+                        signature       : signatureData,
+
                     },
                 },
                 callback: (r) => {
