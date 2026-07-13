@@ -139,18 +139,20 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 
   <!-- PATIENT BANNER -->
   <div class="dc-pt-bar">
-    <div class="dc-pt-name" id="dc-pt-name">
-    <div class="dc-doc-name" id="dc-doc-name">
-    
-    </div>
+    <div class="dc-pt-name" id="dc-pt-name"></div>
+
+    <div class="dc-doc-name" id="dc-doc-name"> </div>
 
     <div class="dc-pt-meta">
       <div>perio exam: <b id="dc-pt-dob">—</b></div>
       <div>Provider: <b id="dc-pt-prov">—</b></div>
       <div>Date: <b id="dc-pt-date"></b></div>
     </div>
+
     <div class="dc-pt-badge" id="dc-pt-badge">New Chart</div>
-  </div>
+  
+    </div>
+
 
   <div class="dc-body">
 
@@ -243,17 +245,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         <div class="teeth-row lower-row" id="dc-lower-row"></div>
       </div>
 
-      <!-- NOTES -->
-      <div class="notes-row">
-        <div class="notes-card">
-          <span class="notes-lbl">Clinical Notes</span>
-          <textarea class="dp-textarea" id="dc-notes-clinical" rows="3" placeholder="Clinical observations, exam findings…"></textarea>
-        </div>
-        <div class="notes-card">
-          <span class="notes-lbl">Treatment Plan</span>
-          <textarea class="dp-textarea" id="dc-notes-treatment" rows="3" placeholder="Proposed procedures, referrals…"></textarea>
-        </div>
-      </div>
+   
 
       <!-- SUMMARY TABLE -->
       <div class="arch-block">
@@ -267,6 +259,13 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
           </div>
         </div>
       </div>
+         <!-- NOTES -->
+      <div class="notes-row">
+        <div class="notes-card">
+          <span class="notes-lbl">Clinical Notes</span>
+          <textarea class="dp-textarea" id="dc-notes-clinical" rows="3" placeholder="Clinical observations, exam findings…"></textarea>
+        </div>
+     
 
     </div><!-- /main -->
 
@@ -320,7 +319,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
       </div>
 
       <div class="dp-section">
-        <div class="dp-label">Tooth Notes</div>
+        <div class="dp-label">Treatment plan </div>
         <textarea class="dp-textarea" id="dc-dp-notes" rows="4" placeholder="Observations for this tooth…"></textarea>
       </div>
 
