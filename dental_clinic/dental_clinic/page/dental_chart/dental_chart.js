@@ -106,6 +106,13 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .sum-tbl td    { padding:6px 10px;border-bottom:1px solid var(--border); }
 #dc-root .sum-tbl tr:last-child td{ border-bottom:none; }
 #dc-root .sum-tbl tr:hover td{ background:var(--panel2); }
+#dc-root .tp-list         { padding:0 12px 4px; }
+#dc-root .tp-svc-btn      { display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border-radius:7px;border:1.5px solid var(--border);background:var(--panel2);cursor:pointer;font-size:11.5px;font-weight:500;color:var(--text);transition:all .13s;margin-bottom:4px;text-align:left;font-family:inherit; }
+#dc-root .tp-svc-btn:hover{ border-color:var(--accent);background:var(--accent-light);color:var(--accent); }
+#dc-root .tp-svc-icon     { font-size:13px; }
+#dc-root .tp-row-rm       { color:var(--muted2);font-size:14px;line-height:1;opacity:.6;cursor:pointer;transition:opacity .12s; }
+#dc-root .tp-row-rm:hover { opacity:1;color:var(--c-decay); }
+#dc-root .tp-status-sel   { border:1px solid var(--border);background:var(--panel2);font-family:'DM Mono',monospace;font-size:10px;color:var(--text);padding:2px 5px;border-radius:4px;outline:none;cursor:pointer; }
 /* stat boxes */
 #dc-root .stat-grid     { display:grid;grid-template-columns:1fr 1fr;gap:5px; }
 #dc-root .stat-box      { background:var(--panel2);border:1px solid var(--border);border-radius:7px;padding:7px;text-align:center; }
@@ -261,11 +268,29 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         </div>
       </div>
          <!-- NOTES -->
+          <!-- TREATMENT PLAN TABLE -->
+      <div class="arch-block">
+        <div class="arch-bar">
+          <div class="arch-title">Treatment Plan</div>
+          <div style="font-size:10px;color:var(--muted2);margin-left:auto">Select a tooth, then click a service in the right panel</div>
+        </div>
+        <div style="padding:10px 14px;overflow-x:auto" id="dc-tp-wrap">
+          <div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">
+            No treatment planned yet
+          </div>
+        </div>
+      </div>
       <div class="notes-row">
         <div class="notes-card">
           <span class="notes-lbl">Clinical Notes</span>
           <textarea class="dp-textarea" id="dc-notes-clinical" rows="3" placeholder="Clinical observations, exam findings…"></textarea>
+            </div>
         </div>
+        <!--signature-->
+        <div>
+        patient signature  <b id="dc-pt-singnature">—</b>
+        </div>
+
         </div>
     </div>
     <!-- /main -->
@@ -319,9 +344,14 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         </div>
       </div>
 
+    <div class="dp-section">
+        <div class="dp-label">Treatment Plan — Click to Add</div>
+        <div class="tp-list" id="dc-tp-services"></div>
+      </div>
+
       <div class="dp-section">
-        <div class="dp-label">Treatment plan </div>
-        <textarea class="dp-textarea" id="dc-dp-notes" rows="4" placeholder="Observations for this tooth…"></textarea>
+        <div class="dp-label">Tooth Notes</div>
+        <textarea class="dp-textarea" id="dc-dp-notes" rows="3" placeholder="Observations for this tooth…"></textarea>
       </div>
 
 
