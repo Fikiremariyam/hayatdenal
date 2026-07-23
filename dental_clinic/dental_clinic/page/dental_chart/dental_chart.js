@@ -63,13 +63,15 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .arch-legend   { display:flex;gap:10px;margin-left:auto; }
 #dc-root .al-item       { display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted); }
 #dc-root .al-dot        { width:7px;height:7px;border-radius:2px; }
-#dc-root .midline-marker{ height:18px;width:2px;background:var(--border2);border-radius:1px;margin:0 2px;flex-shrink:0; }
-#dc-root .teeth-row     { display:flex;align-items:flex-end;justify-content:center;padding:14px 10px 7px;gap:2px;overflow-x:auto; }
+#dc-root .midline-marker{ height:44px;width:2px;background:var(--text);opacity:.55;border-radius:0;margin:0;flex-shrink:0;align-self:flex-end; }
+#dc-root .lower-row .midline-marker{ align-self:flex-start; }
+#dc-root .grid-side-label{ display:flex;align-items:center;justify-content:center;width:22px;font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--muted);flex-shrink:0; }
+#dc-root .teeth-row     { display:flex;align-items:flex-end;justify-content:center;padding:14px 6px 7px;gap:0;overflow-x:auto; }
 #dc-root .lower-row     { align-items:flex-start; }
 /* tooth cell */
-#dc-root .tooth-cell    { display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:2px;border-radius:8px;transition:background .12s;position:relative;min-width:46px; }
+#dc-root .tooth-cell    { display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:2px 0 0;border-radius:0;transition:background .12s;position:relative;min-width:44px; }
 #dc-root .tooth-cell:hover{ background:rgba(26,110,245,.06); }
-#dc-root .tooth-cell.selected{ background:var(--accent-light);outline:2px solid var(--accent);outline-offset:1px; }
+#dc-root .tooth-cell.selected{ background:var(--accent-light);outline:2px solid var(--accent);outline-offset:-1px;z-index:1; }
 #dc-root .tooth-num-fdi { font-family:'DM Mono',monospace;font-size:10px;font-weight:500;color:var(--muted);margin-bottom:2px;line-height:1; }
 #dc-root .tooth-num-uni { font-family:'DM Mono',monospace;font-size:8px;color:var(--muted2);margin-bottom:2px;line-height:1; }
 #dc-root .lower-row .tooth-num-fdi{ order:3;margin-bottom:0;margin-top:2px; }
@@ -647,12 +649,52 @@ class ToothSVG {
 
     /** Entry point: dispatch to the correct morphology renderer. */
     static render(toothMeta, isUpper, conditions) {
-        switch (toothMeta.type) {
-            case 'molar':    return ToothSVG._molar(conditions, isUpper);
-            case 'premolar': return ToothSVG._premolar(conditions, isUpper);
-            case 'canine':   return ToothSVG._canine(conditions, isUpper);
-            default:         return ToothSVG._incisor(conditions, isUpper);
-        }
+        return ToothSVG._grid(conditions);
+    }
+
+    /**
+     * Dentally-style surface-grid tooth: a plain square divided into
+     * 4 outer triangles (Buccal/Facial, Distal, Lingual/Palatal, Mesial)
+     * around a small center square (Occlusal/Incisal). Every tooth —
+     * molar or incisor — renders as the same uniform square so the
+     * whole arch reads as one continuous grid, matching a classic
+     * odontogram / surface-chart layout.
+     */
+    static _grid(conditions) {
+        const SZ   = 44;
+        const HALF = SZ / 2;
+        const OSZ  = 16;                 // center occlusal square size
+        const OOFF = (SZ - OSZ) / 2;
+
+        const miss = conditions.some(c => c.type === 'missing');
+
+        const fillFor = (surfaceKey) => {
+            const match = conditions.find(c => c.surface === surfaceKey || c.surface === 'All');
+            return match ? (ToothSVG.COLORS[match.type] || ToothSVG.COLORS.none).f : '#ffffff';
+        };
+        const strokeFor = (surfaceKey) => {
+            const match = conditions.find(c => c.surface === surfaceKey || c.surface === 'All');
+            return match ? (ToothSVG.COLORS[match.type] || ToothSVG.COLORS.none).s : '#c8cfd8';
+        };
+
+        const gridLines = miss ? '' : `
+            <polygon points="0,0 ${SZ},0 ${HALF},${HALF}" fill="${fillFor('B')}" stroke="${strokeFor('B')}" stroke-width="1"/>
+            <polygon points="${SZ},0 ${SZ},${SZ} ${HALF},${HALF}" fill="${fillFor('D')}" stroke="${strokeFor('D')}" stroke-width="1"/>
+            <polygon points="${SZ},${SZ} 0,${SZ} ${HALF},${HALF}" fill="${fillFor('L')}" stroke="${strokeFor('L')}" stroke-width="1"/>
+            <polygon points="0,${SZ} 0,0 ${HALF},${HALF}" fill="${fillFor('M')}" stroke="${strokeFor('M')}" stroke-width="1"/>
+            <rect x="${OOFF}" y="${OOFF}" width="${OSZ}" height="${OSZ}" fill="${fillFor('O')}" stroke="${strokeFor('O')}" stroke-width="1"/>`;
+
+        const missMarks = miss
+            ? `<rect x="0" y="0" width="${SZ}" height="${SZ}" fill="#f3f4f6"/>
+               <line x1="4" y1="4" x2="${SZ-4}" y2="${SZ-4}" stroke="#b0bec5" stroke-width="2" stroke-linecap="round"/>
+               <line x1="${SZ-4}" y1="4" x2="4" y2="${SZ-4}" stroke="#b0bec5" stroke-width="2" stroke-linecap="round"/>`
+            : '';
+
+        return `<svg viewBox="0 0 ${SZ} ${SZ}" width="40" height="40" xmlns="http://www.w3.org/2000/svg" style="display:block">
+                  ${gridLines}
+                  ${missMarks}
+                  <rect x="0" y="0" width="${SZ}" height="${SZ}" fill="none" stroke="var(--border2)" stroke-width="1"/>
+                </svg>`;
     }
 
     /* cross lines for missing teeth */
@@ -1216,6 +1258,12 @@ class DentalChart {
         const row = document.getElementById(containerId);
         if (!row) return;
         row.innerHTML = '';
+
+        const rLabel = document.createElement('div');
+        rLabel.className   = 'grid-side-label';
+        rLabel.textContent = 'R';
+        row.appendChild(rLabel);
+
         metaList.forEach(meta => {
             row.appendChild(this._buildToothCell(meta, isUpper));
             /* Midline marker after teeth 11 (upper) and 41 (lower) */
@@ -1226,6 +1274,11 @@ class DentalChart {
                 row.appendChild(ml);
             }
         });
+
+        const lLabel = document.createElement('div');
+        lLabel.className   = 'grid-side-label';
+        lLabel.textContent = 'L';
+        row.appendChild(lLabel);
     }
 
     _buildToothCell(meta, isUpper) {
@@ -1234,13 +1287,6 @@ class DentalChart {
         const num    = this.useFDI ? meta.fdi : meta.uni;
         const alt    = this.useFDI ? `U:${meta.uni}` : `FDI:${meta.fdi}`;
         const sel    = this.selFDI === meta.fdi;
-
-        /* Surface dots */
-        const dots = ['M','O','D','B','L'].map(sr => {
-            const match = state.conditions.find(c => c.surface === sr || c.surface === 'All');
-            const col   = match ? DentalChart.COL[match.type] || '#999' : '';
-            return `<div class="surf-dot" style="${col ? `background:${col};border-color:${col}` : ''}"></div>`;
-        }).join('');
 
         /* Badge (first condition abbreviation) */
         const fc  = state.conditions[0];
@@ -1257,8 +1303,7 @@ class DentalChart {
 
         const numH  = `<div class="tooth-num-fdi">${num}</div><div class="tooth-num-uni">${alt}</div>`;
         const svgH  = `<div class="tooth-svg-wrap">${ToothSVG.render(meta, isUp, state.conditions)}${badge}</div>`;
-        const dotH  = `<div class="surface-row">${dots}</div>`;
-        el.innerHTML = isUp ? (numH + svgH + dotH) : (dotH + svgH + numH);
+        el.innerHTML = isUp ? (numH + svgH) : (svgH + numH);
 
         el.addEventListener('click',       ()  => this._selectTooth(meta.fdi));
         el.addEventListener('mouseenter',  (e) => this._showTip(e, meta));
