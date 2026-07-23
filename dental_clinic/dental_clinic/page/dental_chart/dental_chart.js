@@ -790,6 +790,10 @@ class DentalChart {
 
     /* ── constructor ────────────────────────────────────────────────────── */
     constructor() {
+        /* Treatment plan items: [{ id, fdi, toothLabel, service, serviceId, price, surface, status, date }] */
+        this.treatmentPlan  = [];
+/* Catalog fetched from the Treatment Service doctype */
+        this.serviceCatalog = [];
         this.upperMeta = DentalChart.UPPER_META;
         this.lowerMeta = DentalChart.LOWER_META;
         this.allMeta   = [...this.upperMeta, ...this.lowerMeta];
@@ -848,6 +852,7 @@ class DentalChart {
         this._bindApplyButton();
         this._bindNumberingToggle();
         this._bindTooltip();
+        this._loadTreatmentServices();
 
         /* Initial render */
         this.render();
@@ -856,6 +861,29 @@ class DentalChart {
     /* ══════════════════════════════════════════════════════════════════════
        DOCTYPE  ──  FETCH (Load from Dental Chart)
     ══════════════════════════════════════════════════════════════════════*/
+
+    async _loadTreatmentServices() {
+        const wrap = document.getElementById('dc-tp-services');
+        if (wrap) wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">Loading services…</div>`;
+
+        try {
+            this.serviceCatalog = await frappe.db.get_list('Treatment Service', {
+                fields            : ['name', 'service_name', 'price'],   // ← adjust fieldnames here if needed
+                limit_page_length : 0,
+                order_by          : 'service_name asc',
+            });
+        } catch (err) {
+            console.error('[DentalChart] Failed to load Treatment Service list:', err);
+            this.serviceCatalog = [];
+            frappe.msgprint({
+                title: 'Could not load services',
+                message: 'Check that the "Treatment Service" doctype exists and is readable.',
+                indicator: 'red',
+            });
+        }
+
+        this._bindTreatmentServices();
+    }
 
     /**
      * Load the most recent Dental Chart doc for a patient and populate state.
@@ -1310,6 +1338,60 @@ class DentalChart {
             notesEl.oninput = e => { state.notes = e.target.value; };
         }
     }
+    _renderTreatmentPlan() {
+    const wrap = document.getElementById('dc-tp-wrap');
+    if (!wrap) return;
+
+    if (!this.treatmentPlan.length) {
+        wrap.innerHTML = `<div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">No treatment planned yet</div>`;
+        return;
+    }
+
+    const rows = this.treatmentPlan.map(t => `
+        <tr>
+            <td style="font-family:'DM Mono',monospace;font-weight:600">${t.fdi}</td>
+            <td style="color:var(--muted)">${t.toothLabel}</td>
+            <td><strong>${t.service}</strong></td>
+            <td style="font-family:'DM Mono',monospace;color:var(--muted)">${t.surface}</td>
+            <td style="font-family:'DM Mono',monospace">${this._fmtCurrency(t.price)}</td>
+            <td>
+                <select class="tp-status-sel" data-id="${t.id}">
+                    <option ${t.status === 'Planned'     ? 'selected' : ''}>Planned</option>
+                    <option ${t.status === 'In Progress' ? 'selected' : ''}>In Progress</option>
+                    <option ${t.status === 'Completed'   ? 'selected' : ''}>Completed</option>
+                </select>
+            </td>
+            <td style="color:var(--muted)">${t.date}</td>
+            <td><span class="tp-row-rm" data-id="${t.id}">×</span></td>
+        </tr>`).join('');
+
+    const total = this.treatmentPlan.reduce((sum, t) => sum + (t.price || 0), 0);
+
+    wrap.innerHTML = `
+        <table class="sum-tbl">
+            <thead>
+                <tr><th>FDI</th><th>Tooth</th><th>Service</th><th>Surface</th><th>Price</th><th>Status</th><th>Date</th><th></th></tr>
+            </thead>
+            <tbody>${rows}</tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="4" style="text-align:right;font-weight:600;border-top:2px solid var(--border)">Total</td>
+                    <td style="font-family:'DM Mono',monospace;font-weight:700;border-top:2px solid var(--border)">${this._fmtCurrency(total)}</td>
+                    <td colspan="3" style="border-top:2px solid var(--border)"></td>
+                </tr>
+            </tfoot>
+        </table>`;
+
+    wrap.querySelectorAll('.tp-row-rm').forEach(el => {
+        el.addEventListener('click', () => this._removeTreatmentItem(el.dataset.id));
+    });
+    wrap.querySelectorAll('.tp-status-sel').forEach(el => {
+        el.addEventListener('change', (e) => {
+            const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
+            if (item) item.status = e.target.value;
+        });
+    });
+}
 
     /* ══════════════════════════════════════════════════════════════════════
        APPLY CONDITION
@@ -1331,10 +1413,70 @@ class DentalChart {
         this.render();
         this._renderDetailPanel(this.selFDI);
     }
+    
 
     /* ══════════════════════════════════════════════════════════════════════
        EVENT BINDING
     ══════════════════════════════════════════════════════════════════════*/
+    _bindTreatmentServices() {
+    const wrap = document.getElementById('dc-tp-services');
+    if (!wrap) return;
+
+    if (!this.serviceCatalog.length) {
+        wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">No services found</div>`;
+        return;
+    }
+
+    wrap.innerHTML = this.serviceCatalog.map(s => {
+        const label = s.service_name || s.name;
+        const price = this._fmtCurrency(s.price);
+        return `<button class="tp-svc-btn" data-id="${s.name}">
+                    <span style="flex:1">${label}</span>
+                    <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${price}</span>
+                </button>`;
+    }).join('');
+
+    wrap.querySelectorAll('.tp-svc-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const svc = this.serviceCatalog.find(s => s.name === btn.dataset.id);
+            if (svc) this._addTreatmentItem(svc);
+        });
+    });
+}
+
+/* Small currency formatter — uses frappe's if available, else a plain fallback */
+        _fmtCurrency(val) {
+            const n = parseFloat(val) || 0;
+            try {
+                return format_currency(n);           // Frappe global helper
+            } catch (e) {
+                return n.toFixed(2);
+            }
+        }
+
+        _addTreatmentItem(svc) {
+            if (!this.selFDI) {
+                frappe.msgprint({ title: 'No Tooth Selected', message: 'Click a tooth first, then choose a service.', indicator: 'orange' });
+                return;
+            }
+            const meta = this.allMeta.find(t => t.fdi === this.selFDI);
+            const surf = this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase();
+
+            this.treatmentPlan.push({
+                id        : 'tp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+                fdi       : this.selFDI,
+                toothLabel: meta ? meta.name : this.selFDI,
+                service   : svc.service_name || svc.name,
+                serviceId : svc.name,
+                price     : parseFloat(svc.price) || 0,
+                surface   : surf,
+                status    : 'Planned',
+                date      : frappe.datetime.str_to_user(frappe.datetime.get_today()),
+            });
+
+            this._renderTreatmentPlan();
+            frappe.show_alert({ message: `Added "${svc.service_name || svc.name}" for tooth ${this.selFDI}`, indicator: 'green' });
+        }
 
     _bindPaletteEvents() {
         document.querySelectorAll('#dc-root .pal-btn[data-cond]').forEach(btn => {
@@ -1426,3 +1568,7 @@ function _set(id, val) {
     const el = document.getElementById(id);
     if (el) el.textContent = val;
 }
+
+
+
+
