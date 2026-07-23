@@ -293,6 +293,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 
         </div>
     </div>
+    </div>
     <!-- /main -->
 
     <!-- RIGHT DETAIL PANEL -->
@@ -1212,6 +1213,7 @@ class DentalChart {
         this._renderArch(this.lowerMeta, 'dc-lower-row', false);
         this._renderStats();
         this._renderSummary();
+        this._renderTreatmentPlan();  
     }
 
     _renderArch(metaList, containerId, isUpper) {
