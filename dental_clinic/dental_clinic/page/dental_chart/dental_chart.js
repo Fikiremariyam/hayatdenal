@@ -113,6 +113,13 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .tp-row-rm       { color:var(--muted2);font-size:14px;line-height:1;opacity:.6;cursor:pointer;transition:opacity .12s; }
 #dc-root .tp-row-rm:hover { opacity:1;color:var(--c-decay); }
 #dc-root .tp-status-sel   { border:1px solid var(--border);background:var(--panel2);font-family:'DM Mono',monospace;font-size:10px;color:var(--text);padding:2px 5px;border-radius:4px;outline:none;cursor:pointer; }
+#dc-root .tp-link-wrap    { margin-bottom:6px; }
+#dc-root .tp-link-wrap .control-input-wrapper { width:100%; }
+#dc-root .tp-add-btn      { margin-left:8px;padding:3px 10px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent-light);color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .13s; }
+#dc-root .tp-add-btn:hover{ background:var(--accent);color:#fff; }
+#dc-root .tp-cell-input   { width:100%;border:1px solid transparent;background:transparent;font-family:inherit;font-size:12px;color:var(--text);padding:2px 4px;border-radius:4px;outline:none; }
+#dc-root .tp-cell-input:hover, #dc-root .tp-cell-input:focus { border-color:var(--border2);background:var(--panel2); }
+#dc-root .tp-cell-input.tp-price { font-family:'DM Mono',monospace;width:70px; }
 /* stat boxes */
 #dc-root .stat-grid     { display:grid;grid-template-columns:1fr 1fr;gap:5px; }
 #dc-root .stat-box      { background:var(--panel2);border:1px solid var(--border);border-radius:7px;padding:7px;text-align:center; }
@@ -275,7 +282,8 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Treatment Plan</div>
-          <div style="font-size:10px;color:var(--muted2);margin-left:auto">Select a tooth, then click a service in the right panel</div>
+          <div style="font-size:10px;color:var(--muted2);margin-left:auto">Pick a service in the right panel, or add a row manually</div>
+          <button class="tp-add-btn" id="dc-tp-add-row-btn">＋ Add Row</button>
         </div>
         <div style="padding:10px 14px;overflow-x:auto" id="dc-tp-wrap">
           <div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">
@@ -350,8 +358,11 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
       </div>
 
       <div class="dp-section">
-        <div class="dp-label">Treatment Plan — Click to Add</div>
-        <div class="tp-list" id="dc-tp-services"></div>
+        <div class="dp-label">Treatment Plan — Add Service</div>
+        <div id="dc-tp-svc-link" class="tp-link-wrap"></div>
+        <button class="pal-btn" id="dc-tp-manual-btn" style="justify-content:center;font-weight:600;color:var(--accent);margin-top:2px">
+          <span style="font-size:13px">＋</span>Add Custom Item
+        </button>
       </div>
 
       <div class="dp-section">
@@ -826,8 +837,6 @@ class DentalChart {
     constructor() {
         /* Treatment plan items: [{ id, fdi, toothLabel, service, serviceId, price, surface, status, date }] */
         this.treatmentPlan  = [];
-        /* Catalog fetched from the Treatment Service doctype */
-        this.serviceCatalog = [];
 
         this.upperMeta = DentalChart.UPPER_META;
         this.lowerMeta = DentalChart.LOWER_META;
@@ -887,37 +896,12 @@ class DentalChart {
         this._bindApplyButton();
         this._bindNumberingToggle();
         this._bindTooltip();
-        this._loadTreatmentServices();
+        this._bindTreatmentServiceLink();
+        this._bindManualTreatmentButton();
+        this._bindAddRowButton();
 
         /* Initial render */
         this.render();
-    }
-
-    /* ══════════════════════════════════════════════════════════════════════
-       DOCTYPE  ──  FETCH (Load from Dental Chart)
-    ══════════════════════════════════════════════════════════════════════*/
-
-    async _loadTreatmentServices() {
-        const wrap = document.getElementById('dc-tp-services');
-        if (wrap) wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">Loading services…</div>`;
-
-        try {
-            this.serviceCatalog = await frappe.db.get_list('Treatment Service', {
-                fields            : ['name', 'service_name', 'price'],   // ← adjust fieldnames here if needed
-                limit_page_length : 0,
-                order_by          : 'service_name asc',
-            });
-        } catch (err) {
-            console.error('[DentalChart] Failed to load Treatment Service list:', err);
-            this.serviceCatalog = [];
-            frappe.msgprint({
-                title: 'Could not load services',
-                message: 'Check that the "Treatment Service" doctype exists and is readable.',
-                indicator: 'red',
-            });
-        }
-
-        this._bindTreatmentServices();
     }
 
     /**
@@ -1400,9 +1384,9 @@ class DentalChart {
             <tr>
                 <td style="font-family:'DM Mono',monospace;font-weight:600">${t.fdi}</td>
                 <td style="color:var(--muted)">${t.toothLabel}</td>
-                <td><strong>${t.service}</strong></td>
+                <td><input type="text" class="tp-cell-input tp-svc-edit" data-id="${t.id}" value="${(t.service || '').replace(/"/g, '&quot;')}"></td>
                 <td style="font-family:'DM Mono',monospace;color:var(--muted)">${t.surface}</td>
-                <td style="font-family:'DM Mono',monospace">${this._fmtCurrency(t.price)}</td>
+                <td><input type="number" step="0.01" class="tp-cell-input tp-price tp-price-edit" data-id="${t.id}" value="${t.price || 0}"></td>
                 <td>
                     <select class="tp-status-sel" data-id="${t.id}">
                         <option ${t.status === 'Planned'     ? 'selected' : ''}>Planned</option>
@@ -1440,6 +1424,19 @@ class DentalChart {
                 if (item) item.status = e.target.value;
             });
         });
+        wrap.querySelectorAll('.tp-svc-edit').forEach(el => {
+            el.addEventListener('change', (e) => {
+                const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
+                if (item) item.service = e.target.value;
+            });
+        });
+        wrap.querySelectorAll('.tp-price-edit').forEach(el => {
+            el.addEventListener('change', (e) => {
+                const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
+                if (item) item.price = parseFloat(e.target.value) || 0;
+                this._renderTreatmentPlan();   // refresh the total
+            });
+        });
     }
 
     /** Remove a treatment plan item by its id and re-render the table. */
@@ -1473,30 +1470,105 @@ class DentalChart {
        EVENT BINDING
     ══════════════════════════════════════════════════════════════════════*/
 
-    _bindTreatmentServices() {
-        const wrap = document.getElementById('dc-tp-services');
-        if (!wrap) return;
+    /**
+     * Search-as-you-type Link control for the "Treatment Service" doctype —
+     * the exact same mechanism used for the Patient / Provider fields above.
+     * This is robust to catalog size and doesn't depend on a get_list() call
+     * succeeding up front, so it will show results as long as the doctype
+     * exists and the field name (options: 'Treatment Service') is correct.
+     */
+    _bindTreatmentServiceLink() {
+        const container = document.getElementById('dc-tp-svc-link');
+        if (!container) return;
 
-        if (!this.serviceCatalog.length) {
-            wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">No services found</div>`;
-            return;
-        }
-
-        wrap.innerHTML = this.serviceCatalog.map(s => {
-            const label = s.service_name || s.name;
-            const price = this._fmtCurrency(s.price);
-            return `<button class="tp-svc-btn" data-id="${s.name}">
-                        <span style="flex:1">${label}</span>
-                        <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${price}</span>
-                    </button>`;
-        }).join('');
-
-        wrap.querySelectorAll('.tp-svc-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const svc = this.serviceCatalog.find(s => s.name === btn.dataset.id);
-                if (svc) this._addTreatmentItem(svc);
-            });
+        this._svcCtrl = frappe.ui.form.make_control({
+            parent: $(container),
+            df: {
+                fieldtype  : 'Link',
+                options    : 'Treatment Service',   // ← change this if your doctype is named differently
+                label      : 'Service',
+                fieldname  : 'treatment_service',
+                placeholder: 'Search treatment service…',
+            },
+            render_input: true,
         });
+        this._svcCtrl.refresh();
+
+        this._svcCtrl.$input.on('change', async () => {
+            const val = this._svcCtrl.get_value();
+            if (!val) return;
+
+            if (!this.selFDI) {
+                frappe.msgprint({ title: 'No Tooth Selected', message: 'Click a tooth first, then choose a service.', indicator: 'orange' });
+                this._svcCtrl.set_value('');
+                return;
+            }
+
+            try {
+                const res     = await frappe.db.get_value('Treatment Service', val, ['service_name', 'price']);
+                const svcDoc  = (res && res.message) ? res.message : {};
+                this._addTreatmentItem({
+                    name        : val,
+                    service_name: svcDoc.service_name || val,
+                    price       : svcDoc.price || 0,
+                });
+            } catch (err) {
+                console.error('[DentalChart] Failed to fetch service details:', err);
+                /* Still add it so the pick isn't lost — price can be fixed inline in the table */
+                this._addTreatmentItem({ name: val, service_name: val, price: 0 });
+            }
+
+            /* Reset the field so the same service (or another) can be picked again */
+            this._svcCtrl.set_value('');
+        });
+    }
+
+    /* "+ Add Custom Item" button in the right panel */
+    _bindManualTreatmentButton() {
+        const btn = document.getElementById('dc-tp-manual-btn');
+        if (btn) btn.addEventListener('click', () => this._openManualTreatmentDialog());
+    }
+
+    /* "+ Add Row" button on the Treatment Plan table itself */
+    _bindAddRowButton() {
+        const btn = document.getElementById('dc-tp-add-row-btn');
+        if (btn) btn.addEventListener('click', () => this._openManualTreatmentDialog());
+    }
+
+    /**
+     * Dialog to add a treatment item by hand — for services that aren't in
+     * the system yet, or when the person just wants to type something in.
+     * Tooth is selectable here too, so a tooth doesn't need to be pre-picked
+     * on the chart first.
+     */
+    _openManualTreatmentDialog() {
+        const toothOptions = this.allMeta.map(m => `${m.fdi} — ${m.name}`);
+        const defaultTooth = this.selFDI
+            ? toothOptions.find(o => o.startsWith(this.selFDI + ' '))
+            : toothOptions[0];
+
+        const d = new frappe.ui.Dialog({
+            title : 'Add Treatment Item',
+            fields: [
+                { fieldtype:'Select',   fieldname:'tooth',        label:'Tooth', reqd:1,
+                  options: toothOptions.join('\n'), default: defaultTooth },
+                { fieldtype:'Data',     fieldname:'service_name', label:'Service / Procedure', reqd:1 },
+                { fieldtype:'Currency', fieldname:'price',        label:'Price', default:0 },
+                { fieldtype:'Select',   fieldname:'surface',      label:'Surface',
+                  options:['All','M','O','D','B','L'].join('\n'),
+                  default: this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase() },
+            ],
+            primary_action_label: 'Add to Plan',
+            primary_action: (values) => {
+                const fdi = (values.tooth || '').split(' — ')[0];
+                this._addTreatmentItem(
+                    { name: null, service_name: values.service_name, price: values.price || 0 },
+                    { fdi, surface: values.surface }
+                );
+                d.hide();
+            },
+        });
+        d.show();
     }
 
     /* Small currency formatter — uses frappe's if available, else a plain fallback */
@@ -1509,20 +1581,26 @@ class DentalChart {
         }
     }
 
-    _addTreatmentItem(svc) {
-        if (!this.selFDI) {
+    /**
+     * @param {{name:?string, service_name:string, price:number}} svc
+     * @param {{fdi?:string, surface?:string}} [overrides] – used by the manual dialog,
+     *        which lets the person pick the tooth instead of requiring a prior chart click.
+     */
+    _addTreatmentItem(svc, overrides = {}) {
+        const fdi = overrides.fdi || this.selFDI;
+        if (!fdi) {
             frappe.msgprint({ title: 'No Tooth Selected', message: 'Click a tooth first, then choose a service.', indicator: 'orange' });
             return;
         }
-        const meta = this.allMeta.find(t => t.fdi === this.selFDI);
-        const surf = this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase();
+        const meta = this.allMeta.find(t => t.fdi === fdi);
+        const surf = overrides.surface || (this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase());
 
         this.treatmentPlan.push({
             id        : 'tp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
-            fdi       : this.selFDI,
-            toothLabel: meta ? meta.name : this.selFDI,
+            fdi       : fdi,
+            toothLabel: meta ? meta.name : fdi,
             service   : svc.service_name || svc.name,
-            serviceId : svc.name,
+            serviceId : svc.name || null,
             price     : parseFloat(svc.price) || 0,
             surface   : surf,
             status    : 'Planned',
@@ -1530,7 +1608,7 @@ class DentalChart {
         });
 
         this._renderTreatmentPlan();
-        frappe.show_alert({ message: `Added "${svc.service_name || svc.name}" for tooth ${this.selFDI}`, indicator: 'green' });
+        frappe.show_alert({ message: `Added "${svc.service_name || svc.name}" for tooth ${fdi}`, indicator: 'green' });
     }
 
     _bindPaletteEvents() {
