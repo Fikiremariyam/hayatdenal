@@ -123,6 +123,9 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 
 #dc-root .notes-card {flex: 1;    background: var(--panel);    border: 1px solid var(--border);border-radius: 10px;    padding: 12px;}
 #dc-root .notes-lbl     { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:7px;display:block; }
+/* signature row */
+#dc-root .sig-row       { background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--muted); }
+#dc-root .sig-row b     { color:var(--text); }
 /* status bar */
 #dc-root .dc-statusbar  { background:var(--panel);border-top:1px solid var(--border);padding:4px 14px;display:flex;align-items:center;gap:16px;font-size:11px;color:var(--muted);flex-wrap:wrap; }
 #dc-root .sb-chip       { display:flex;align-items:center;gap:5px;font-family:'DM Mono',monospace;font-size:10px; }
@@ -267,8 +270,8 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
           </div>
         </div>
       </div>
-         <!-- NOTES -->
-          <!-- TREATMENT PLAN TABLE -->
+
+      <!-- TREATMENT PLAN TABLE -->
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Treatment Plan</div>
@@ -280,19 +283,20 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
           </div>
         </div>
       </div>
+
+      <!-- NOTES -->
       <div class="notes-row">
         <div class="notes-card">
           <span class="notes-lbl">Clinical Notes</span>
           <textarea class="dp-textarea" id="dc-notes-clinical" rows="3" placeholder="Clinical observations, exam findings…"></textarea>
-            </div>
         </div>
-        <!--signature-->
-        <div>
-        patient signature  <b id="dc-pt-singnature">—</b>
-        </div>
+      </div>
 
-        </div>
-    </div>
+      <!-- SIGNATURE -->
+      <div class="sig-row">
+        patient signature&nbsp; <b id="dc-pt-signature">—</b>
+      </div>
+
     </div>
     <!-- /main -->
 
@@ -345,7 +349,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         </div>
       </div>
 
-    <div class="dp-section">
+      <div class="dp-section">
         <div class="dp-label">Treatment Plan — Click to Add</div>
         <div class="tp-list" id="dc-tp-services"></div>
       </div>
@@ -354,7 +358,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         <div class="dp-label">Tooth Notes</div>
         <textarea class="dp-textarea" id="dc-dp-notes" rows="3" placeholder="Observations for this tooth…"></textarea>
       </div>
-
 
     <!-- STATUS BAR -->
     <div class="dc-statusbar">
@@ -823,8 +826,9 @@ class DentalChart {
     constructor() {
         /* Treatment plan items: [{ id, fdi, toothLabel, service, serviceId, price, surface, status, date }] */
         this.treatmentPlan  = [];
-/* Catalog fetched from the Treatment Service doctype */
+        /* Catalog fetched from the Treatment Service doctype */
         this.serviceCatalog = [];
+
         this.upperMeta = DentalChart.UPPER_META;
         this.lowerMeta = DentalChart.LOWER_META;
         this.allMeta   = [...this.upperMeta, ...this.lowerMeta];
@@ -959,12 +963,18 @@ class DentalChart {
 
             /* Reset first so stale data is cleared */
             this._resetAllTeeth();
+            this.treatmentPlan = [];
 
             /* Restore notes */
-            const clinicalEl  = document.getElementById('dc-notes-clinical');
-            const treatmentEl = document.getElementById('dc-notes-treatment');
-            if (clinicalEl)  clinicalEl.value  = doc.clinical_notes  || '';
-            if (treatmentEl) treatmentEl.value = doc.treatment_plan  || '';
+            const clinicalEl = document.getElementById('dc-notes-clinical');
+            if (clinicalEl) clinicalEl.value = doc.clinical_notes || '';
+
+            /* Restore treatment plan (stored as JSON in the treatment_plan text field) */
+            try {
+                this.treatmentPlan = doc.treatment_plan ? JSON.parse(doc.treatment_plan) : [];
+            } catch (e) {
+                this.treatmentPlan = [];
+            }
 
             /* Restore provider into link control and banner */
             if (doc.provider) {
@@ -1106,8 +1116,8 @@ class DentalChart {
         });
 
         const providerVal   = this.patient.providerValue || this.patient.provider || '';
-        const clinicalNotes = (document.getElementById('dc-notes-clinical')  || {}).value || '';
-        const treatmentPlan = (document.getElementById('dc-notes-treatment') || {}).value || '';
+        const clinicalNotes = (document.getElementById('dc-notes-clinical') || {}).value || '';
+        const treatmentPlan = JSON.stringify(this.treatmentPlan);
 
         if (this.savedChartName) {
             /* ── UPDATE existing chart ──────────────────────────────────────
@@ -1170,6 +1180,7 @@ class DentalChart {
         this._resetAllTeeth();
         this.selFDI         = null;
         this.savedChartName = null;
+        this.treatmentPlan  = [];
         _set('dc-pt-badge', 'New Chart');
         this.render();
         _set('dc-dp-title', 'No tooth selected');
@@ -1180,10 +1191,11 @@ class DentalChart {
 
     export() {
         const payload = {
-            chart   : this.savedChartName,
-            patient : this.patient.value,
-            exported: new Date().toISOString(),
-            state   : {},
+            chart        : this.savedChartName,
+            patient      : this.patient.value,
+            exported     : new Date().toISOString(),
+            treatmentPlan: this.treatmentPlan,
+            state        : {},
         };
         this.allMeta.forEach(m => {
             const s = this.teeth[m.fdi];
@@ -1213,7 +1225,7 @@ class DentalChart {
         this._renderArch(this.lowerMeta, 'dc-lower-row', false);
         this._renderStats();
         this._renderSummary();
-        this._renderTreatmentPlan();  
+        this._renderTreatmentPlan();
     }
 
     _renderArch(metaList, containerId, isUpper) {
@@ -1370,60 +1382,71 @@ class DentalChart {
             notesEl.oninput = e => { state.notes = e.target.value; };
         }
     }
-    _renderTreatmentPlan() {
-    const wrap = document.getElementById('dc-tp-wrap');
-    if (!wrap) return;
 
-    if (!this.treatmentPlan.length) {
-        wrap.innerHTML = `<div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">No treatment planned yet</div>`;
-        return;
+    /* ══════════════════════════════════════════════════════════════════════
+       TREATMENT PLAN
+    ══════════════════════════════════════════════════════════════════════*/
+
+    _renderTreatmentPlan() {
+        const wrap = document.getElementById('dc-tp-wrap');
+        if (!wrap) return;
+
+        if (!this.treatmentPlan.length) {
+            wrap.innerHTML = `<div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">No treatment planned yet</div>`;
+            return;
+        }
+
+        const rows = this.treatmentPlan.map(t => `
+            <tr>
+                <td style="font-family:'DM Mono',monospace;font-weight:600">${t.fdi}</td>
+                <td style="color:var(--muted)">${t.toothLabel}</td>
+                <td><strong>${t.service}</strong></td>
+                <td style="font-family:'DM Mono',monospace;color:var(--muted)">${t.surface}</td>
+                <td style="font-family:'DM Mono',monospace">${this._fmtCurrency(t.price)}</td>
+                <td>
+                    <select class="tp-status-sel" data-id="${t.id}">
+                        <option ${t.status === 'Planned'     ? 'selected' : ''}>Planned</option>
+                        <option ${t.status === 'In Progress' ? 'selected' : ''}>In Progress</option>
+                        <option ${t.status === 'Completed'   ? 'selected' : ''}>Completed</option>
+                    </select>
+                </td>
+                <td style="color:var(--muted)">${t.date}</td>
+                <td><span class="tp-row-rm" data-id="${t.id}">×</span></td>
+            </tr>`).join('');
+
+        const total = this.treatmentPlan.reduce((sum, t) => sum + (t.price || 0), 0);
+
+        wrap.innerHTML = `
+            <table class="sum-tbl">
+                <thead>
+                    <tr><th>FDI</th><th>Tooth</th><th>Service</th><th>Surface</th><th>Price</th><th>Status</th><th>Date</th><th></th></tr>
+                </thead>
+                <tbody>${rows}</tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="4" style="text-align:right;font-weight:600;border-top:2px solid var(--border)">Total</td>
+                        <td style="font-family:'DM Mono',monospace;font-weight:700;border-top:2px solid var(--border)">${this._fmtCurrency(total)}</td>
+                        <td colspan="3" style="border-top:2px solid var(--border)"></td>
+                    </tr>
+                </tfoot>
+            </table>`;
+
+        wrap.querySelectorAll('.tp-row-rm').forEach(el => {
+            el.addEventListener('click', () => this._removeTreatmentItem(el.dataset.id));
+        });
+        wrap.querySelectorAll('.tp-status-sel').forEach(el => {
+            el.addEventListener('change', (e) => {
+                const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
+                if (item) item.status = e.target.value;
+            });
+        });
     }
 
-    const rows = this.treatmentPlan.map(t => `
-        <tr>
-            <td style="font-family:'DM Mono',monospace;font-weight:600">${t.fdi}</td>
-            <td style="color:var(--muted)">${t.toothLabel}</td>
-            <td><strong>${t.service}</strong></td>
-            <td style="font-family:'DM Mono',monospace;color:var(--muted)">${t.surface}</td>
-            <td style="font-family:'DM Mono',monospace">${this._fmtCurrency(t.price)}</td>
-            <td>
-                <select class="tp-status-sel" data-id="${t.id}">
-                    <option ${t.status === 'Planned'     ? 'selected' : ''}>Planned</option>
-                    <option ${t.status === 'In Progress' ? 'selected' : ''}>In Progress</option>
-                    <option ${t.status === 'Completed'   ? 'selected' : ''}>Completed</option>
-                </select>
-            </td>
-            <td style="color:var(--muted)">${t.date}</td>
-            <td><span class="tp-row-rm" data-id="${t.id}">×</span></td>
-        </tr>`).join('');
-
-    const total = this.treatmentPlan.reduce((sum, t) => sum + (t.price || 0), 0);
-
-    wrap.innerHTML = `
-        <table class="sum-tbl">
-            <thead>
-                <tr><th>FDI</th><th>Tooth</th><th>Service</th><th>Surface</th><th>Price</th><th>Status</th><th>Date</th><th></th></tr>
-            </thead>
-            <tbody>${rows}</tbody>
-            <tfoot>
-                <tr>
-                    <td colspan="4" style="text-align:right;font-weight:600;border-top:2px solid var(--border)">Total</td>
-                    <td style="font-family:'DM Mono',monospace;font-weight:700;border-top:2px solid var(--border)">${this._fmtCurrency(total)}</td>
-                    <td colspan="3" style="border-top:2px solid var(--border)"></td>
-                </tr>
-            </tfoot>
-        </table>`;
-
-    wrap.querySelectorAll('.tp-row-rm').forEach(el => {
-        el.addEventListener('click', () => this._removeTreatmentItem(el.dataset.id));
-    });
-    wrap.querySelectorAll('.tp-status-sel').forEach(el => {
-        el.addEventListener('change', (e) => {
-            const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
-            if (item) item.status = e.target.value;
-        });
-    });
-}
+    /** Remove a treatment plan item by its id and re-render the table. */
+    _removeTreatmentItem(id) {
+        this.treatmentPlan = this.treatmentPlan.filter(t => t.id !== id);
+        this._renderTreatmentPlan();
+    }
 
     /* ══════════════════════════════════════════════════════════════════════
        APPLY CONDITION
@@ -1445,70 +1468,70 @@ class DentalChart {
         this.render();
         this._renderDetailPanel(this.selFDI);
     }
-    
 
     /* ══════════════════════════════════════════════════════════════════════
        EVENT BINDING
     ══════════════════════════════════════════════════════════════════════*/
-    _bindTreatmentServices() {
-    const wrap = document.getElementById('dc-tp-services');
-    if (!wrap) return;
 
-    if (!this.serviceCatalog.length) {
-        wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">No services found</div>`;
-        return;
+    _bindTreatmentServices() {
+        const wrap = document.getElementById('dc-tp-services');
+        if (!wrap) return;
+
+        if (!this.serviceCatalog.length) {
+            wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">No services found</div>`;
+            return;
+        }
+
+        wrap.innerHTML = this.serviceCatalog.map(s => {
+            const label = s.service_name || s.name;
+            const price = this._fmtCurrency(s.price);
+            return `<button class="tp-svc-btn" data-id="${s.name}">
+                        <span style="flex:1">${label}</span>
+                        <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${price}</span>
+                    </button>`;
+        }).join('');
+
+        wrap.querySelectorAll('.tp-svc-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const svc = this.serviceCatalog.find(s => s.name === btn.dataset.id);
+                if (svc) this._addTreatmentItem(svc);
+            });
+        });
     }
 
-    wrap.innerHTML = this.serviceCatalog.map(s => {
-        const label = s.service_name || s.name;
-        const price = this._fmtCurrency(s.price);
-        return `<button class="tp-svc-btn" data-id="${s.name}">
-                    <span style="flex:1">${label}</span>
-                    <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${price}</span>
-                </button>`;
-    }).join('');
+    /* Small currency formatter — uses frappe's if available, else a plain fallback */
+    _fmtCurrency(val) {
+        const n = parseFloat(val) || 0;
+        try {
+            return format_currency(n);           // Frappe global helper
+        } catch (e) {
+            return n.toFixed(2);
+        }
+    }
 
-    wrap.querySelectorAll('.tp-svc-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const svc = this.serviceCatalog.find(s => s.name === btn.dataset.id);
-            if (svc) this._addTreatmentItem(svc);
+    _addTreatmentItem(svc) {
+        if (!this.selFDI) {
+            frappe.msgprint({ title: 'No Tooth Selected', message: 'Click a tooth first, then choose a service.', indicator: 'orange' });
+            return;
+        }
+        const meta = this.allMeta.find(t => t.fdi === this.selFDI);
+        const surf = this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase();
+
+        this.treatmentPlan.push({
+            id        : 'tp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+            fdi       : this.selFDI,
+            toothLabel: meta ? meta.name : this.selFDI,
+            service   : svc.service_name || svc.name,
+            serviceId : svc.name,
+            price     : parseFloat(svc.price) || 0,
+            surface   : surf,
+            status    : 'Planned',
+            date      : frappe.datetime.str_to_user(frappe.datetime.get_today()),
         });
-    });
-}
 
-/* Small currency formatter — uses frappe's if available, else a plain fallback */
-        _fmtCurrency(val) {
-            const n = parseFloat(val) || 0;
-            try {
-                return format_currency(n);           // Frappe global helper
-            } catch (e) {
-                return n.toFixed(2);
-            }
-        }
-
-        _addTreatmentItem(svc) {
-            if (!this.selFDI) {
-                frappe.msgprint({ title: 'No Tooth Selected', message: 'Click a tooth first, then choose a service.', indicator: 'orange' });
-                return;
-            }
-            const meta = this.allMeta.find(t => t.fdi === this.selFDI);
-            const surf = this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase();
-
-            this.treatmentPlan.push({
-                id        : 'tp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
-                fdi       : this.selFDI,
-                toothLabel: meta ? meta.name : this.selFDI,
-                service   : svc.service_name || svc.name,
-                serviceId : svc.name,
-                price     : parseFloat(svc.price) || 0,
-                surface   : surf,
-                status    : 'Planned',
-                date      : frappe.datetime.str_to_user(frappe.datetime.get_today()),
-            });
-
-            this._renderTreatmentPlan();
-            frappe.show_alert({ message: `Added "${svc.service_name || svc.name}" for tooth ${this.selFDI}`, indicator: 'green' });
-        }
+        this._renderTreatmentPlan();
+        frappe.show_alert({ message: `Added "${svc.service_name || svc.name}" for tooth ${this.selFDI}`, indicator: 'green' });
+    }
 
     _bindPaletteEvents() {
         document.querySelectorAll('#dc-root .pal-btn[data-cond]').forEach(btn => {
@@ -1600,7 +1623,3 @@ function _set(id, val) {
     const el = document.getElementById(id);
     if (el) el.textContent = val;
 }
-
-
-
-
