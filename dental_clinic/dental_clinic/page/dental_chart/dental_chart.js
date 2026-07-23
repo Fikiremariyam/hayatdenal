@@ -108,20 +108,29 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .sum-tbl td    { padding:6px 10px;border-bottom:1px solid var(--border); }
 #dc-root .sum-tbl tr:last-child td{ border-bottom:none; }
 #dc-root .sum-tbl tr:hover td{ background:var(--panel2); }
-#dc-root .tp-list         { padding:0 12px 4px; }
-#dc-root .tp-svc-btn      { display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border-radius:7px;border:1.5px solid var(--border);background:var(--panel2);cursor:pointer;font-size:11.5px;font-weight:500;color:var(--text);transition:all .13s;margin-bottom:4px;text-align:left;font-family:inherit; }
-#dc-root .tp-svc-btn:hover{ border-color:var(--accent);background:var(--accent-light);color:var(--accent); }
-#dc-root .tp-svc-icon     { font-size:13px; }
-#dc-root .tp-row-rm       { color:var(--muted2);font-size:14px;line-height:1;opacity:.6;cursor:pointer;transition:opacity .12s; }
-#dc-root .tp-row-rm:hover { opacity:1;color:var(--c-decay); }
-#dc-root .tp-status-sel   { border:1px solid var(--border);background:var(--panel2);font-family:'DM Mono',monospace;font-size:10px;color:var(--text);padding:2px 5px;border-radius:4px;outline:none;cursor:pointer; }
-#dc-root .tp-link-wrap    { margin-bottom:6px; }
-#dc-root .tp-link-wrap .control-input-wrapper { width:100%; }
-#dc-root .tp-add-btn      { margin-left:8px;padding:3px 10px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent-light);color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .13s; }
-#dc-root .tp-add-btn:hover{ background:var(--accent);color:#fff; }
+#dc-root .tp-row-rm       { color:var(--muted2);font-size:13px;line-height:1;opacity:.6;cursor:pointer;transition:opacity .12s; }
+#dc-root .tp-row-rm:hover { opacity:1; }
+#dc-root .tp-status-sel   { border:1px solid var(--border);background:var(--panel2);font-family:'DM Mono',monospace;font-size:10px;color:var(--text);padding:2px 5px;border-radius:4px;outline:none;cursor:pointer;width:100%; }
+#dc-root .tp-toolbar      { display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:10px; }
+#dc-root .tp-selall-wrap  { display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);margin-right:auto;cursor:pointer; }
+#dc-root .tp-selall-wrap input, #dc-root .tp-row-chk { cursor:pointer; }
+#dc-root .tp-add-btn      { padding:3px 10px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent-light);color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .13s; }
+#dc-root .tp-add-btn:hover:not(:disabled){ background:var(--accent);color:#fff; }
+#dc-root .tp-add-btn:disabled { opacity:.35;cursor:not-allowed; }
+#dc-root .tp-dup-btn      { border-color:var(--border2);background:var(--panel2);color:var(--text); }
+#dc-root .tp-dup-btn:hover:not(:disabled){ border-color:var(--accent);color:var(--accent);background:var(--accent-light); }
+#dc-root .tp-del-btn      { border-color:#f5c2c2;background:#fdeeee;color:var(--c-decay); }
+#dc-root .tp-del-btn:hover:not(:disabled){ background:var(--c-decay);color:#fff;border-color:var(--c-decay); }
+#dc-root .tp-chk-cell     { width:26px;text-align:center; }
+#dc-root .tp-idx-cell     { width:26px;text-align:center;color:var(--muted2);font-family:'DM Mono',monospace;font-size:11px; }
+#dc-root .tp-svc-ctrl .control-input-wrapper { width:100%; }
+#dc-root .tp-svc-ctrl input { font-size:12px !important;padding:3px 6px !important;height:auto !important;border-color:transparent !important;background:transparent !important; }
+#dc-root .tp-svc-ctrl input:hover, #dc-root .tp-svc-ctrl input:focus { border-color:var(--border2) !important;background:var(--panel2) !important; }
 #dc-root .tp-cell-input   { width:100%;border:1px solid transparent;background:transparent;font-family:inherit;font-size:12px;color:var(--text);padding:2px 4px;border-radius:4px;outline:none; }
 #dc-root .tp-cell-input:hover, #dc-root .tp-cell-input:focus { border-color:var(--border2);background:var(--panel2); }
-#dc-root .tp-cell-input.tp-price { font-family:'DM Mono',monospace;width:70px; }
+#dc-root .tp-cell-input.tp-price { font-family:'DM Mono',monospace; }
+#dc-root .tp-tooth-edit, #dc-root .tp-surf-edit { font-family:'DM Mono',monospace;cursor:pointer; }
+#dc-root .tp-date-edit    { font-family:'DM Mono',monospace;font-size:11px; }
 /* stat boxes */
 #dc-root .stat-grid     { display:grid;grid-template-columns:1fr 1fr;gap:5px; }
 #dc-root .stat-box      { background:var(--panel2);border:1px solid var(--border);border-radius:7px;padding:7px;text-align:center; }
@@ -147,7 +156,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root ::-webkit-scrollbar-track{ background:transparent; }
 #dc-root ::-webkit-scrollbar-thumb{ background:var(--border2);border-radius:3px; }
 @media print{
-    #dc-root .dc-palette,#dc-root .dc-detail,#dc-root .dc-statusbar,#dc-root .dc-pt-bar{ display:none!important; }
+    #dc-root .dc-palette,#dc-root .dc-statusbar,#dc-root .dc-pt-bar{ display:none!important; }
     #dc-root .dc-main{ padding:0; }
 }
     `);
@@ -191,15 +200,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
       </div>
 
       <div class="pal-section">
-        <div class="pal-label">Restorations</div>
-        <button class="pal-btn" data-cond="crown"   style="color:var(--c-crown)"><span class="pal-dot" style="background:var(--c-crown)"></span>Crown</button>
-        <button class="pal-btn" data-cond="filling" style="color:var(--c-filling)"><span class="pal-dot" style="background:var(--c-filling)"></span>Filling</button>
-        <button class="pal-btn" data-cond="rct"     style="color:var(--c-rct)"><span class="pal-dot" style="background:var(--c-rct)"></span>Root Canal (RCT)</button>
-        <button class="pal-btn" data-cond="veneer"  style="color:#00bcd4"><span class="pal-dot" style="background:#00bcd4"></span>Veneer</button>
-      </div>
-      <div class="pal-sep"></div>
-
-      <div class="pal-section">
         <div class="pal-label">Pathology</div>
         <button class="pal-btn" data-cond="decay"    style="color:var(--c-decay)"><span class="pal-dot" style="background:var(--c-decay)"></span>Decay / Caries</button>
         <button class="pal-btn" data-cond="fracture" style="color:var(--c-fracture)"><span class="pal-dot" style="background:var(--c-fracture)"></span>Fracture</button>
@@ -235,7 +235,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
           <div class="stat-box"><div class="stat-val" style="color:var(--c-healthy)" id="dc-st-h">0</div><div class="stat-lbl">Healthy</div></div>
           <div class="stat-box"><div class="stat-val" style="color:var(--c-decay)"   id="dc-st-d">0</div><div class="stat-lbl">Decay</div></div>
           <div class="stat-box"><div class="stat-val" style="color:var(--c-missing)" id="dc-st-m">0</div><div class="stat-lbl">Missing</div></div>
-          <div class="stat-box"><div class="stat-val" style="color:var(--c-crown)"   id="dc-st-cr">0</div><div class="stat-lbl">Crown</div></div>
+          <div class="stat-box"><div class="stat-val" style="color:var(--c-fracture)" id="dc-st-fr">0</div><div class="stat-lbl">Fracture</div></div>
         </div>
       </div>
 
@@ -251,10 +251,9 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
           <div style="font-size:10px;color:var(--muted2)">Right → Left · FDI 18–28</div>
           <div class="arch-legend">
             <div class="al-item"><div class="al-dot" style="background:var(--c-decay)"></div>Decay</div>
-            <div class="al-item"><div class="al-dot" style="background:var(--c-crown)"></div>Crown</div>
-            <div class="al-item"><div class="al-dot" style="background:var(--c-filling)"></div>Filling</div>
+            <div class="al-item"><div class="al-dot" style="background:var(--c-fracture)"></div>Fracture</div>
             <div class="al-item"><div class="al-dot" style="background:var(--c-missing)"></div>Missing</div>
-            <div class="al-item"><div class="al-dot" style="background:var(--c-rct)"></div>RCT</div>
+            <div class="al-item"><div class="al-dot" style="background:var(--c-implant)"></div>Implant</div>
           </div>
         </div>
         <div class="teeth-row" id="dc-upper-row"></div>
@@ -284,14 +283,9 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Treatment Plan</div>
-          <div style="font-size:10px;color:var(--muted2);margin-left:auto">Pick a service in the right panel, or add a row manually</div>
-          <button class="tp-add-btn" id="dc-tp-add-row-btn">＋ Add Row</button>
+          <div style="font-size:10px;color:var(--muted2);margin-left:auto">Add, edit and remove items directly in the table below</div>
         </div>
-        <div style="padding:10px 14px;overflow-x:auto" id="dc-tp-wrap">
-          <div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">
-            No treatment planned yet
-          </div>
-        </div>
+        <div style="padding:10px 14px;overflow-x:auto" id="dc-tp-wrap"></div>
       </div>
 
       <!-- NOTES -->
@@ -309,80 +303,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 
     </div>
     <!-- /main -->
-
-    <!-- RIGHT DETAIL PANEL -->
-    <div class="dc-detail">
-
-      <div class="dp-header">
-        <div class="dp-title" id="dc-dp-title">No tooth selected</div>
-        <div class="dp-sub"   id="dc-dp-sub">Click a tooth to view details</div>
-      </div>
-
-      <div class="dp-section">
-        <div class="dp-label">Surface Map</div>
-        <div class="surf-map">
-          <div></div>
-          <div class="sm-cell" data-s="O">O</div>
-          <div></div>
-          <div class="sm-cell" data-s="M">M</div>
-          <div style="height:20px;border-radius:3px;border:1px solid var(--border);background:var(--panel2)"></div>
-          <div class="sm-cell" data-s="D">D</div>
-          <div></div>
-          <div class="sm-cell" data-s="L">L</div>
-          <div></div>
-        </div>
-        <div style="text-align:center;margin-top:8px">
-          <button class="apply-btn" id="dc-apply-btn">Apply &amp; Record</button>
-        </div>
-      </div>
-
-      <div class="dp-section">
-        <div class="dp-label">Conditions</div>
-        <div id="dc-dp-conds">
-          <div style="font-size:11px;color:var(--muted2);text-align:center;padding:8px 0">None recorded</div>
-        </div>
-      </div>
-
-      <div class="dp-section">
-        <div class="dp-label">Measurements</div>
-        <div class="dp-row">
-          <span style="color:var(--muted)">Mobility</span>
-          <select id="dc-dp-mob" class="dp-select"><option>0</option><option>I</option><option>II</option><option>III</option></select>
-        </div>
-        <div class="dp-row">
-          <span style="color:var(--muted)">Furcation</span>
-          <select id="dc-dp-furc" class="dp-select"><option>—</option><option>I</option><option>II</option><option>III</option></select>
-        </div>
-        <div class="dp-row">
-          <span style="color:var(--muted)">Sensitivity</span>
-          <select id="dc-dp-sens" class="dp-select"><option>None</option><option>Cold</option><option>Heat</option><option>Both</option></select>
-        </div>
-      </div>
-
-      <div class="dp-section">
-        <div class="dp-label">Treatment Plan — Add Service</div>
-        <div id="dc-tp-svc-link" class="tp-link-wrap"></div>
-        <button class="pal-btn" id="dc-tp-manual-btn" style="justify-content:center;font-weight:600;color:var(--accent);margin-top:2px">
-          <span style="font-size:13px">＋</span>Add Custom Item
-        </button>
-      </div>
-
-      <div class="dp-section">
-        <div class="dp-label">Tooth Notes</div>
-        <textarea class="dp-textarea" id="dc-dp-notes" rows="3" placeholder="Observations for this tooth…"></textarea>
-      </div>
-
-    <!-- STATUS BAR -->
-    <div class="dc-statusbar">
-        <div class="sb-chip"><div class="sb-dot" style="background:var(--c-healthy)"></div><span id="dc-sb-h">0</span> healthy</div>
-        <div class="sb-chip"><div class="sb-dot" style="background:var(--c-decay)"></div><span id="dc-sb-d">0</span> decay</div>
-        <div class="sb-chip"><div class="sb-dot" style="background:var(--c-missing)"></div><span id="dc-sb-m">0</span> missing</div>
-        <div class="sb-chip"><div class="sb-dot" style="background:var(--c-crown)"></div><span id="dc-sb-cr">0</span> crown</div>
-        <div class="sb-chip"><div class="sb-dot" style="background:var(--c-rct)"></div><span id="dc-sb-rct">0</span> rct</div>
-        <div class="sb-mode">Mode: <span id="dc-sb-mode">Healthy</span> · Surface: <span id="dc-sb-surf">All</span></div>
-    </div>
-    </div><!-- /detail -->
-
 
   </div><!-- /body -->
 
@@ -879,6 +799,8 @@ class DentalChart {
     constructor() {
         /* Treatment plan items: [{ id, fdi, toothLabel, service, serviceId, price, surface, status, date }] */
         this.treatmentPlan  = [];
+        /* Row ids currently checked in the treatment plan grid (for bulk delete/duplicate) */
+        this.selectedIds    = new Set();
 
         this.upperMeta = DentalChart.UPPER_META;
         this.lowerMeta = DentalChart.LOWER_META;
@@ -931,16 +853,11 @@ class DentalChart {
             this._loadLatestChart(params.patient);
         }
 
-        /* Bind all palette, surface, and detail panel events */
+        /* Bind all palette and surface events */
         this._bindPaletteEvents();
         this._bindSurfaceEvents();
-        this._bindSurfaceMapEvents();
-        this._bindApplyButton();
         this._bindNumberingToggle();
         this._bindTooltip();
-        this._bindTreatmentServiceLink();
-        this._bindManualTreatmentButton();
-        this._bindAddRowButton();
 
         /* Initial render */
         this.render();
@@ -990,6 +907,7 @@ class DentalChart {
             /* Reset first so stale data is cleared */
             this._resetAllTeeth();
             this.treatmentPlan = [];
+            this.selectedIds   = new Set();
 
             /* Restore notes */
             const clinicalEl = document.getElementById('dc-notes-clinical');
@@ -1207,12 +1125,9 @@ class DentalChart {
         this.selFDI         = null;
         this.savedChartName = null;
         this.treatmentPlan  = [];
+        this.selectedIds    = new Set();
         _set('dc-pt-badge', 'New Chart');
         this.render();
-        _set('dc-dp-title', 'No tooth selected');
-        _set('dc-dp-sub',   'Click a tooth to view details');
-        const ce = document.getElementById('dc-dp-conds');
-        if (ce) ce.innerHTML = '<div style="font-size:11px;color:var(--muted2);text-align:center;padding:8px 0">None recorded</div>';
     }
 
     export() {
@@ -1313,21 +1228,19 @@ class DentalChart {
     }
 
     _renderStats() {
-        let h = 0, d = 0, m = 0, cr = 0, rct = 0;
+        let h = 0, d = 0, m = 0, fr = 0;
         this.allMeta.forEach(meta => {
             const types = this.teeth[meta.fdi].conditions.map(c => c.type);
             if (!types.length) { h++; return; }
             if (types.includes('missing'))  m++;
             if (types.includes('decay'))    d++;
-            if (types.includes('crown'))    cr++;
-            if (types.includes('rct'))      rct++;
-            if (!types.some(tp => ['missing','decay','crown','rct','filling','fracture','abscess'].includes(tp))) h++;
+            if (types.includes('fracture')) fr++;
+            if (!types.some(tp => ['missing','decay','fracture','abscess','mobility'].includes(tp))) h++;
         });
-        _set('dc-st-h',  h);   _set('dc-sb-h',   h);
-        _set('dc-st-d',  d);   _set('dc-sb-d',   d);
-        _set('dc-st-m',  m);   _set('dc-sb-m',   m);
-        _set('dc-st-cr', cr);  _set('dc-sb-cr',  cr);
-        _set('dc-sb-rct', rct);
+        _set('dc-st-h',  h);
+        _set('dc-st-d',  d);
+        _set('dc-st-m',  m);
+        _set('dc-st-fr', fr);
     }
 
     _renderSummary() {
@@ -1356,60 +1269,12 @@ class DentalChart {
     }
 
     /* ══════════════════════════════════════════════════════════════════════
-       DETAIL PANEL
+       TOOTH SELECTION
     ══════════════════════════════════════════════════════════════════════*/
 
     _selectTooth(fdi) {
         this.selFDI = fdi;
         this.render();
-        this._renderDetailPanel(fdi);
-    }
-
-    _renderDetailPanel(fdi) {
-        const meta  = this.allMeta.find(t => t.fdi === fdi);
-        if (!meta) return;
-        const state = this.teeth[fdi];
-
-        _set('dc-dp-title', `Tooth ${meta.fdi} (U:${meta.uni})`);
-        _set('dc-dp-sub',   meta.name);
-
-        /* Conditions list */
-        const ce = document.getElementById('dc-dp-conds');
-        ce.innerHTML = state.conditions.length
-            ? state.conditions.map((c, i) => `
-                <div class="cond-tag">
-                    <div class="ct-dot" style="background:${DentalChart.COL[c.type]||'#999'}"></div>
-                    <span>${DentalChart.LBL[c.type]||c.type}</span>
-                    <span style="font-size:10px;color:var(--muted2);font-family:'DM Mono',monospace;margin-left:4px">${c.surface}</span>
-                    <span class="ct-rm" data-fdi="${fdi}" data-i="${i}">×</span>
-                </div>`).join('')
-            : '<div style="font-size:11px;color:var(--muted2);text-align:center;padding:8px 0">None recorded</div>';
-
-        ce.querySelectorAll('.ct-rm').forEach(el => {
-            el.addEventListener('click', () => {
-                this.teeth[el.dataset.fdi].removeCondition(+el.dataset.i);
-                this.render();
-                this._renderDetailPanel(el.dataset.fdi);
-            });
-        });
-
-        /* Measurement selects */
-        const bind = (id, key) => {
-            const el = document.getElementById(id);
-            if (!el) return;
-            el.value    = state[key];
-            el.onchange = e => { state[key] = e.target.value; };
-        };
-        bind('dc-dp-mob',  'mobility');
-        bind('dc-dp-furc', 'furcation');
-        bind('dc-dp-sens', 'sensitivity');
-
-        /* Tooth notes */
-        const notesEl = document.getElementById('dc-dp-notes');
-        if (notesEl) {
-            notesEl.value  = state.notes || '';
-            notesEl.oninput = e => { state.notes = e.target.value; };
-        }
     }
 
     /* ══════════════════════════════════════════════════════════════════════
@@ -1420,17 +1285,27 @@ class DentalChart {
         const wrap = document.getElementById('dc-tp-wrap');
         if (!wrap) return;
 
-        if (!this.treatmentPlan.length) {
-            wrap.innerHTML = `<div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">No treatment planned yet</div>`;
-            return;
-        }
+        const toothOptions   = this.allMeta.map(m => m.fdi);
+        const surfaceOptions = ['All', 'M', 'O', 'D', 'B', 'L'];
+        const total = this.treatmentPlan.reduce((sum, t) => sum + (t.price || 0), 0);
+        const nSel  = this.selectedIds.size;
+        const allChecked = this.treatmentPlan.length > 0 && nSel === this.treatmentPlan.length;
 
-        const rows = this.treatmentPlan.map(t => `
+        const rows = this.treatmentPlan.map((t, idx) => `
             <tr>
-                <td style="font-family:'DM Mono',monospace;font-weight:600">${t.fdi}</td>
-                <td style="color:var(--muted)">${t.toothLabel}</td>
-                <td><input type="text" class="tp-cell-input tp-svc-edit" data-id="${t.id}" value="${(t.service || '').replace(/"/g, '&quot;')}"></td>
-                <td style="font-family:'DM Mono',monospace;color:var(--muted)">${t.surface}</td>
+                <td class="tp-chk-cell"><input type="checkbox" class="tp-row-chk" data-id="${t.id}" ${this.selectedIds.has(t.id) ? 'checked' : ''}></td>
+                <td class="tp-idx-cell">${idx + 1}</td>
+                <td>
+                    <select class="tp-cell-input tp-tooth-edit" data-id="${t.id}">
+                        ${toothOptions.map(fdi => `<option value="${fdi}" ${fdi === t.fdi ? 'selected' : ''}>${fdi}</option>`).join('')}
+                    </select>
+                </td>
+                <td><div class="tp-svc-ctrl" id="tp-svc-ctrl-${t.id}"></div></td>
+                <td>
+                    <select class="tp-cell-input tp-surf-edit" data-id="${t.id}">
+                        ${surfaceOptions.map(s => `<option ${s === t.surface ? 'selected' : ''}>${s}</option>`).join('')}
+                    </select>
+                </td>
                 <td><input type="number" step="0.01" class="tp-cell-input tp-price tp-price-edit" data-id="${t.id}" value="${t.price || 0}"></td>
                 <td>
                     <select class="tp-status-sel" data-id="${t.id}">
@@ -1439,29 +1314,101 @@ class DentalChart {
                         <option ${t.status === 'Completed'   ? 'selected' : ''}>Completed</option>
                     </select>
                 </td>
-                <td style="color:var(--muted)">${t.date}</td>
-                <td><span class="tp-row-rm" data-id="${t.id}">×</span></td>
+                <td><input type="date" class="tp-cell-input tp-date-edit" data-id="${t.id}" value="${t.date || ''}"></td>
+                <td><span class="tp-row-rm" data-id="${t.id}" title="Delete row">🗑</span></td>
             </tr>`).join('');
 
-        const total = this.treatmentPlan.reduce((sum, t) => sum + (t.price || 0), 0);
-
         wrap.innerHTML = `
-            <table class="sum-tbl">
+            <div class="tp-toolbar">
+                <label class="tp-selall-wrap">
+                    <input type="checkbox" id="dc-tp-select-all" ${allChecked ? 'checked' : ''} ${this.treatmentPlan.length ? '' : 'disabled'}>
+                    <span>Select All</span>
+                </label>
+                <button class="tp-add-btn" id="dc-tp-add-row-btn">＋ Add Row</button>
+                <button class="tp-add-btn tp-dup-btn" id="dc-tp-dup-btn" ${nSel ? '' : 'disabled'}>⧉ Duplicate${nSel ? ` (${nSel})` : ''}</button>
+                <button class="tp-add-btn tp-del-btn" id="dc-tp-del-btn" ${nSel ? '' : 'disabled'}>🗑 Delete${nSel ? ` (${nSel})` : ''}</button>
+            </div>
+            ${this.treatmentPlan.length ? `
+            <table class="sum-tbl tp-grid">
                 <thead>
-                    <tr><th>FDI</th><th>Tooth</th><th>Service</th><th>Surface</th><th>Price</th><th>Status</th><th>Date</th><th></th></tr>
+                    <tr>
+                        <th style="width:26px"></th>
+                        <th style="width:26px">#</th>
+                        <th style="width:70px">Tooth</th>
+                        <th>Service</th>
+                        <th style="width:70px">Surface</th>
+                        <th style="width:90px">Price</th>
+                        <th style="width:110px">Status</th>
+                        <th style="width:130px">Date</th>
+                        <th style="width:26px"></th>
+                    </tr>
                 </thead>
                 <tbody>${rows}</tbody>
                 <tfoot>
                     <tr>
-                        <td colspan="4" style="text-align:right;font-weight:600;border-top:2px solid var(--border)">Total</td>
+                        <td colspan="5" style="text-align:right;font-weight:600;border-top:2px solid var(--border)">Total</td>
                         <td style="font-family:'DM Mono',monospace;font-weight:700;border-top:2px solid var(--border)">${this._fmtCurrency(total)}</td>
                         <td colspan="3" style="border-top:2px solid var(--border)"></td>
                     </tr>
                 </tfoot>
-            </table>`;
+            </table>` : `<div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">No treatment planned yet — click "＋ Add Row" to start</div>`}
+        `;
 
+        this._bindTreatmentPlanEvents();
+        this._mountServiceLinkControls();
+    }
+
+    /** Wires up every control inside the freshly-rendered treatment plan grid. */
+    _bindTreatmentPlanEvents() {
+        const wrap = document.getElementById('dc-tp-wrap');
+        if (!wrap) return;
+
+        /* Toolbar */
+        const addBtn = document.getElementById('dc-tp-add-row-btn');
+        if (addBtn) addBtn.addEventListener('click', () => this._addBlankRow());
+
+        const dupBtn = document.getElementById('dc-tp-dup-btn');
+        if (dupBtn) dupBtn.addEventListener('click', () => this._duplicateSelected());
+
+        const delBtn = document.getElementById('dc-tp-del-btn');
+        if (delBtn) delBtn.addEventListener('click', () => this._deleteSelected());
+
+        const selAll = document.getElementById('dc-tp-select-all');
+        if (selAll) selAll.addEventListener('change', (e) => {
+            if (e.target.checked) this.treatmentPlan.forEach(t => this.selectedIds.add(t.id));
+            else this.selectedIds.clear();
+            this._renderTreatmentPlan();
+        });
+
+        /* Row checkboxes */
+        wrap.querySelectorAll('.tp-row-chk').forEach(el => {
+            el.addEventListener('change', (e) => {
+                if (e.target.checked) this.selectedIds.add(el.dataset.id);
+                else this.selectedIds.delete(el.dataset.id);
+                this._renderTreatmentPlan();
+            });
+        });
+
+        /* Row delete */
         wrap.querySelectorAll('.tp-row-rm').forEach(el => {
             el.addEventListener('click', () => this._removeTreatmentItem(el.dataset.id));
+        });
+
+        /* Inline edits */
+        wrap.querySelectorAll('.tp-tooth-edit').forEach(el => {
+            el.addEventListener('change', (e) => {
+                const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
+                if (!item) return;
+                item.fdi = e.target.value;
+                const meta = this.allMeta.find(m => m.fdi === item.fdi);
+                item.toothLabel = meta ? meta.name : item.fdi;
+            });
+        });
+        wrap.querySelectorAll('.tp-surf-edit').forEach(el => {
+            el.addEventListener('change', (e) => {
+                const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
+                if (item) item.surface = e.target.value;
+            });
         });
         wrap.querySelectorAll('.tp-status-sel').forEach(el => {
             el.addEventListener('change', (e) => {
@@ -1469,10 +1416,10 @@ class DentalChart {
                 if (item) item.status = e.target.value;
             });
         });
-        wrap.querySelectorAll('.tp-svc-edit').forEach(el => {
+        wrap.querySelectorAll('.tp-date-edit').forEach(el => {
             el.addEventListener('change', (e) => {
                 const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
-                if (item) item.service = e.target.value;
+                if (item) item.date = e.target.value;
             });
         });
         wrap.querySelectorAll('.tp-price-edit').forEach(el => {
@@ -1484,15 +1431,112 @@ class DentalChart {
         });
     }
 
-    /** Remove a treatment plan item by its id and re-render the table. */
-    _removeTreatmentItem(id) {
-        this.treatmentPlan = this.treatmentPlan.filter(t => t.id !== id);
+    /**
+     * Mounts a real Frappe Link control (options: 'Treatment Service') into
+     * every row's Service cell — the service is always a genuine link to
+     * the Treatment Service doctype, never free text.
+     */
+    _mountServiceLinkControls() {
+        this.treatmentPlan.forEach(t => {
+            const container = document.getElementById(`tp-svc-ctrl-${t.id}`);
+            if (!container) return;
+
+            const ctrl = frappe.ui.form.make_control({
+                parent: $(container),
+                df: {
+                    fieldtype  : 'Link',
+                    options    : 'Treatment Service',   // ← change this if your doctype is named differently
+                    fieldname  : 'treatment_service',
+                    placeholder: 'Search service…',
+                },
+                render_input: true,
+            });
+            ctrl.refresh();
+            if (t.serviceId) ctrl.set_value(t.serviceId);
+
+            ctrl.$input.on('change', async () => {
+                const val = ctrl.get_value();
+                if (!val) {
+                    t.serviceId = null;
+                    return;
+                }
+                try {
+                    const res    = await frappe.db.get_value('Treatment Service', val, ['service_name', 'price']);
+                    const svcDoc = (res && res.message) ? res.message : {};
+                    t.serviceId = val;
+                    t.service   = svcDoc.service_name || val;
+                    t.price     = parseFloat(svcDoc.price) || 0;
+                } catch (err) {
+                    console.error('[DentalChart] Failed to fetch service details:', err);
+                    t.serviceId = val;
+                    t.service   = val;
+                }
+                this._renderTreatmentPlan();
+            });
+        });
+    }
+
+    /** Create a new, empty, fully-editable row — the ERPNext-grid "Add Row" pattern. */
+    _addBlankRow() {
+        const fdi  = this.selFDI || (this.allMeta[0] && this.allMeta[0].fdi) || '';
+        const meta = this.allMeta.find(m => m.fdi === fdi);
+        this.treatmentPlan.push({
+            id        : 'tp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+            fdi       : fdi,
+            toothLabel: meta ? meta.name : fdi,
+            service   : '',
+            serviceId : null,
+            price     : 0,
+            surface   : this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase(),
+            status    : 'Planned',
+            date      : frappe.datetime.get_today(),
+        });
         this._renderTreatmentPlan();
     }
 
-    /* ══════════════════════════════════════════════════════════════════════
-       APPLY CONDITION
-    ══════════════════════════════════════════════════════════════════════*/
+    /** Duplicate every selected row, inserting the copy right after its source. */
+    _duplicateSelected() {
+        if (!this.selectedIds.size) return;
+        const next = [];
+        this.treatmentPlan.forEach(t => {
+            next.push(t);
+            if (this.selectedIds.has(t.id)) {
+                next.push({
+                    ...t,
+                    id: 'tp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+                });
+            }
+        });
+        this.treatmentPlan = next;
+        this.selectedIds   = new Set();
+        this._renderTreatmentPlan();
+    }
+
+    /** Bulk-delete every checked row. */
+    _deleteSelected() {
+        if (!this.selectedIds.size) return;
+        this.treatmentPlan = this.treatmentPlan.filter(t => !this.selectedIds.has(t.id));
+        this.selectedIds   = new Set();
+        this._renderTreatmentPlan();
+    }
+
+    /** Remove a single treatment plan row and re-render the grid. */
+    _removeTreatmentItem(id) {
+        this.treatmentPlan = this.treatmentPlan.filter(t => t.id !== id);
+        this.selectedIds.delete(id);
+        this._renderTreatmentPlan();
+    }
+
+    /* Small currency formatter — uses frappe's if available, else a plain fallback */
+    _fmtCurrency(val) {
+        const n = parseFloat(val) || 0;
+        try {
+            return format_currency(n);           // Frappe global helper
+        } catch (e) {
+            return n.toFixed(2);
+        }
+    }
+
 
     _applyCondition() {
         if (!this.selFDI) {
@@ -1508,153 +1552,11 @@ class DentalChart {
             state.addCondition(this.selCond, surf);
         }
         this.render();
-        this._renderDetailPanel(this.selFDI);
     }
 
     /* ══════════════════════════════════════════════════════════════════════
        EVENT BINDING
     ══════════════════════════════════════════════════════════════════════*/
-
-    /**
-     * Search-as-you-type Link control for the "Treatment Service" doctype —
-     * the exact same mechanism used for the Patient / Provider fields above.
-     * This is robust to catalog size and doesn't depend on a get_list() call
-     * succeeding up front, so it will show results as long as the doctype
-     * exists and the field name (options: 'Treatment Service') is correct.
-     */
-    _bindTreatmentServiceLink() {
-        const container = document.getElementById('dc-tp-svc-link');
-        if (!container) return;
-
-        this._svcCtrl = frappe.ui.form.make_control({
-            parent: $(container),
-            df: {
-                fieldtype  : 'Link',
-                options    : 'Treatment Service',   // ← change this if your doctype is named differently
-                label      : 'Service',
-                fieldname  : 'treatment_service',
-                placeholder: 'Search treatment service…',
-            },
-            render_input: true,
-        });
-        this._svcCtrl.refresh();
-
-        this._svcCtrl.$input.on('change', async () => {
-            const val = this._svcCtrl.get_value();
-            if (!val) return;
-
-            if (!this.selFDI) {
-                frappe.msgprint({ title: 'No Tooth Selected', message: 'Click a tooth first, then choose a service.', indicator: 'orange' });
-                this._svcCtrl.set_value('');
-                return;
-            }
-
-            try {
-                const res     = await frappe.db.get_value('Treatment Service', val, ['service_name', 'price']);
-                const svcDoc  = (res && res.message) ? res.message : {};
-                this._addTreatmentItem({
-                    name        : val,
-                    service_name: svcDoc.service_name || val,
-                    price       : svcDoc.price || 0,
-                });
-            } catch (err) {
-                console.error('[DentalChart] Failed to fetch service details:', err);
-                /* Still add it so the pick isn't lost — price can be fixed inline in the table */
-                this._addTreatmentItem({ name: val, service_name: val, price: 0 });
-            }
-
-            /* Reset the field so the same service (or another) can be picked again */
-            this._svcCtrl.set_value('');
-        });
-    }
-
-    /* "+ Add Custom Item" button in the right panel */
-    _bindManualTreatmentButton() {
-        const btn = document.getElementById('dc-tp-manual-btn');
-        if (btn) btn.addEventListener('click', () => this._openManualTreatmentDialog());
-    }
-
-    /* "+ Add Row" button on the Treatment Plan table itself */
-    _bindAddRowButton() {
-        const btn = document.getElementById('dc-tp-add-row-btn');
-        if (btn) btn.addEventListener('click', () => this._openManualTreatmentDialog());
-    }
-
-    /**
-     * Dialog to add a treatment item by hand — for services that aren't in
-     * the system yet, or when the person just wants to type something in.
-     * Tooth is selectable here too, so a tooth doesn't need to be pre-picked
-     * on the chart first.
-     */
-    _openManualTreatmentDialog() {
-        const toothOptions = this.allMeta.map(m => `${m.fdi} — ${m.name}`);
-        const defaultTooth = this.selFDI
-            ? toothOptions.find(o => o.startsWith(this.selFDI + ' '))
-            : toothOptions[0];
-
-        const d = new frappe.ui.Dialog({
-            title : 'Add Treatment Item',
-            fields: [
-                { fieldtype:'Select',   fieldname:'tooth',        label:'Tooth', reqd:1,
-                  options: toothOptions.join('\n'), default: defaultTooth },
-                { fieldtype:'Data',     fieldname:'service_name', label:'Service / Procedure', reqd:1 },
-                { fieldtype:'Currency', fieldname:'price',        label:'Price', default:0 },
-                { fieldtype:'Select',   fieldname:'surface',      label:'Surface',
-                  options:['All','M','O','D','B','L'].join('\n'),
-                  default: this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase() },
-            ],
-            primary_action_label: 'Add to Plan',
-            primary_action: (values) => {
-                const fdi = (values.tooth || '').split(' — ')[0];
-                this._addTreatmentItem(
-                    { name: null, service_name: values.service_name, price: values.price || 0 },
-                    { fdi, surface: values.surface }
-                );
-                d.hide();
-            },
-        });
-        d.show();
-    }
-
-    /* Small currency formatter — uses frappe's if available, else a plain fallback */
-    _fmtCurrency(val) {
-        const n = parseFloat(val) || 0;
-        try {
-            return format_currency(n);           // Frappe global helper
-        } catch (e) {
-            return n.toFixed(2);
-        }
-    }
-
-    /**
-     * @param {{name:?string, service_name:string, price:number}} svc
-     * @param {{fdi?:string, surface?:string}} [overrides] – used by the manual dialog,
-     *        which lets the person pick the tooth instead of requiring a prior chart click.
-     */
-    _addTreatmentItem(svc, overrides = {}) {
-        const fdi = overrides.fdi || this.selFDI;
-        if (!fdi) {
-            frappe.msgprint({ title: 'No Tooth Selected', message: 'Click a tooth first, then choose a service.', indicator: 'orange' });
-            return;
-        }
-        const meta = this.allMeta.find(t => t.fdi === fdi);
-        const surf = overrides.surface || (this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase());
-
-        this.treatmentPlan.push({
-            id        : 'tp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
-            fdi       : fdi,
-            toothLabel: meta ? meta.name : fdi,
-            service   : svc.service_name || svc.name,
-            serviceId : svc.name || null,
-            price     : parseFloat(svc.price) || 0,
-            surface   : surf,
-            status    : 'Planned',
-            date      : frappe.datetime.str_to_user(frappe.datetime.get_today()),
-        });
-
-        this._renderTreatmentPlan();
-        frappe.show_alert({ message: `Added "${svc.service_name || svc.name}" for tooth ${fdi}`, indicator: 'green' });
-    }
 
     _bindPaletteEvents() {
         document.querySelectorAll('#dc-root .pal-btn[data-cond]').forEach(btn => {
@@ -1662,7 +1564,6 @@ class DentalChart {
                 document.querySelectorAll('#dc-root .pal-btn[data-cond]').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 this.selCond = btn.dataset.cond;
-                _set('dc-sb-mode', DentalChart.LBL[this.selCond] || this.selCond);
                 if (this.selFDI) this._applyCondition();
             });
         });
@@ -1674,20 +1575,8 @@ class DentalChart {
                 document.querySelectorAll('#dc-root .surf-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 this.selSurf = btn.dataset.surf;
-                _set('dc-sb-surf', this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase());
             });
         });
-    }
-
-    _bindSurfaceMapEvents() {
-        document.querySelectorAll('#dc-root .sm-cell').forEach(c => {
-            c.addEventListener('click', () => c.classList.toggle('active'));
-        });
-    }
-
-    _bindApplyButton() {
-        const btn = document.getElementById('dc-apply-btn');
-        if (btn) btn.addEventListener('click', () => this._applyCondition());
     }
 
     _bindNumberingToggle() {
@@ -1697,7 +1586,6 @@ class DentalChart {
             this.useFDI = !this.useFDI;
             btn.innerHTML = `<span style="font-size:13px">🔢</span>${this.useFDI ? 'FDI / Universal' : 'Universal / FDI'}`;
             this.render();
-            if (this.selFDI) this._renderDetailPanel(this.selFDI);
         });
     }
 
