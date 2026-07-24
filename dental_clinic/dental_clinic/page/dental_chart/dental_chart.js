@@ -78,6 +78,8 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .lower-row .tooth-num-uni{ order:4; }
 #dc-root .tooth-svg-wrap{ position:relative; }
 #dc-root .tooth-svg-wrap svg{ display:block; }
+#dc-root .tooth-svg-wrap svg [data-surface]{ cursor:pointer; transition:opacity .1s; }
+#dc-root .tooth-svg-wrap svg [data-surface]:hover{ opacity:.65; }
 #dc-root .tooth-badge   { position:absolute;top:-4px;right:-4px;width:13px;height:13px;border-radius:50%;border:1.5px solid #fff;font-size:7px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;z-index:2; }
 #dc-root .surface-row   { display:flex;gap:2px;margin-top:3px; }
 #dc-root .surf-dot      { width:7px;height:7px;border-radius:2px;border:1px solid var(--border);background:var(--panel2); }
@@ -189,22 +191,8 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
     <div class="dc-palette">
 
       <div class="pal-section">
-        <div class="pal-label">Tooth Status</div>
-        <button class="pal-btn active" data-cond="healthy"  style="color:var(--c-healthy)"><span class="pal-dot" style="background:var(--c-healthy)"></span>Healthy</button>
-        <button class="pal-btn"        data-cond="missing"  style="color:var(--c-missing)"><span class="pal-dot" style="background:var(--c-missing)"></span>Missing</button>
-        <button class="pal-btn"        data-cond="implant"  style="color:var(--c-implant)"><span class="pal-dot" style="background:var(--c-implant)"></span>Implant</button>
-        <button class="pal-btn"        data-cond="bridge"   style="color:var(--c-bridge)"><span class="pal-dot" style="background:var(--c-bridge)"></span>Bridge Pontic</button>
-      </div>
-      <div class="pal-sep">
-
-      </div>
-
-      <div class="pal-section">
-        <div class="pal-label">Pathology</div>
-        <button class="pal-btn" data-cond="decay"    style="color:var(--c-decay)"><span class="pal-dot" style="background:var(--c-decay)"></span>Decay / Caries</button>
-        <button class="pal-btn" data-cond="fracture" style="color:var(--c-fracture)"><span class="pal-dot" style="background:var(--c-fracture)"></span>Fracture</button>
-        <button class="pal-btn" data-cond="mobility" style="color:#e91e63"><span class="pal-dot" style="background:#e91e63"></span>Mobility</button>
-        <button class="pal-btn" data-cond="abscess"  style="color:#ff5722"><span class="pal-dot" style="background:#ff5722"></span>Abscess</button>
+        <div class="pal-label">Observations</div>
+        <div id="dc-obs-list"></div>
       </div>
       <div class="pal-sep"></div>
 
@@ -222,6 +210,13 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
       <div class="pal-sep"></div>
 
       <div class="pal-section">
+        <div class="pal-label">Dentition</div>
+        <button class="pal-btn active" data-dentition="permanent" style="justify-content:center"><span style="font-size:13px">🦷</span>Permanent</button>
+        <button class="pal-btn"        data-dentition="primary"   style="justify-content:center"><span style="font-size:13px">👶</span>Primary (Child)</button>
+      </div>
+      <div class="pal-sep"></div>
+
+      <div class="pal-section">
         <div class="pal-label">Numbering</div>
         <button class="pal-btn" id="dc-num-toggle" style="font-family:'DM Mono',monospace;font-size:11px">
           <span style="font-size:13px">🔢</span>FDI / Universal
@@ -233,9 +228,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         <div class="pal-label">Summary</div>
         <div class="stat-grid">
           <div class="stat-box"><div class="stat-val" style="color:var(--c-healthy)" id="dc-st-h">0</div><div class="stat-lbl">Healthy</div></div>
-          <div class="stat-box"><div class="stat-val" style="color:var(--c-decay)"   id="dc-st-d">0</div><div class="stat-lbl">Decay</div></div>
-          <div class="stat-box"><div class="stat-val" style="color:var(--c-missing)" id="dc-st-m">0</div><div class="stat-lbl">Missing</div></div>
-          <div class="stat-box"><div class="stat-val" style="color:var(--c-fracture)" id="dc-st-fr">0</div><div class="stat-lbl">Fracture</div></div>
+          <div class="stat-box"><div class="stat-val" style="color:var(--accent)"    id="dc-st-fl">0</div><div class="stat-lbl">Flagged</div></div>
         </div>
       </div>
 
@@ -354,14 +347,13 @@ class ToothState {
 
     /**
      * Add a condition, deduplicating on type+surface.
-     * @param {string} type
-     * @param {string} surface
+     * @param {{type:string, label:string, color:string, surface:string}} cond
      */
-    addCondition(type, surface) {
+    addCondition(cond) {
         this.conditions = this.conditions.filter(
-            c => !(c.type === type && c.surface === surface)
+            c => !(c.type === cond.type && c.surface === cond.surface)
         );
-        this.conditions.push({ type, surface });
+        this.conditions.push(cond);
     }
 
     /** Remove a condition by index. */
@@ -381,11 +373,19 @@ class ToothState {
     /**
      * Populate from a Dental Chart Tooth child-table row (fetched from DocType).
      * @param {Object} row  – one item from doc.tooth_conditions
+     * @param {Array}  [catalog] – the Tooth Status catalog, used to recover the
+     *        original color for a saved condition label when possible.
      */
-    loadFromDocRow(row) {
-        const type = (row.condition || '').toLowerCase();
-        if (type && type !== 'healthy') {
-            this.addCondition(type, row.surface || 'All');
+    loadFromDocRow(row, catalog = []) {
+        const label = row.condition || '';
+        if (label && label.toLowerCase() !== 'healthy') {
+            const match = catalog.find(s => (s.status_name || s.name) === label);
+            this.addCondition({
+                type   : match ? match.name : label,
+                label  : label,
+                color  : match ? (match.color || '#999999') : '#999999',
+                surface: row.surface || 'All',
+            });
         }
         if (row.mobility    && row.mobility    !== '0') this.mobility    = row.mobility;
         if (row.furcation   && row.furcation   !== '—') this.furcation   = row.furcation;
@@ -401,9 +401,7 @@ class ToothState {
             tooth_universal  : this.uni,
             tooth_name_label : this.name,
             arch,
-            condition        : this.conditions[0]
-                ? this.conditions[0].type.charAt(0).toUpperCase() + this.conditions[0].type.slice(1)
-                : 'Healthy',
+            condition        : this.conditions[0] ? (this.conditions[0].label || this.conditions[0].type) : 'Healthy',
             surface          : this.conditions[0] ? this.conditions[0].surface : 'All',
             mobility         : this.mobility,
             furcation        : this.furcation,
@@ -586,34 +584,38 @@ class ToothSVG {
         const OSZ  = 16;                 // center occlusal square size
         const OOFF = (SZ - OSZ) / 2;
 
-        const miss = conditions.some(c => c.type === 'missing');
+        const isMissing = conditions.some(c => (c.label || c.type || '').toLowerCase() === 'missing');
 
-        const fillFor = (surfaceKey) => {
+        const colorFor = (surfaceKey) => {
             const match = conditions.find(c => c.surface === surfaceKey || c.surface === 'All');
-            return match ? (ToothSVG.COLORS[match.type] || ToothSVG.COLORS.none).f : '#ffffff';
-        };
-        const strokeFor = (surfaceKey) => {
-            const match = conditions.find(c => c.surface === surfaceKey || c.surface === 'All');
-            return match ? (ToothSVG.COLORS[match.type] || ToothSVG.COLORS.none).s : '#c8cfd8';
+            return match ? (match.color || '#999999') : null;
         };
 
-        const gridLines = miss ? '' : `
-            <polygon points="0,0 ${SZ},0 ${HALF},${HALF}" fill="${fillFor('B')}" stroke="${strokeFor('B')}" stroke-width="1"/>
-            <polygon points="${SZ},0 ${SZ},${SZ} ${HALF},${HALF}" fill="${fillFor('D')}" stroke="${strokeFor('D')}" stroke-width="1"/>
-            <polygon points="${SZ},${SZ} 0,${SZ} ${HALF},${HALF}" fill="${fillFor('L')}" stroke="${strokeFor('L')}" stroke-width="1"/>
-            <polygon points="0,${SZ} 0,0 ${HALF},${HALF}" fill="${fillFor('M')}" stroke="${strokeFor('M')}" stroke-width="1"/>
-            <rect x="${OOFF}" y="${OOFF}" width="${OSZ}" height="${OSZ}" fill="${fillFor('O')}" stroke="${strokeFor('O')}" stroke-width="1"/>`;
+        const region = (surfaceKey, tag, geom) => {
+            const color = colorFor(surfaceKey);
+            const fill        = color || '#ffffff';
+            const fillOpacity = color ? '0.30' : '1';
+            const stroke      = color || '#c8cfd8';
+            return `<${tag} data-surface="${surfaceKey}" ${geom} fill="${fill}" fill-opacity="${fillOpacity}" stroke="${stroke}" stroke-width="1"/>`;
+        };
 
-        const missMarks = miss
-            ? `<rect x="0" y="0" width="${SZ}" height="${SZ}" fill="#f3f4f6"/>
-               <line x1="4" y1="4" x2="${SZ-4}" y2="${SZ-4}" stroke="#b0bec5" stroke-width="2" stroke-linecap="round"/>
-               <line x1="${SZ-4}" y1="4" x2="4" y2="${SZ-4}" stroke="#b0bec5" stroke-width="2" stroke-linecap="round"/>`
+        const gridLines = isMissing ? '' : `
+            ${region('B', 'polygon', `points="0,0 ${SZ},0 ${HALF},${HALF}"`)}
+            ${region('D', 'polygon', `points="${SZ},0 ${SZ},${SZ} ${HALF},${HALF}"`)}
+            ${region('L', 'polygon', `points="${SZ},${SZ} 0,${SZ} ${HALF},${HALF}"`)}
+            ${region('M', 'polygon', `points="0,${SZ} 0,0 ${HALF},${HALF}"`)}
+            ${region('O', 'rect', `x="${OOFF}" y="${OOFF}" width="${OSZ}" height="${OSZ}"`)}`;
+
+        const missMarks = isMissing
+            ? `<rect data-surface="All" x="0" y="0" width="${SZ}" height="${SZ}" fill="#f3f4f6"/>
+               <line x1="4" y1="4" x2="${SZ-4}" y2="${SZ-4}" stroke="#b0bec5" stroke-width="2" stroke-linecap="round" pointer-events="none"/>
+               <line x1="${SZ-4}" y1="4" x2="4" y2="${SZ-4}" stroke="#b0bec5" stroke-width="2" stroke-linecap="round" pointer-events="none"/>`
             : '';
 
         return `<svg viewBox="0 0 ${SZ} ${SZ}" width="40" height="40" xmlns="http://www.w3.org/2000/svg" style="display:block">
                   ${gridLines}
                   ${missMarks}
-                  <rect x="0" y="0" width="${SZ}" height="${SZ}" fill="none" stroke="var(--border2)" stroke-width="1"/>
+                  <rect x="0" y="0" width="${SZ}" height="${SZ}" fill="none" stroke="var(--border2)" stroke-width="1" pointer-events="none"/>
                 </svg>`;
     }
 
@@ -781,6 +783,40 @@ class DentalChart {
         {fdi:'38',uni:'17',name:'Lower Left 3rd Molar',     type:'molar'},
     ];
 
+    /* Primary / deciduous (child) dentition — FDI 51–65, 71–85, Universal letters A–T */
+    static UPPER_META_CHILD = [
+        {fdi:'55',uni:'A',name:'Upper Right 2nd Primary Molar', type:'molar'},
+        {fdi:'54',uni:'B',name:'Upper Right 1st Primary Molar', type:'molar'},
+        {fdi:'53',uni:'C',name:'Upper Right Primary Canine',    type:'canine'},
+        {fdi:'52',uni:'D',name:'Upper Right Primary Lateral',   type:'incisor'},
+        {fdi:'51',uni:'E',name:'Upper Right Primary Central',   type:'incisor'},
+        {fdi:'61',uni:'F',name:'Upper Left Primary Central',    type:'incisor'},
+        {fdi:'62',uni:'G',name:'Upper Left Primary Lateral',    type:'incisor'},
+        {fdi:'63',uni:'H',name:'Upper Left Primary Canine',     type:'canine'},
+        {fdi:'64',uni:'I',name:'Upper Left 1st Primary Molar',  type:'molar'},
+        {fdi:'65',uni:'J',name:'Upper Left 2nd Primary Molar',  type:'molar'},
+    ];
+
+    static LOWER_META_CHILD = [
+        {fdi:'85',uni:'T',name:'Lower Right 2nd Primary Molar', type:'molar'},
+        {fdi:'84',uni:'S',name:'Lower Right 1st Primary Molar', type:'molar'},
+        {fdi:'83',uni:'R',name:'Lower Right Primary Canine',    type:'canine'},
+        {fdi:'82',uni:'Q',name:'Lower Right Primary Lateral',   type:'incisor'},
+        {fdi:'81',uni:'P',name:'Lower Right Primary Central',   type:'incisor'},
+        {fdi:'71',uni:'O',name:'Lower Left Primary Central',    type:'incisor'},
+        {fdi:'72',uni:'N',name:'Lower Left Primary Lateral',    type:'incisor'},
+        {fdi:'73',uni:'M',name:'Lower Left Primary Canine',     type:'canine'},
+        {fdi:'74',uni:'L',name:'Lower Left 1st Primary Molar',  type:'molar'},
+        {fdi:'75',uni:'K',name:'Lower Left 2nd Primary Molar',  type:'molar'},
+    ];
+
+    /* Which tooth the midline divider goes after, per dentition */
+    static MIDLINE_AFTER = {
+        permanent: ['11', '41'],
+        primary  : ['51', '81'],
+    };
+
+
     static COL = {
         healthy:'#27ae60', missing:'#95a5a6', implant:'#27ae60',
         bridge :'#16a085', crown  :'#f39c12', filling:'#3498db',
@@ -802,17 +838,23 @@ class DentalChart {
         /* Row ids currently checked in the treatment plan grid (for bulk delete/duplicate) */
         this.selectedIds    = new Set();
 
-        this.upperMeta = DentalChart.UPPER_META;
-        this.lowerMeta = DentalChart.LOWER_META;
-        this.allMeta   = [...this.upperMeta, ...this.lowerMeta];
+        /* Which arch set is on screen: 'permanent' or 'primary' (child) */
+        this.dentition = 'permanent';
 
-        /* keyed by FDI string → ToothState */
-        this.teeth = {};
-        this.allMeta.forEach(m => { this.teeth[m.fdi] = new ToothState(m); });
+        /* Tooth state is kept per-dentition so switching views never loses data */
+        this.teethSets = { permanent: {}, primary: {} };
+        [...DentalChart.UPPER_META, ...DentalChart.LOWER_META]
+            .forEach(m => { this.teethSets.permanent[m.fdi] = new ToothState(m); });
+        [...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD]
+            .forEach(m => { this.teethSets.primary[m.fdi] = new ToothState(m); });
+
+        /* Observations catalog, fetched from the "Tooth Status" doctype */
+        this.toothStatusCatalog = [];
+        /* Currently selected observation: { id, label, color, isHealthy } */
+        this.selStatus = null;
 
         /* UI state */
         this.selFDI  = null;
-        this.selCond = 'healthy';
         this.selSurf = 'all';
         this.useFDI  = true;
 
@@ -825,6 +867,14 @@ class DentalChart {
         /* Tooltip element (already in HTML) */
         this._tip = document.getElementById('dc-tip');
     }
+
+    /** Tooth catalogue for the arch currently on screen. */
+    get upperMeta() { return this.dentition === 'primary' ? DentalChart.UPPER_META_CHILD : DentalChart.UPPER_META; }
+    get lowerMeta() { return this.dentition === 'primary' ? DentalChart.LOWER_META_CHILD : DentalChart.LOWER_META; }
+    get allMeta()   { return [...this.upperMeta, ...this.lowerMeta]; }
+    /** ToothState dict for the arch currently on screen, keyed by FDI. */
+    get teeth()     { return this.teethSets[this.dentition]; }
+
 
     /* ── init ───────────────────────────────────────────────────────────── */
     init() {
@@ -854,8 +904,9 @@ class DentalChart {
         }
 
         /* Bind all palette and surface events */
-        this._bindPaletteEvents();
+        this._loadToothStatuses();
         this._bindSurfaceEvents();
+        this._bindDentitionToggle();
         this._bindNumberingToggle();
         this._bindTooltip();
 
@@ -904,10 +955,16 @@ class DentalChart {
         try {
             const doc = await frappe.db.get_doc('Dental charting', chartName);
 
-            /* Reset first so stale data is cleared */
+            /* Reset first so stale data is cleared (both dentitions) */
             this._resetAllTeeth();
             this.treatmentPlan = [];
             this.selectedIds   = new Set();
+
+            /* Make sure the observation catalog is available so saved condition
+               labels can be matched back to their original color. */
+            if (!this.toothStatusCatalog.length) {
+                await this._loadToothStatuses();
+            }
 
             /* Restore notes */
             const clinicalEl = document.getElementById('dc-notes-clinical');
@@ -925,10 +982,11 @@ class DentalChart {
                 this.patient.setProvider(doc.provider);
             }
 
-            /* Restore per-tooth conditions from child table */
+            /* Restore per-tooth conditions from child table — look across both
+               dentition sets since permanent/primary FDI codes never overlap. */
             (doc.tooth_conditions || []).forEach(row => {
-                const state = this.teeth[row.tooth_fdi];
-                if (state) state.loadFromDocRow(row);
+                const state = this.teethSets.permanent[row.tooth_fdi] || this.teethSets.primary[row.tooth_fdi];
+                if (state) state.loadFromDocRow(row, this.toothStatusCatalog);
             });
 
             /* Track the loaded chart name */
@@ -1019,11 +1077,20 @@ class DentalChart {
             return;
         }
 
-        /* Build child-table rows – one row per condition per tooth */
+        /* Build child-table rows – one row per condition per tooth, across
+           BOTH dentitions (permanent + primary), since FDI codes never
+           collide between the two sets. */
         const rows = [];
-        this.allMeta.forEach(meta => {
-            const state = this.teeth[meta.fdi];
-            const arch  = this.upperMeta.includes(meta) ? 'Upper' : 'Lower';
+        const fullMeta = [
+            ...DentalChart.UPPER_META,       ...DentalChart.LOWER_META,
+            ...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD,
+        ];
+        const upperFdis = new Set([...DentalChart.UPPER_META, ...DentalChart.UPPER_META_CHILD].map(m => m.fdi));
+
+        fullMeta.forEach(meta => {
+            const state = this.teethSets.permanent[meta.fdi] || this.teethSets.primary[meta.fdi];
+            if (!state) return;
+            const arch = upperFdis.has(meta.fdi) ? 'Upper' : 'Lower';
 
             if (!state.conditions.length) {
                 /* Save healthy teeth too so the chart is complete */
@@ -1048,7 +1115,7 @@ class DentalChart {
                         tooth_universal  : state.uni,
                         tooth_name_label : state.name,
                         arch,
-                        condition        : c.type.charAt(0).toUpperCase() + c.type.slice(1),
+                        condition        : c.label || c.type,
                         surface          : c.surface,
                         mobility         : state.mobility,
                         furcation        : state.furcation,
@@ -1181,8 +1248,8 @@ class DentalChart {
 
         metaList.forEach(meta => {
             row.appendChild(this._buildToothCell(meta, isUpper));
-            /* Midline marker after teeth 11 (upper) and 41 (lower) */
-            if (['11', '41'].includes(meta.fdi)) {
+            /* Midline marker after the last tooth of the right side (varies by dentition) */
+            if (DentalChart.MIDLINE_AFTER[this.dentition].includes(meta.fdi)) {
                 const ml = document.createElement('div');
                 ml.className = 'midline-marker';
                 ml.title     = 'Midline';
@@ -1203,13 +1270,10 @@ class DentalChart {
         const alt    = this.useFDI ? `U:${meta.uni}` : `FDI:${meta.fdi}`;
         const sel    = this.selFDI === meta.fdi;
 
-        /* Badge (first condition abbreviation) */
-        const fc  = state.conditions[0];
-        const bmap= { missing:'✕', rct:'R', crown:'C', implant:'I', decay:'D', filling:'F' };
-        const bt  = fc ? (bmap[fc.type] || '') : '';
-        const bc  = fc ? DentalChart.COL[fc.type] : '';
-        const badge = bt && bc
-            ? `<div class="tooth-badge" style="background:${bc};${isUp ? '' : 'bottom:-4px;top:auto'}">${bt}</div>`
+        /* Badge (first condition's initial, colored to match) */
+        const fc    = state.conditions[0];
+        const badge = fc
+            ? `<div class="tooth-badge" style="background:${fc.color || '#999'};${isUp ? '' : 'bottom:-4px;top:auto'}">${(fc.label || fc.type || '?').charAt(0).toUpperCase()}</div>`
             : '';
 
         const el       = document.createElement('div');
@@ -1220,27 +1284,33 @@ class DentalChart {
         const svgH  = `<div class="tooth-svg-wrap">${ToothSVG.render(meta, isUp, state.conditions)}${badge}</div>`;
         el.innerHTML = isUp ? (numH + svgH) : (svgH + numH);
 
+        /* Whole-cell click just selects the tooth (used as the default
+           tooth for new treatment plan rows, and for the tooltip). */
         el.addEventListener('click',       ()  => this._selectTooth(meta.fdi));
         el.addEventListener('mouseenter',  (e) => this._showTip(e, meta));
         el.addEventListener('mouseleave',  ()  => this._hideTip());
+
+        /* Each surface region of the tooth diagram is individually
+           clickable: clicking a side applies the currently selected
+           observation to exactly that surface, right on the diagram. */
+        el.querySelectorAll('[data-surface]').forEach(region => {
+            region.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._applyToSurface(meta.fdi, region.dataset.surface);
+            });
+        });
 
         return el;
     }
 
     _renderStats() {
-        let h = 0, d = 0, m = 0, fr = 0;
+        let healthy = 0, flagged = 0;
         this.allMeta.forEach(meta => {
-            const types = this.teeth[meta.fdi].conditions.map(c => c.type);
-            if (!types.length) { h++; return; }
-            if (types.includes('missing'))  m++;
-            if (types.includes('decay'))    d++;
-            if (types.includes('fracture')) fr++;
-            if (!types.some(tp => ['missing','decay','fracture','abscess','mobility'].includes(tp))) h++;
+            if (this.teeth[meta.fdi].conditions.length) flagged++;
+            else healthy++;
         });
-        _set('dc-st-h',  h);
-        _set('dc-st-d',  d);
-        _set('dc-st-m',  m);
-        _set('dc-st-fr', fr);
+        _set('dc-st-h',  healthy);
+        _set('dc-st-fl', flagged);
     }
 
     _renderSummary() {
@@ -1253,8 +1323,8 @@ class DentalChart {
                     <td style="font-family:'DM Mono',monospace;font-weight:600">${meta.fdi}</td>
                     <td style="color:var(--muted)">${meta.name}</td>
                     <td><span style="display:inline-flex;align-items:center;gap:5px">
-                        <span style="width:8px;height:8px;border-radius:2px;background:${DentalChart.COL[c.type]||'#999'};display:inline-block"></span>
-                        <strong>${DentalChart.LBL[c.type]||c.type}</strong></span></td>
+                        <span style="width:8px;height:8px;border-radius:2px;background:${c.color || '#999'};display:inline-block"></span>
+                        <strong>${c.label || c.type}</strong></span></td>
                     <td style="font-family:'DM Mono',monospace;color:var(--muted)">${c.surface}</td>
                     <td style="color:var(--muted)">${this.teeth[meta.fdi].notes || '—'}</td>
                 </tr>`);
@@ -1285,7 +1355,10 @@ class DentalChart {
         const wrap = document.getElementById('dc-tp-wrap');
         if (!wrap) return;
 
-        const toothOptions   = this.allMeta.map(m => m.fdi);
+        const toothOptions = [
+            { value: '00', label: '00 — General' },
+            ...this.allMeta.map(m => ({ value: m.fdi, label: m.fdi })),
+        ];
         const surfaceOptions = ['All', 'M', 'O', 'D', 'B', 'L'];
         const total = this.treatmentPlan.reduce((sum, t) => sum + (t.price || 0), 0);
         const nSel  = this.selectedIds.size;
@@ -1296,8 +1369,8 @@ class DentalChart {
                 <td class="tp-chk-cell"><input type="checkbox" class="tp-row-chk" data-id="${t.id}" ${this.selectedIds.has(t.id) ? 'checked' : ''}></td>
                 <td class="tp-idx-cell">${idx + 1}</td>
                 <td>
-                    <select class="tp-cell-input tp-tooth-edit" data-id="${t.id}">
-                        ${toothOptions.map(fdi => `<option value="${fdi}" ${fdi === t.fdi ? 'selected' : ''}>${fdi}</option>`).join('')}
+                    <select class="tp-cell-input tp-tooth-edit" data-id="${t.id}" title="${(t.toothLabel || '').replace(/"/g, '&quot;')}">
+                        ${toothOptions.map(o => `<option value="${o.value}" ${o.value === t.fdi ? 'selected' : ''}>${o.label}</option>`).join('')}
                     </select>
                 </td>
                 <td><div class="tp-svc-ctrl" id="tp-svc-ctrl-${t.id}"></div></td>
@@ -1400,8 +1473,16 @@ class DentalChart {
                 const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
                 if (!item) return;
                 item.fdi = e.target.value;
-                const meta = this.allMeta.find(m => m.fdi === item.fdi);
-                item.toothLabel = meta ? meta.name : item.fdi;
+                if (item.fdi === '00') {
+                    item.toothLabel = 'General (non-tooth-specific)';
+                } else {
+                    const fullMeta = [
+                        ...DentalChart.UPPER_META,       ...DentalChart.LOWER_META,
+                        ...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD,
+                    ];
+                    const meta = fullMeta.find(m => m.fdi === item.fdi);
+                    item.toothLabel = meta ? meta.name : item.fdi;
+                }
             });
         });
         wrap.querySelectorAll('.tp-surf-edit').forEach(el => {
@@ -1441,6 +1522,37 @@ class DentalChart {
             const container = document.getElementById(`tp-svc-ctrl-${t.id}`);
             if (!container) return;
 
+            const handleChange = async (ctrl) => {
+                const val = ctrl.get_value();
+                if (!val) {
+                    if (t.serviceId !== null) { t.serviceId = null; this._renderTreatmentPlan(); }
+                    return;
+                }
+                if (val === t.serviceId) return;   // guard against re-fetch loops from programmatic set_value
+
+                try {
+                    const doc = await frappe.db.get_doc('Treatment Service', val);
+                    console.log('[DentalChart] Treatment Service doc for', val, '→', doc);
+
+                    const label = doc.service_name || doc.title || doc.procedure_name || doc.description || val;
+                    const priceRaw = (doc.price !== undefined ? doc.price
+                        : doc.rate !== undefined ? doc.rate
+                        : doc.standard_rate !== undefined ? doc.standard_rate
+                        : doc.amount !== undefined ? doc.amount
+                        : doc.cost !== undefined ? doc.cost
+                        : 0);
+
+                    t.serviceId = val;
+                    t.service   = label;
+                    t.price     = parseFloat(priceRaw) || 0;
+                } catch (err) {
+                    console.error('[DentalChart] Failed to fetch Treatment Service', val, err);
+                    t.serviceId = val;
+                    t.service   = val;
+                }
+                this._renderTreatmentPlan();
+            };
+
             const ctrl = frappe.ui.form.make_control({
                 parent: $(container),
                 df: {
@@ -1448,31 +1560,15 @@ class DentalChart {
                     options    : 'Treatment Service',   // ← change this if your doctype is named differently
                     fieldname  : 'treatment_service',
                     placeholder: 'Search service…',
+                    onchange   : () => handleChange(ctrl),
                 },
                 render_input: true,
             });
             ctrl.refresh();
             if (t.serviceId) ctrl.set_value(t.serviceId);
 
-            ctrl.$input.on('change', async () => {
-                const val = ctrl.get_value();
-                if (!val) {
-                    t.serviceId = null;
-                    return;
-                }
-                try {
-                    const res    = await frappe.db.get_value('Treatment Service', val, ['service_name', 'price']);
-                    const svcDoc = (res && res.message) ? res.message : {};
-                    t.serviceId = val;
-                    t.service   = svcDoc.service_name || val;
-                    t.price     = parseFloat(svcDoc.price) || 0;
-                } catch (err) {
-                    console.error('[DentalChart] Failed to fetch service details:', err);
-                    t.serviceId = val;
-                    t.service   = val;
-                }
-                this._renderTreatmentPlan();
-            });
+            /* Backup binding — some Frappe versions only fire this, not df.onchange */
+            ctrl.$input.on('change', () => handleChange(ctrl));
         });
     }
 
@@ -1538,33 +1634,131 @@ class DentalChart {
     }
 
 
+    /**
+     * Apply (or clear) the currently selected observation on one tooth/surface.
+     * Shared by the palette "apply to selected tooth" flow and by clicking
+     * a surface region directly on the tooth diagram.
+     */
+    _applyStatusToTooth(fdi, surface) {
+        if (!this.selStatus) return;
+        const state = this.teeth[fdi];
+        if (!state) return;
+
+        if (this.selStatus.isHealthy) {
+            if (surface === 'All') {
+                state.conditions = [];
+            } else {
+                state.conditions = state.conditions.filter(c => c.surface !== surface && c.surface !== 'All');
+            }
+        } else {
+            state.addCondition({
+                type   : this.selStatus.id,
+                label  : this.selStatus.label,
+                color  : this.selStatus.color,
+                surface: surface,
+            });
+        }
+        this.render();
+    }
+
     _applyCondition() {
         if (!this.selFDI) {
             frappe.msgprint({ title: 'No Tooth Selected', message: 'Click a tooth first.', indicator: 'orange' });
             return;
         }
-        const surf  = this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase();
-        const state = this.teeth[this.selFDI];
-
-        if (this.selCond === 'healthy') {
-            state.conditions = [];
-        } else {
-            state.addCondition(this.selCond, surf);
+        if (!this.selStatus) {
+            frappe.msgprint({ title: 'No Observation Selected', message: 'Pick an observation from the left panel first.', indicator: 'orange' });
+            return;
         }
-        this.render();
+        const surf = this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase();
+        this._applyStatusToTooth(this.selFDI, surf);
+    }
+
+    /** Clicking directly on a tooth surface applies the selected observation right there. */
+    _applyToSurface(fdi, surface) {
+        this.selFDI = fdi;
+        if (!this.selStatus) {
+            frappe.msgprint({ title: 'No Observation Selected', message: 'Pick an observation from the left panel first, then click a surface.', indicator: 'orange' });
+            this.render();
+            return;
+        }
+        this._applyStatusToTooth(fdi, surface);
     }
 
     /* ══════════════════════════════════════════════════════════════════════
        EVENT BINDING
     ══════════════════════════════════════════════════════════════════════*/
 
-    _bindPaletteEvents() {
-        document.querySelectorAll('#dc-root .pal-btn[data-cond]').forEach(btn => {
+    /**
+     * Fetch the observation catalog from the "Tooth Status" doctype and
+     * render it as a clickable, color-coded list in the left palette.
+     */
+    async _loadToothStatuses() {
+        const wrap = document.getElementById('dc-obs-list');
+        if (wrap) wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">Loading observations…</div>`;
+
+        try {
+            this.toothStatusCatalog = await frappe.db.get_list('Tooth Status', {
+                fields            : ['name', 'status_name', 'color'],   // ← adjust fieldnames here if needed
+                limit_page_length : 0,
+                order_by          : 'status_name asc',
+            });
+        } catch (err) {
+            console.error('[DentalChart] Failed to load Tooth Status list:', err);
+            this.toothStatusCatalog = [];
+            frappe.msgprint({
+                title: 'Could not load observations',
+                message: 'Check that the "Tooth Status" doctype exists and is readable.',
+                indicator: 'red',
+            });
+        }
+
+        this._renderObservationList();
+    }
+
+    _renderObservationList() {
+        const wrap = document.getElementById('dc-obs-list');
+        if (!wrap) return;
+
+        if (!this.toothStatusCatalog.length) {
+            wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">No observations found</div>`;
+            return;
+        }
+
+        wrap.innerHTML = this.toothStatusCatalog.map(s => {
+            const label  = s.status_name || s.name;
+            const color  = s.color || '#999999';
+            const active = this.selStatus && this.selStatus.id === s.name;
+            return `<button class="pal-btn obs-btn${active ? ' active' : ''}" data-id="${s.name}" style="color:${color}">
+                        <span class="pal-dot" style="background:${color}"></span>${label}
+                    </button>`;
+        }).join('');
+
+        wrap.querySelectorAll('.obs-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                document.querySelectorAll('#dc-root .pal-btn[data-cond]').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                this.selCond = btn.dataset.cond;
+                const doc = this.toothStatusCatalog.find(s => s.name === btn.dataset.id);
+                if (!doc) return;
+                const label = doc.status_name || doc.name;
+                this.selStatus = {
+                    id       : doc.name,
+                    label    : label,
+                    color    : doc.color || '#999999',
+                    isHealthy: label.trim().toLowerCase() === 'healthy',
+                };
+                this._renderObservationList();
                 if (this.selFDI) this._applyCondition();
+            });
+        });
+    }
+
+    _bindDentitionToggle() {
+        document.querySelectorAll('#dc-root .pal-btn[data-dentition]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#dc-root .pal-btn[data-dentition]').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.dentition = btn.dataset.dentition;
+                this.selFDI    = null;
+                this.render();
             });
         });
     }
@@ -1605,7 +1799,7 @@ class DentalChart {
     _showTip(e, meta) {
         const conds = this.teeth[meta.fdi].conditions;
         const str   = conds.length
-            ? conds.map(c => `${DentalChart.LBL[c.type]} (${c.surface})`).join(', ')
+            ? conds.map(c => `${c.label || c.type} (${c.surface})`).join(', ')
             : 'Healthy';
         this._tip.innerHTML  = `<b>${meta.fdi}</b> · ${meta.name}<br><span style="color:#9ca3af;font-size:10px">${str}</span>`;
         this._tip.style.opacity = '1';
@@ -1622,7 +1816,8 @@ class DentalChart {
     ══════════════════════════════════════════════════════════════════════*/
 
     _resetAllTeeth() {
-        this.allMeta.forEach(m => this.teeth[m.fdi].reset());
+        Object.values(this.teethSets.permanent).forEach(t => t.reset());
+        Object.values(this.teethSets.primary).forEach(t => t.reset());
     }
 }
 
