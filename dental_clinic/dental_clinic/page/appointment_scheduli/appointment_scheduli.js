@@ -48,6 +48,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-allday-cell { padding: 3px 4px; border-right: 1px solid var(--border-color); min-height: 26px; }
             .cal-allday-cell:last-child { border-right: none; }
             .cal-allday-block { background: #B5D4F4; color: #0C447C; border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 500; }
+            .cal-leave-block { background: #E5E7EB; color: #374151; border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 500; cursor: pointer; border: 1px dashed #9CA3AF; margin-bottom: 2px; }
             .cal-body-row { display: grid; }
             .cal-time-col { background: var(--card-bg); border-right: 1px solid var(--border-color); }
             .cal-time-slot { height: 52px; padding: 4px 8px; font-size: 10px; color: var(--text-muted); text-align: right; border-bottom: 1px solid var(--border-color); }
@@ -113,8 +114,12 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     <button class="cal-view-btn" id="view-day">day</button>
                     <button class="cal-view-btn active" id="view-week">week</button>
                 </div>
+                <button class="cal-nav-btn" id="btn-mark-unavailable"
+                    style="margin-left:auto">
+                    Mark Not Available
+                </button>
                 <button class="cal-nav-btn" id="btn-new-appt"
-                    style="background:#1a2340;color:#fff;border-color:#1a2340;margin-left:auto">
+                    style="background:#1a2340;color:#fff;border-color:#1a2340;">
                     + New Appointment
                 </button>
             </div>
@@ -182,6 +187,15 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             appointment_date: from_date,
             practitioner: practitioner_field.get_value(),
             service_unit: service_unit_field.get_value()
+        });
+    });
+
+    // ── Mark Not Available button ───────────────────────────────
+    document.getElementById('btn-mark-unavailable').addEventListener('click', function() {
+        open_leave_dialog({
+            from_date: from_date,
+            to_date: to_date,
+            practitioner: practitioner_field.get_value()
         });
     });
 
@@ -289,7 +303,77 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             callback: function(r) {
                 var appts = r.message || [];
                 render_stats(appts, stats);
-                render_calendar(appts, wrap, f, t);
+                fetch_leaves(f, t, pf, function(leaves_by_date) {
+                    render_calendar(appts, wrap, f, t, leaves_by_date);
+                });
+            }
+        });
+    }
+
+    // ── Fetch practitioner unavailability via Leave Application ──
+    // Practitioners must be linked to an Employee (Healthcare Practitioner → Employee field)
+    // for their leave to show up here.
+    function fetch_leaves(f, t, practitioner_filter, callback) {
+        var prac_filters = [['employee', 'is', 'set']];
+        if (practitioner_filter) prac_filters.push(['name', '=', practitioner_filter]);
+
+        frappe.call({
+            method: 'frappe.client.get_list',
+            args: {
+                doctype: 'Healthcare Practitioner',
+                fields: ['name', 'practitioner_name', 'employee'],
+                filters: prac_filters,
+                limit_page_length: 500
+            },
+            callback: function(pr) {
+                var practitioners = pr.message || [];
+                if (!practitioners.length) { callback({}); return; }
+
+                var emp_to_prac = {};
+                var employees = practitioners.map(function(p) {
+                    emp_to_prac[p.employee] = p;
+                    return p.employee;
+                });
+
+                frappe.call({
+                    method: 'frappe.client.get_list',
+                    args: {
+                        doctype: 'Leave Application',
+                        fields: [
+                            'name', 'employee', 'employee_name', 'leave_type',
+                            'from_date', 'to_date', 'half_day', 'description', 'status'
+                        ],
+                        filters: [
+                            ['employee', 'in', employees],
+                            ['status', '=', 'Approved'],
+                            ['from_date', '<=', t],
+                            ['to_date', '>=', f]
+                        ],
+                        limit_page_length: 500
+                    },
+                    callback: function(lr) {
+                        var leaves = lr.message || [];
+                        var leaves_by_date = {};
+                        leaves.forEach(function(lv) {
+                            var start = lv.from_date > f ? lv.from_date : f;
+                            var end   = lv.to_date   < t ? lv.to_date   : t;
+                            var d = start;
+                            while (d <= end) {
+                                if (!leaves_by_date[d]) leaves_by_date[d] = [];
+                                var prac = emp_to_prac[lv.employee] || {};
+                                leaves_by_date[d].push({
+                                    name: lv.name,
+                                    practitioner_name: prac.practitioner_name || lv.employee_name,
+                                    leave_type: lv.leave_type,
+                                    description: lv.description,
+                                    half_day: lv.half_day
+                                });
+                                d = frappe.datetime.add_days(d, 1);
+                            }
+                        });
+                        callback(leaves_by_date);
+                    }
+                });
             }
         });
     }
@@ -308,7 +392,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Calendar grid ──────────────────────────────────────────
-    function render_calendar(appts, wrap, f, t) {
+    function render_calendar(appts, wrap, f, t, leaves_by_date) {
+        leaves_by_date = leaves_by_date || {};
         var dates    = get_week_dates(f, t);
         var today    = frappe.datetime.get_today();
         var grid_tpl = '60px ' + dates.map(function() { return '1fr'; }).join(' ');
@@ -347,6 +432,16 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         html += '<div class="cal-allday-lbl">all-day</div>';
         dates.forEach(function(d) {
             html += '<div class="cal-allday-cell">';
+            if (leaves_by_date[d]) {
+                leaves_by_date[d].forEach(function(lv) {
+                    html += '<div class="cal-leave-block" data-leave="' + lv.name + '" title="'
+                        + (lv.description || lv.leave_type || '') + '">'
+                        + '🚫 ' + lv.practitioner_name
+                        + (lv.leave_type ? ' \u2022 ' + lv.leave_type : '')
+                        + (lv.half_day ? ' (half day)' : '')
+                        + '</div>';
+                });
+            }
             if (allday[d]) {
                 allday[d].forEach(function(a) {
                     html += '<div class="cal-allday-block">'
@@ -393,6 +488,14 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 e.stopPropagation();
                 var a = appts.find(function(x) { return x.name === el.dataset.name; });
                 if (a) show_modal(a);
+            });
+        });
+
+        // Click a "not available" block → open the Leave Application record
+        wrap.querySelectorAll('.cal-leave-block[data-leave]').forEach(function(el) {
+            el.addEventListener('click', function(e) {
+                e.stopPropagation();
+                frappe.set_route('Form', 'Leave Application', el.dataset.leave);
             });
         });
 
@@ -506,6 +609,94 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     }
                 });
         }
+    }
+
+    // ── Mark Not Available dialog (creates a Leave Application) ──
+    function open_leave_dialog(prefill) {
+        prefill = prefill || {};
+
+        var dialog = new frappe.ui.Dialog({
+            title: 'Mark Practitioner Not Available',
+            fields: [
+                {
+                    fieldtype: 'Link', fieldname: 'practitioner', label: 'Practitioner',
+                    options: 'Healthcare Practitioner', reqd: 1,
+                    default: prefill.practitioner || '',
+                    description: 'Practitioner must be linked to an Employee record to be marked unavailable.'
+                },
+                {
+                    fieldtype: 'Link', fieldname: 'leave_type', label: 'Reason / Leave Type',
+                    options: 'Leave Type', reqd: 1
+                },
+                { fieldtype: 'Column Break' },
+                {
+                    fieldtype: 'Date', fieldname: 'from_date', label: 'From Date',
+                    reqd: 1, default: prefill.from_date || frappe.datetime.get_today()
+                },
+                {
+                    fieldtype: 'Date', fieldname: 'to_date', label: 'To Date',
+                    reqd: 1, default: prefill.to_date || prefill.from_date || frappe.datetime.get_today()
+                },
+                { fieldtype: 'Check', fieldname: 'half_day', label: 'Half Day' },
+                { fieldtype: 'Section Break' },
+                { fieldtype: 'Small Text', fieldname: 'description', label: 'Notes' }
+            ],
+            primary_action_label: 'Mark Unavailable',
+            primary_action: function(values) {
+                frappe.db.get_value('Healthcare Practitioner', values.practitioner, 'employee')
+                    .then(function(r) {
+                        var employee = r && r.message && r.message.employee;
+                        if (!employee) {
+                            frappe.msgprint({
+                                title: 'No Employee Linked',
+                                message: 'This practitioner is not linked to an Employee record, so a leave cannot be created for them. Link one in the Healthcare Practitioner master first.',
+                                indicator: 'red'
+                            });
+                            return;
+                        }
+
+                        frappe.call({
+                            method: 'frappe.client.insert',
+                            args: {
+                                doc: {
+                                    doctype: 'Leave Application',
+                                    employee: employee,
+                                    leave_type: values.leave_type,
+                                    from_date: values.from_date,
+                                    to_date: values.to_date,
+                                    half_day: values.half_day,
+                                    description: values.description
+                                }
+                            },
+                            freeze: true,
+                            freeze_message: 'Marking unavailable…',
+                            callback: function(ir) {
+                                var leave_name = ir.message && ir.message.name;
+                                if (!leave_name) return;
+                                // Attempt to submit so it takes effect immediately.
+                                // If the company requires leave approval, this may fail —
+                                // that's fine, it's saved as a pending request either way.
+                                frappe.call({
+                                    method: 'frappe.client.submit',
+                                    args: { doc: ir.message },
+                                    callback: function() {
+                                        frappe.show_alert({ message: 'Marked unavailable (' + leave_name + ')', indicator: 'green' });
+                                        dialog.hide();
+                                        load_schedule();
+                                    },
+                                    error: function() {
+                                        frappe.show_alert({ message: leave_name + ' saved, pending approval', indicator: 'orange' });
+                                        dialog.hide();
+                                        load_schedule();
+                                    }
+                                });
+                            }
+                        });
+                    });
+            }
+        });
+
+        dialog.show();
     }
 
     // ── Detail modal ───────────────────────────────────────────
