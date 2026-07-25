@@ -1314,12 +1314,47 @@ class DentalChart {
 
         const planItems = this.treatmentPlan;
 
+        /* IMPORTANT: a Treatment Service's own id (e.g. "crown") is NOT a
+           valid Sales Invoice item_code unless it's genuinely linked to a
+           real Item record. Setting an item_code that doesn't exist as an
+           Item crashes ERPNext's price-list lookup (AttributeError: 'NoneType'
+           object has no attribute 'name' in apply_price_list). So: only use
+           item_code when we can confirm a linked Item actually exists —
+           otherwise leave it blank and let the person pick a real Item in
+           the form themselves. */
+        const itemCodeCache = {};
+        for (const t of planItems) {
+            if (!t.serviceId || Object.prototype.hasOwnProperty.call(itemCodeCache, t.serviceId)) continue;
+            let linkedItemCode = null;
+            try {
+                const svcDoc = await frappe.db.get_doc('Treatment Service', t.serviceId);
+                const candidate = svcDoc.item || svcDoc.item_code || svcDoc.sales_item || svcDoc.linked_item || null;
+                if (candidate) {
+                    /* Confirm it's a real, existing Item before trusting it */
+                    const exists = await frappe.db.exists('Item', candidate);
+                    if (exists) linkedItemCode = candidate;
+                }
+            } catch (err) {
+                console.warn('[DentalChart] Could not resolve a linked Item for Treatment Service', t.serviceId, err);
+            }
+            itemCodeCache[t.serviceId] = linkedItemCode;
+        }
+
+        let anyMissingItemCode = false;
+
         frappe.new_doc('Sales Invoice', {}, (doc) => {
             if (customerId) doc.customer = customerId;
 
             planItems.forEach(t => {
                 const row = frappe.model.add_child(doc, 'Sales Invoice Item', 'items');
-                if (t.serviceId) row.item_code = t.serviceId;   // ← assumes Treatment Service names line up with Item codes
+                const linkedItemCode = t.serviceId ? itemCodeCache[t.serviceId] : null;
+
+                if (linkedItemCode) {
+                    row.item_code = linkedItemCode;
+                } else {
+                    anyMissingItemCode = true;
+                }
+
                 row.item_name   = t.service || 'Service';
                 row.description = 'Tooth ' + (t.fdi === '00' ? 'General' : t.fdi)
                     + (t.surface && t.surface !== 'All' ? ` · Surface ${t.surface}` : '')
@@ -1329,7 +1364,15 @@ class DentalChart {
             });
         });
 
-        frappe.show_alert({ message: 'Draft Sales Invoice created from the treatment plan — review and save.', indicator: 'blue' });
+        if (anyMissingItemCode) {
+            frappe.msgprint({
+                title    : 'Select Items Manually',
+                message  : 'One or more treatment plan services aren\'t linked to a real Item yet, so those rows were left without an Item Code. Please pick the correct Item for those rows before saving — leaving an invalid code in place can crash the price list lookup.',
+                indicator: 'orange',
+            });
+        } else {
+            frappe.show_alert({ message: 'Draft Sales Invoice created from the treatment plan — review and save.', indicator: 'blue' });
+        }
     }
 
     /* ══════════════════════════════════════════════════════════════════════
