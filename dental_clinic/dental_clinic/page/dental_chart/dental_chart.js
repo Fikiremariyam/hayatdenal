@@ -380,8 +380,9 @@ class ToothState {
     }
 
     /**
-     * Populate from a Dental Chart Tooth child-table row (fetched from DocType).
+     * Populate from a "Condition summary child table" row.
      * @param {Object} row  – one item from doc.condition_summary
+     *        Fields: fdi, name1, condition, surface, notes
      * @param {Array}  [catalog] – the Tooth Status catalog, used to recover the
      *        original color for a saved condition label when possible.
      */
@@ -396,26 +397,18 @@ class ToothState {
                 surface: row.surface || 'All',
             });
         }
-        if (row.mobility    && row.mobility    !== '0') this.mobility    = row.mobility;
-        if (row.furcation   && row.furcation   !== '—') this.furcation   = row.furcation;
-        if (row.sensitivity && row.sensitivity !== 'None') this.sensitivity = row.sensitivity;
         if (row.notes) this.notes = row.notes;
     }
 
-    /** Serialize to a Dental Chart Tooth child-table row object. */
-    toDocRow(arch) {
+    /** Serialize to a "Condition summary child table" row object. */
+    toDocRow() {
         return {
-            doctype          : 'Dental Chart Tooth',
-            tooth_fdi        : this.fdi,
-            tooth_universal  : this.uni,
-            tooth_name_label : this.name,
-            arch,
-            condition        : this.conditions[0] ? (this.conditions[0].label || this.conditions[0].type) : 'Healthy',
-            surface          : this.conditions[0] ? this.conditions[0].surface : 'All',
-            mobility         : this.mobility,
-            furcation        : this.furcation,
-            sensitivity      : this.sensitivity,
-            notes            : this.notes || '',
+            doctype  : 'Condition summary child table',
+            fdi      : this.fdi,
+            name1    : this.name,
+            condition: this.conditions[0] ? (this.conditions[0].label || this.conditions[0].type) : 'Healthy',
+            surface  : this.conditions[0] ? this.conditions[0].surface : 'All',
+            notes    : this.notes || '',
         };
     }
 }
@@ -946,7 +939,7 @@ class DentalChart {
             /* Get list of charts for this patient, newest first */
             const list = await frappe.db.get_list('Dental charting', {
                 filters : { patient: patientId },
-                fields  : ['name', 'chart_date', 'provider', 'clinical_notes', 'treatment_plan'],
+                fields  : ['name', 'chart_date', 'provider', 'clinical_notes'],
                 order_by: 'chart_date desc',
                 limit   : 1,
             });
@@ -990,26 +983,39 @@ class DentalChart {
             const clinicalEl = document.getElementById('dc-notes-clinical');
             if (clinicalEl) clinicalEl.value = doc.clinical_notes || '';
 
-            /* Restore treatment plan — a real child table (fieldname: treatment_plan) */
+            /* Restore treatment plan — a real child table (fieldname: treatment_plan)
+               Fields: tooth_fdi, service, surface, price, status, date */
             const fullMeta = [
                 ...DentalChart.UPPER_META,       ...DentalChart.LOWER_META,
                 ...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD,
             ];
-            this.treatmentPlan = (doc.treatment_plan || []).map(row => {
-                const fdi  = row.tooth_fdi || row.tooth || '00';
+            this.treatmentPlan = await Promise.all((doc.treatment_plan || []).map(async row => {
+                const fdi  = row.tooth_fdi || '00';
                 const meta = fullMeta.find(m => m.fdi === fdi);
+
+                /* Only the Link id is stored — fetch its label for display */
+                let serviceLabel = row.service || '';
+                if (row.service) {
+                    try {
+                        const res = await frappe.db.get_value('Treatment Service', row.service, 'service_name');
+                        serviceLabel = (res && res.message && res.message.service_name) || row.service;
+                    } catch (e) {
+                        console.warn('[DentalChart] Could not resolve service label for', row.service, e);
+                    }
+                }
+
                 return {
                     id        : 'tp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
                     fdi       : fdi,
                     toothLabel: fdi === '00' ? 'General (non-tooth-specific)' : (meta ? meta.name : fdi),
-                    service   : row.service_name || row.service || '',
+                    service   : serviceLabel,
                     serviceId : row.service || null,
                     price     : parseFloat(row.price) || 0,
                     surface   : row.surface || 'All',
                     status    : row.status || 'Planned',
                     date      : row.date || frappe.datetime.get_today(),
                 };
-            });
+            }));
 
             /* Restore provider into link control and banner */
             if (doc.provider) {
@@ -1017,9 +1023,10 @@ class DentalChart {
             }
 
             /* Restore per-tooth conditions — a real child table (fieldname: condition_summary).
+               Fields: fdi, name1, condition, surface, notes.
                Look across both dentition sets since permanent/primary FDI codes never overlap. */
             (doc.condition_summary || []).forEach(row => {
-                const state = this.teethSets.permanent[row.tooth_fdi] || this.teethSets.primary[row.tooth_fdi];
+                const state = this.teethSets.permanent[row.fdi] || this.teethSets.primary[row.fdi];
                 if (state) state.loadFromDocRow(row, this.toothStatusCatalog);
             });
 
@@ -1101,7 +1108,7 @@ class DentalChart {
        DOCTYPE  ──  SAVE (Insert new chart OR update existing chart)
     ══════════════════════════════════════════════════════════════════════*/
 
-    save() {
+    async save() {
         const patientId = this.patient.value || frappe.utils.get_query_params().patient;
 
         if (!patientId) {
@@ -1115,120 +1122,120 @@ class DentalChart {
 
         /* Build "Condition summary" child-table rows – one row per condition
            per tooth, across BOTH dentitions (permanent + primary), since FDI
-           codes never collide between the two sets. */
+           codes never collide between the two sets.
+           Fields: fdi, name1, condition, surface, notes */
         const conditionRows = [];
         const fullMeta = [
             ...DentalChart.UPPER_META,       ...DentalChart.LOWER_META,
             ...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD,
         ];
-        const upperFdis = new Set([...DentalChart.UPPER_META, ...DentalChart.UPPER_META_CHILD].map(m => m.fdi));
 
         fullMeta.forEach(meta => {
             const state = this.teethSets.permanent[meta.fdi] || this.teethSets.primary[meta.fdi];
             if (!state) return;
-            const arch = upperFdis.has(meta.fdi) ? 'Upper' : 'Lower';
 
             if (!state.conditions.length) {
                 /* Save healthy teeth too so the chart is complete */
                 conditionRows.push({
-                    doctype          : 'Dental Chart Tooth',   // ← adjust child doctype name if different
-                    tooth_fdi        : state.fdi,
-                    tooth_universal  : state.uni,
-                    tooth_name_label : state.name,
-                    arch,
-                    condition        : 'Healthy',
-                    surface          : 'All',
-                    mobility         : state.mobility,
-                    furcation        : state.furcation,
-                    sensitivity      : state.sensitivity,
-                    notes            : state.notes || '',
+                    doctype  : 'Condition summary child table',
+                    fdi      : state.fdi,
+                    name1    : state.name,
+                    condition: 'Healthy',
+                    surface  : 'All',
+                    notes    : state.notes || '',
                 });
             } else {
                 state.conditions.forEach(c => {
                     conditionRows.push({
-                        doctype          : 'Dental Chart Tooth',   // ← adjust child doctype name if different
-                        tooth_fdi        : state.fdi,
-                        tooth_universal  : state.uni,
-                        tooth_name_label : state.name,
-                        arch,
-                        condition        : c.label || c.type,
-                        surface          : c.surface,
-                        mobility         : state.mobility,
-                        furcation        : state.furcation,
-                        sensitivity      : state.sensitivity,
-                        notes            : state.notes || '',
+                        doctype  : 'Condition summary child table',
+                        fdi      : state.fdi,
+                        name1    : state.name,
+                        condition: c.label || c.type,
+                        surface  : c.surface,
+                        notes    : state.notes || '',
                     });
                 });
             }
         });
 
-        /* Build "Treatment plan" child-table rows */
+        /* Build "Treatment plan" child-table rows.
+           Fields: tooth_fdi, service, surface, price, status, date */
         const treatmentPlanRows = this.treatmentPlan.map(t => ({
-            doctype     : 'Treatment Plan Item',   // ← adjust child doctype name if different
-            tooth_fdi   : t.fdi,
-            service     : t.serviceId || undefined,
-            service_name: t.service,
-            surface     : t.surface,
-            price       : t.price,
-            status      : t.status,
-            date        : t.date,
+            doctype  : 'Treatment plan',
+            tooth_fdi: t.fdi,
+            service  : t.serviceId || undefined,
+            surface  : t.surface,
+            price    : t.price,
+            status   : t.status,
+            date     : t.date,
         }));
 
         const providerVal   = this.patient.providerValue || this.patient.provider || '';
         const clinicalNotes = (document.getElementById('dc-notes-clinical') || {}).value || '';
 
-        if (this.savedChartName) {
-            /* ── UPDATE existing chart ──────────────────────────────────────
-               frappe.client.save expects a full doc object including name.
-            ────────────────────────────────────────────────────────────────*/
-            frappe.call({
-                method  : 'frappe.client.save',
-                args    : {
-                    doc: {
-                        doctype          : 'Dental charting',
-                        name             : this.savedChartName,
-                        patient          : patientId,
-                        chart_date       : frappe.datetime.get_today(),
-                        provider         : providerVal,
-                        status           : this.chartStatus,
-                        clinical_notes   : clinicalNotes,
-                        treatment_plan   : treatmentPlanRows,
-                        condition_summary: conditionRows,
+        try {
+            if (this.savedChartName) {
+                /* ── UPDATE existing chart ──────────────────────────────────────
+                   frappe.client.save needs the FULL document — saving a partial
+                   object here was the bug: fields we don't manage (or even ones
+                   we do, on some Frappe versions) would get wiped out instead of
+                   updated. Fetch the real doc first, mutate it, then save it whole.
+                ────────────────────────────────────────────────────────────────*/
+                const existing = await frappe.db.get_doc('Dental charting', this.savedChartName);
+                existing.patient           = patientId;
+                existing.chart_date        = frappe.datetime.get_today();
+                existing.provider          = providerVal;
+                existing.status            = this.chartStatus;
+                existing.clinical_notes    = clinicalNotes;
+                existing.treatment_plan    = treatmentPlanRows;
+                existing.condition_summary = conditionRows;
+
+                frappe.call({
+                    method  : 'frappe.client.save',
+                    args    : { doc: existing },
+                    callback: (r) => {
+                        if (r.message) {
+                            _set('dc-pt-badge', r.message.name);
+                            frappe.show_alert({ message: `Updated: ${r.message.name}`, indicator: 'green' });
+                        }
                     },
-                },
-                callback: (r) => {
-                    if (r.message) {
-                        _set('dc-pt-badge', r.message.name);
-                        frappe.show_alert({ message: `Updated: ${r.message.name}`, indicator: 'green' });
-                    }
-                },
-            });
-        } else {
-            /* ── CREATE new chart ───────────────────────────────────────────
-               Insert a fresh Dental charting document.
-            ────────────────────────────────────────────────────────────────*/
-            frappe.call({
-                method  : 'frappe.client.insert',
-                args    : {
-                    doc: {
-                        doctype          : 'Dental charting',
-                        patient          : patientId,
-                        chart_date       : frappe.datetime.get_today(),
-                        provider         : providerVal,
-                        status           : this.chartStatus,
-                        clinical_notes   : clinicalNotes,
-                        treatment_plan   : treatmentPlanRows,
-                        condition_summary: conditionRows,
+                    error: (r) => {
+                        console.error('[DentalChart] save (update) failed:', r);
                     },
-                },
-                callback: (r) => {
-                    if (r.message) {
-                        this.savedChartName = r.message.name;
-                        _set('dc-pt-badge', r.message.name);
-                        frappe.show_alert({ message: `Saved: ${r.message.name}`, indicator: 'green' });
-                    }
-                },
-            });
+                });
+            } else {
+                /* ── CREATE new chart ───────────────────────────────────────────
+                   Insert a fresh Dental charting document.
+                ────────────────────────────────────────────────────────────────*/
+                frappe.call({
+                    method  : 'frappe.client.insert',
+                    args    : {
+                        doc: {
+                            doctype          : 'Dental charting',
+                            patient          : patientId,
+                            chart_date       : frappe.datetime.get_today(),
+                            provider         : providerVal,
+                            status           : this.chartStatus,
+                            clinical_notes   : clinicalNotes,
+                            treatment_plan   : treatmentPlanRows,
+                            condition_summary: conditionRows,
+                        },
+                    },
+                    callback: (r) => {
+                        if (r.message) {
+                            this.savedChartName = r.message.name;
+                            _set('dc-pt-badge', r.message.name);
+                            frappe.show_alert({ message: `Saved: ${r.message.name}`, indicator: 'green' });
+                        }
+                    },
+                    error: (r) => {
+                        console.error('[DentalChart] save (insert) failed:', r);
+                    },
+                });
+            }
+        } catch (err) {
+            console.error('[DentalChart] save failed:', err);
+            frappe.msgprint({ title: 'Save Error', message: String(err), indicator: 'red' });
         }
     }
 
