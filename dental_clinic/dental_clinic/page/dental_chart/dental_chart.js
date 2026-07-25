@@ -937,7 +937,7 @@ class DentalChart {
         });
         try {
             /* Get list of charts for this patient, newest first */
-            const list = await frappe.db.get_list('Dental charting', {
+            const list = await frappe.db.get_list('Dental charting_', {
                 filters : { patient: patientId },
                 fields  : ['name', 'chart_date', 'provider', 'clinical_notes'],
                 order_by: 'chart_date desc',
@@ -965,7 +965,7 @@ class DentalChart {
      */
     async _loadChartByName(chartName) {
         try {
-            const doc = await frappe.db.get_doc('Dental charting', chartName);
+            const doc = await frappe.db.get_doc('Dental charting_', chartName);
 
             /* Reset first so stale data is cleared (both dentitions) */
             this._resetAllTeeth();
@@ -1057,7 +1057,7 @@ class DentalChart {
         }
 
         try {
-            const list = await frappe.db.get_list('Dental charting', {
+            const list = await frappe.db.get_list('Dental charting_', {
                 filters : { patient: patientId },
                 fields  : ['name', 'chart_date', 'provider'],
                 order_by: 'chart_date desc',
@@ -1181,7 +1181,7 @@ class DentalChart {
                    we do, on some Frappe versions) would get wiped out instead of
                    updated. Fetch the real doc first, mutate it, then save it whole.
                 ────────────────────────────────────────────────────────────────*/
-                const existing = await frappe.db.get_doc('Dental charting', this.savedChartName);
+                const existing = await frappe.db.get_doc('Dental charting_', this.savedChartName);
                 existing.patient           = patientId;
                 existing.chart_date        = frappe.datetime.get_today();
                 existing.provider          = providerVal;
@@ -1205,13 +1205,13 @@ class DentalChart {
                 });
             } else {
                 /* ── CREATE new chart ───────────────────────────────────────────
-                   Insert a fresh Dental charting document.
+                   Insert a fresh Dental charting_ document.
                 ────────────────────────────────────────────────────────────────*/
                 frappe.call({
                     method  : 'frappe.client.insert',
                     args    : {
                         doc: {
-                            doctype          : 'Dental charting',
+                            doctype          : 'Dental charting_',
                             patient          : patientId,
                             chart_date       : frappe.datetime.get_today(),
                             provider         : providerVal,
