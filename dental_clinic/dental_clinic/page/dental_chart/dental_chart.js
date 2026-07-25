@@ -271,7 +271,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Condition Summary</div>
-          <div style="font-size:10px;color:var(--muted2);margin-left:auto">All recorded conditions · both arches</div>
+          <div style="font-size:10px;color:var(--muted2);margin-left:auto">Edit directly, or add/remove rows below</div>
         </div>
         <div style="padding:10px 14px;overflow-x:auto" id="dc-summary-wrap">
           <div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">
@@ -361,6 +361,7 @@ class ToothState {
         this.conditions = this.conditions.filter(
             c => !(c.type === cond.type && c.surface === cond.surface)
         );
+        if (!cond.uid) cond.uid = 'cond_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
         this.conditions.push(cond);
     }
 
@@ -380,7 +381,7 @@ class ToothState {
 
     /**
      * Populate from a Dental Chart Tooth child-table row (fetched from DocType).
-     * @param {Object} row  – one item from doc.tooth_conditions
+     * @param {Object} row  – one item from doc.condition_summary
      * @param {Array}  [catalog] – the Tooth Status catalog, used to recover the
      *        original color for a saved condition label when possible.
      */
@@ -846,6 +847,8 @@ class DentalChart {
         this.treatmentPlan  = [];
         /* Row ids currently checked in the treatment plan grid (for bulk delete/duplicate) */
         this.selectedIds    = new Set();
+        /* Condition (uid) currently checked in the Condition Summary grid */
+        this.summarySelectedIds = new Set();
 
         /* Which arch set is on screen: 'permanent' or 'primary' (child) */
         this.dentition = 'permanent';
@@ -973,8 +976,9 @@ class DentalChart {
 
             /* Reset first so stale data is cleared (both dentitions) */
             this._resetAllTeeth();
-            this.treatmentPlan = [];
-            this.selectedIds   = new Set();
+            this.treatmentPlan     = [];
+            this.selectedIds       = new Set();
+            this.summarySelectedIds = new Set();
 
             /* Make sure the observation catalog is available so saved condition
                labels can be matched back to their original color. */
@@ -986,21 +990,35 @@ class DentalChart {
             const clinicalEl = document.getElementById('dc-notes-clinical');
             if (clinicalEl) clinicalEl.value = doc.clinical_notes || '';
 
-            /* Restore treatment plan (stored as JSON in the treatment_plan text field) */
-            try {
-                this.treatmentPlan = doc.treatment_plan ? JSON.parse(doc.treatment_plan) : [];
-            } catch (e) {
-                this.treatmentPlan = [];
-            }
+            /* Restore treatment plan — a real child table (fieldname: treatment_plan) */
+            const fullMeta = [
+                ...DentalChart.UPPER_META,       ...DentalChart.LOWER_META,
+                ...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD,
+            ];
+            this.treatmentPlan = (doc.treatment_plan || []).map(row => {
+                const fdi  = row.tooth_fdi || row.tooth || '00';
+                const meta = fullMeta.find(m => m.fdi === fdi);
+                return {
+                    id        : 'tp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+                    fdi       : fdi,
+                    toothLabel: fdi === '00' ? 'General (non-tooth-specific)' : (meta ? meta.name : fdi),
+                    service   : row.service_name || row.service || '',
+                    serviceId : row.service || null,
+                    price     : parseFloat(row.price) || 0,
+                    surface   : row.surface || 'All',
+                    status    : row.status || 'Planned',
+                    date      : row.date || frappe.datetime.get_today(),
+                };
+            });
 
             /* Restore provider into link control and banner */
             if (doc.provider) {
                 this.patient.setProvider(doc.provider);
             }
 
-            /* Restore per-tooth conditions from child table — look across both
-               dentition sets since permanent/primary FDI codes never overlap. */
-            (doc.tooth_conditions || []).forEach(row => {
+            /* Restore per-tooth conditions — a real child table (fieldname: condition_summary).
+               Look across both dentition sets since permanent/primary FDI codes never overlap. */
+            (doc.condition_summary || []).forEach(row => {
                 const state = this.teethSets.permanent[row.tooth_fdi] || this.teethSets.primary[row.tooth_fdi];
                 if (state) state.loadFromDocRow(row, this.toothStatusCatalog);
             });
@@ -1095,10 +1113,10 @@ class DentalChart {
             return;
         }
 
-        /* Build child-table rows – one row per condition per tooth, across
-           BOTH dentitions (permanent + primary), since FDI codes never
-           collide between the two sets. */
-        const rows = [];
+        /* Build "Condition summary" child-table rows – one row per condition
+           per tooth, across BOTH dentitions (permanent + primary), since FDI
+           codes never collide between the two sets. */
+        const conditionRows = [];
         const fullMeta = [
             ...DentalChart.UPPER_META,       ...DentalChart.LOWER_META,
             ...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD,
@@ -1112,8 +1130,8 @@ class DentalChart {
 
             if (!state.conditions.length) {
                 /* Save healthy teeth too so the chart is complete */
-                rows.push({
-                    doctype          : 'Dental Chart Tooth',
+                conditionRows.push({
+                    doctype          : 'Dental Chart Tooth',   // ← adjust child doctype name if different
                     tooth_fdi        : state.fdi,
                     tooth_universal  : state.uni,
                     tooth_name_label : state.name,
@@ -1127,8 +1145,8 @@ class DentalChart {
                 });
             } else {
                 state.conditions.forEach(c => {
-                    rows.push({
-                        doctype          : 'Dental Chart Tooth',
+                    conditionRows.push({
+                        doctype          : 'Dental Chart Tooth',   // ← adjust child doctype name if different
                         tooth_fdi        : state.fdi,
                         tooth_universal  : state.uni,
                         tooth_name_label : state.name,
@@ -1144,9 +1162,20 @@ class DentalChart {
             }
         });
 
+        /* Build "Treatment plan" child-table rows */
+        const treatmentPlanRows = this.treatmentPlan.map(t => ({
+            doctype     : 'Treatment Plan Item',   // ← adjust child doctype name if different
+            tooth_fdi   : t.fdi,
+            service     : t.serviceId || undefined,
+            service_name: t.service,
+            surface     : t.surface,
+            price       : t.price,
+            status      : t.status,
+            date        : t.date,
+        }));
+
         const providerVal   = this.patient.providerValue || this.patient.provider || '';
         const clinicalNotes = (document.getElementById('dc-notes-clinical') || {}).value || '';
-        const treatmentPlan = JSON.stringify(this.treatmentPlan);
 
         if (this.savedChartName) {
             /* ── UPDATE existing chart ──────────────────────────────────────
@@ -1156,15 +1185,15 @@ class DentalChart {
                 method  : 'frappe.client.save',
                 args    : {
                     doc: {
-                        doctype         : 'Dental charting',
-                        name            : this.savedChartName,
-                        patient         : patientId,
-                        chart_date      : frappe.datetime.get_today(),
-                        provider        : providerVal,
-                        status          : this.chartStatus,   // ← adjust fieldname here if your doctype differs
-                        clinical_notes  : clinicalNotes,
-                        treatment_plan  : treatmentPlan,
-                        tooth_conditions: rows,
+                        doctype          : 'Dental charting',
+                        name             : this.savedChartName,
+                        patient          : patientId,
+                        chart_date       : frappe.datetime.get_today(),
+                        provider         : providerVal,
+                        status           : this.chartStatus,
+                        clinical_notes   : clinicalNotes,
+                        treatment_plan   : treatmentPlanRows,
+                        condition_summary: conditionRows,
                     },
                 },
                 callback: (r) => {
@@ -1182,14 +1211,14 @@ class DentalChart {
                 method  : 'frappe.client.insert',
                 args    : {
                     doc: {
-                        doctype         : 'Dental charting',
-                        patient         : patientId,
-                        chart_date      : frappe.datetime.get_today(),
-                        provider        : providerVal,
-                        status          : this.chartStatus,   // ← adjust fieldname here if your doctype differs
-                        clinical_notes  : clinicalNotes,
-                        treatment_plan  : treatmentPlan,
-                        tooth_conditions: rows,
+                        doctype          : 'Dental charting',
+                        patient          : patientId,
+                        chart_date       : frappe.datetime.get_today(),
+                        provider         : providerVal,
+                        status           : this.chartStatus,
+                        clinical_notes   : clinicalNotes,
+                        treatment_plan   : treatmentPlanRows,
+                        condition_summary: conditionRows,
                     },
                 },
                 callback: (r) => {
@@ -1209,11 +1238,12 @@ class DentalChart {
 
     clear() {
         this._resetAllTeeth();
-        this.selFDI         = null;
-        this.savedChartName = null;
-        this.treatmentPlan  = [];
-        this.selectedIds    = new Set();
-        this.chartStatus    = 'Planned';
+        this.selFDI             = null;
+        this.savedChartName     = null;
+        this.treatmentPlan      = [];
+        this.selectedIds        = new Set();
+        this.summarySelectedIds = new Set();
+        this.chartStatus        = 'Planned';
         _set('dc-pt-badge', 'New Chart');
         this._renderChartStatus();
         this.render();
@@ -1387,26 +1417,223 @@ class DentalChart {
     _renderSummary() {
         const wrap = document.getElementById('dc-summary-wrap');
         if (!wrap) return;
-        const rows = [];
+
+        const toothOptions   = this.allMeta.map(m => m.fdi);
+        const surfaceOptions = ['All', 'M', 'O', 'D', 'B', 'L'];
+
+        /* Flatten every condition across the current dentition into rows */
+        const flat = [];
         this.allMeta.forEach(meta => {
             this.teeth[meta.fdi].conditions.forEach(c => {
-                rows.push(`<tr>
-                    <td style="font-family:'DM Mono',monospace;font-weight:600">${meta.fdi}</td>
-                    <td style="color:var(--muted)">${meta.name}</td>
-                    <td><span style="display:inline-flex;align-items:center;gap:5px">
-                        <span style="width:8px;height:8px;border-radius:2px;background:${c.color || '#999'};display:inline-block"></span>
-                        <strong>${c.label || c.type}</strong></span></td>
-                    <td style="font-family:'DM Mono',monospace;color:var(--muted)">${c.surface}</td>
-                    <td style="color:var(--muted)">${this.teeth[meta.fdi].notes || '—'}</td>
-                </tr>`);
+                flat.push({ fdi: meta.fdi, toothLabel: meta.name, cond: c });
             });
         });
-        wrap.innerHTML = rows.length
-            ? `<table class="sum-tbl">
-                 <thead><tr><th>FDI</th><th>Name</th><th>Condition</th><th>Surface</th><th>Notes</th></tr></thead>
-                 <tbody>${rows.join('')}</tbody>
-               </table>`
-            : `<div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">No conditions recorded yet</div>`;
+
+        const nSel = this.summarySelectedIds.size;
+        const allChecked = flat.length > 0 && nSel === flat.length;
+
+        const rows = flat.map((r, idx) => `
+            <tr>
+                <td class="tp-chk-cell"><input type="checkbox" class="cs-row-chk" data-uid="${r.cond.uid}" ${this.summarySelectedIds.has(r.cond.uid) ? 'checked' : ''}></td>
+                <td class="tp-idx-cell">${idx + 1}</td>
+                <td>
+                    <select class="tp-cell-input cs-tooth-edit" data-uid="${r.cond.uid}">
+                        ${toothOptions.map(fdi => `<option value="${fdi}" ${fdi === r.fdi ? 'selected' : ''}>${fdi}</option>`).join('')}
+                    </select>
+                </td>
+                <td>
+                    <select class="tp-cell-input cs-obs-edit" data-uid="${r.cond.uid}">
+                        <option value="">— Select —</option>
+                        ${this.toothStatusCatalog.map(s => `<option value="${s.name}" ${s.name === r.cond.type ? 'selected' : ''}>${s.status_name || s.name}</option>`).join('')}
+                    </select>
+                </td>
+                <td>
+                    <select class="tp-cell-input cs-surf-edit" data-uid="${r.cond.uid}">
+                        ${surfaceOptions.map(s => `<option ${s === r.cond.surface ? 'selected' : ''}>${s}</option>`).join('')}
+                    </select>
+                </td>
+                <td><input type="text" class="tp-cell-input cs-notes-edit" data-fdi="${r.fdi}" value="${(this.teeth[r.fdi].notes || '').replace(/"/g, '&quot;')}" placeholder="Notes…"></td>
+                <td><span class="tp-row-rm cs-row-rm" data-uid="${r.cond.uid}" title="Delete row">🗑</span></td>
+            </tr>`).join('');
+
+        wrap.innerHTML = `
+            <div class="tp-toolbar">
+                <label class="tp-selall-wrap">
+                    <input type="checkbox" id="dc-cs-select-all" ${allChecked ? 'checked' : ''} ${flat.length ? '' : 'disabled'}>
+                    <span>Select All</span>
+                </label>
+                <button class="tp-add-btn" id="dc-cs-add-row-btn">＋ Add Row</button>
+                <button class="tp-add-btn tp-dup-btn" id="dc-cs-dup-btn" ${nSel ? '' : 'disabled'}>⧉ Duplicate${nSel ? ` (${nSel})` : ''}</button>
+                <button class="tp-add-btn tp-del-btn" id="dc-cs-del-btn" ${nSel ? '' : 'disabled'}>🗑 Delete${nSel ? ` (${nSel})` : ''}</button>
+            </div>
+            ${flat.length ? `
+            <table class="sum-tbl tp-grid">
+                <thead>
+                    <tr>
+                        <th style="width:26px"></th>
+                        <th style="width:26px">#</th>
+                        <th style="width:70px">Tooth</th>
+                        <th>Observation</th>
+                        <th style="width:70px">Surface</th>
+                        <th>Notes</th>
+                        <th style="width:26px"></th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>` : `<div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">No conditions recorded yet — click "＋ Add Row" to start</div>`}
+        `;
+
+        this._bindConditionSummaryEvents();
+    }
+
+    /** Find a condition (and its owning ToothState) by its uid, across the current dentition. */
+    _findConditionByUid(uid) {
+        for (const meta of this.allMeta) {
+            const state = this.teeth[meta.fdi];
+            const cond  = state.conditions.find(c => c.uid === uid);
+            if (cond) return { state, cond, fdi: meta.fdi };
+        }
+        return null;
+    }
+
+    _bindConditionSummaryEvents() {
+        const wrap = document.getElementById('dc-summary-wrap');
+        if (!wrap) return;
+
+        const addBtn = document.getElementById('dc-cs-add-row-btn');
+        if (addBtn) addBtn.addEventListener('click', () => this._addBlankConditionRow());
+
+        const dupBtn = document.getElementById('dc-cs-dup-btn');
+        if (dupBtn) dupBtn.addEventListener('click', () => this._duplicateSelectedConditions());
+
+        const delBtn = document.getElementById('dc-cs-del-btn');
+        if (delBtn) delBtn.addEventListener('click', () => this._deleteSelectedConditions());
+
+        const selAll = document.getElementById('dc-cs-select-all');
+        if (selAll) selAll.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                this.allMeta.forEach(meta => this.teeth[meta.fdi].conditions.forEach(c => this.summarySelectedIds.add(c.uid)));
+            } else {
+                this.summarySelectedIds.clear();
+            }
+            this._renderSummary();
+        });
+
+        wrap.querySelectorAll('.cs-row-chk').forEach(el => {
+            el.addEventListener('change', (e) => {
+                if (e.target.checked) this.summarySelectedIds.add(el.dataset.uid);
+                else this.summarySelectedIds.delete(el.dataset.uid);
+                this._renderSummary();
+            });
+        });
+
+        wrap.querySelectorAll('.cs-row-rm').forEach(el => {
+            el.addEventListener('click', () => this._removeConditionByUid(el.dataset.uid));
+        });
+
+        wrap.querySelectorAll('.cs-tooth-edit').forEach(el => {
+            el.addEventListener('change', (e) => this._moveConditionTooth(el.dataset.uid, e.target.value));
+        });
+
+        wrap.querySelectorAll('.cs-obs-edit').forEach(el => {
+            el.addEventListener('change', (e) => this._setConditionObservation(el.dataset.uid, e.target.value));
+        });
+
+        wrap.querySelectorAll('.cs-surf-edit').forEach(el => {
+            el.addEventListener('change', (e) => {
+                const found = this._findConditionByUid(el.dataset.uid);
+                if (found) { found.cond.surface = e.target.value; this.render(); }
+            });
+        });
+
+        wrap.querySelectorAll('.cs-notes-edit').forEach(el => {
+            el.addEventListener('change', (e) => {
+                const state = this.teeth[el.dataset.fdi];
+                if (state) state.notes = e.target.value;
+                this._renderSummary();   // other rows for the same tooth show the same notes value
+            });
+        });
+    }
+
+    /** "+ Add Row" — a blank, unassigned observation waiting to be picked. */
+    _addBlankConditionRow() {
+        const fdi = this.selFDI || (this.allMeta[0] && this.allMeta[0].fdi);
+        if (!fdi) return;
+        this.teeth[fdi].addCondition({ type: '', label: '— Select —', color: '#c8cfd8', surface: 'All' });
+        this.render();
+    }
+
+    _removeConditionByUid(uid) {
+        const found = this._findConditionByUid(uid);
+        if (!found) return;
+        found.state.conditions = found.state.conditions.filter(c => c.uid !== uid);
+        this.summarySelectedIds.delete(uid);
+        this.render();
+    }
+
+    _duplicateSelectedConditions() {
+        if (!this.summarySelectedIds.size) return;
+        this.summarySelectedIds.forEach(uid => {
+            const found = this._findConditionByUid(uid);
+            if (found) {
+                /* Push directly (bypassing addCondition's type+surface dedup) so the copy isn't collapsed back into the original */
+                found.state.conditions.push({
+                    ...found.cond,
+                    uid: 'cond_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+                });
+            }
+        });
+        this.summarySelectedIds = new Set();
+        this.render();
+    }
+
+    _deleteSelectedConditions() {
+        if (!this.summarySelectedIds.size) return;
+        this.allMeta.forEach(meta => {
+            const state = this.teeth[meta.fdi];
+            state.conditions = state.conditions.filter(c => !this.summarySelectedIds.has(c.uid));
+        });
+        this.summarySelectedIds = new Set();
+        this.render();
+    }
+
+    /** Move a condition from its current tooth to a different one, keeping its uid/status/surface. */
+    _moveConditionTooth(uid, newFdi) {
+        const found = this._findConditionByUid(uid);
+        if (!found || found.fdi === newFdi) return;
+        const newState = this.teeth[newFdi];
+        if (!newState) return;
+        found.state.conditions = found.state.conditions.filter(c => c.uid !== uid);
+        newState.conditions.push(found.cond);
+        this.render();
+    }
+
+    /** Change which observation a Condition Summary row represents. Picking "Healthy" removes the row. */
+    _setConditionObservation(uid, statusId) {
+        const found = this._findConditionByUid(uid);
+        if (!found) return;
+
+        if (!statusId) {
+            found.cond.type  = '';
+            found.cond.label = '— Select —';
+            found.cond.color = '#c8cfd8';
+            this.render();
+            return;
+        }
+
+        const doc = this.toothStatusCatalog.find(s => s.name === statusId);
+        if (!doc) return;
+        const label = doc.status_name || doc.name;
+
+        if (label.trim().toLowerCase() === 'healthy') {
+            this._removeConditionByUid(uid);
+            return;
+        }
+
+        found.cond.type  = doc.name;
+        found.cond.label = label;
+        found.cond.color = doc.color || '#999999';
+        this.render();
     }
 
     /* ══════════════════════════════════════════════════════════════════════
