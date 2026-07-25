@@ -11,6 +11,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
    page.set_primary_action("Save Chart",  () => window._dc?.save(),   "save");
    page.add_inner_button("Export JSON",   () => window._dc?.export());
    page.add_inner_button("Load History",  () => window._dc?.loadChartHistory());
+   page.add_inner_button("Create Sales Invoice", () => window._dc?.createSalesInvoice(), "Create");
    page.add_inner_button("Clear Chart",   () => {
        frappe.confirm("Clear all charting data for this session?", () => {
            window._dc?.clear();
@@ -43,7 +44,8 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .dc-pt-name    { font-size:15px;font-weight:700; }
 #dc-root .dc-pt-meta    { display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted); }
 #dc-root .dc-pt-meta b  { color:var(--text);font-weight:600; }
-#dc-root .dc-pt-badge   { margin-left:auto;background:var(--accent-light);color:var(--accent);font-size:10px;font-weight:600;padding:3px 10px;border-radius:20px;letter-spacing:.04em; }
+#dc-root .dc-pt-badge   { background:var(--accent-light);color:var(--accent);font-size:10px;font-weight:600;padding:3px 10px;border-radius:20px;letter-spacing:.04em; }
+#dc-root .dc-status-select { margin-left:auto;border:none;border-radius:20px;padding:4px 26px 4px 12px;font-size:11px;font-weight:700;letter-spacing:.02em;cursor:pointer;outline:none;font-family:inherit;appearance:none;-webkit-appearance:none;background-repeat:no-repeat;background-position:right 10px center;background-size:9px;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%23ffffff' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>"); }
 /* sidebar */
 #dc-root .pal-section   { padding:11px 12px 7px; }
 #dc-root .pal-label     { font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted2);margin-bottom:7px;display:block; }
@@ -175,10 +177,16 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
     <div class="dc-doc-name" id="dc-doc-name"> </div>
 
     <div class="dc-pt-meta">
-      <div>perio exam: <b id="dc-pt-dob">—</b></div>
-      <div>Provider: <b id="dc-pt-prov">—</b></div>
       <div>Date: <b id="dc-pt-date"></b></div>
     </div>
+
+    <select class="dc-status-select" id="dc-chart-status">
+      <option value="Planned">Planned</option>
+      <option value="Approved">Approved</option>
+      <option value="To Bill">To Bill</option>
+      <option value="Billed">Billed</option>
+      <option value="Completed">Completed</option>
+    </select>
 
     <div class="dc-pt-badge" id="dc-pt-badge">New Chart</div>
   
@@ -444,16 +452,16 @@ class PatientInfo {
             if (val && this._onChangeCb) this._onChangeCb(val);
         });
 
-        /* Provider (Healthcare Practitioner) link control */
+        /* Provider (Healthcare Practitioner) link control — bare input, no label */
         this.provider_ctrl = frappe.ui.form.make_control({
             parent: $('.dc-doc-name'),
             df: {
                 fieldtype  : 'Link',
                 options    : 'Healthcare Practitioner',
-                label      : 'Provider',
                 fieldname  : 'provider',
                 placeholder: 'Search provider name or ID…',
             },
+            only_input  : true,
             render_input: true,
         });
 
@@ -461,7 +469,6 @@ class PatientInfo {
             const providerVal = this.provider_ctrl.get_value();
             if (providerVal) {
                 this.provider = providerVal;
-                _set('dc-pt-prov', providerVal);
                 if (this._onProviderChangeCb) this._onProviderChangeCb(providerVal);
             }
         });
@@ -503,7 +510,6 @@ class PatientInfo {
         if (!providerId) return;
         this.provider = providerId;
         this.provider_ctrl.set_value(providerId);
-        _set('dc-pt-prov', providerId);
     }
 
     /**
@@ -517,15 +523,9 @@ class PatientInfo {
             this.id       = doc.name;
             this.fullName = doc.patient_name || patientId;
             this.dob      = doc.dob ? frappe.datetime.str_to_user(doc.dob) : '—';
-            this._renderBanner();
         } catch (err) {
             console.warn('[DentalChart] PatientInfo.load failed:', err);
         }
-    }
-
-    _renderBanner() {
-        _set('dc-pt-dob',  this.dob);
-        _set('dc-pt-prov', this.provider);
     }
 }
 
@@ -816,6 +816,15 @@ class DentalChart {
         primary  : ['51', '81'],
     };
 
+    /* Colors for the overall chart status pill in the top bar */
+    static STATUS_COLORS = {
+        'Planned'   : '#f39c12',
+        'Approved'  : '#3498db',
+        'To Bill'   : '#8e44ad',
+        'Billed'    : '#16a085',
+        'Completed' : '#27ae60',
+    };
+
 
     static COL = {
         healthy:'#27ae60', missing:'#95a5a6', implant:'#27ae60',
@@ -864,6 +873,9 @@ class DentalChart {
         /* Saved chart name (after first save) */
         this.savedChartName = null;
 
+        /* Overall chart status shown in the top bar */
+        this.chartStatus = 'Planned';
+
         /* Tooltip element (already in HTML) */
         this._tip = document.getElementById('dc-tip');
     }
@@ -885,7 +897,9 @@ class DentalChart {
         this.patient.onChange(async (patientId) => {
             await this.patient.load(patientId);
             this.savedChartName = null;
+            this.chartStatus    = 'Planned';
             _set('dc-pt-badge', 'New Chart');
+            this._renderChartStatus();
             await this._loadLatestChart(patientId);
         });
 
@@ -909,6 +923,8 @@ class DentalChart {
         this._bindDentitionToggle();
         this._bindNumberingToggle();
         this._bindTooltip();
+        this._bindChartStatus();
+        this._renderChartStatus();
 
         /* Initial render */
         this.render();
@@ -989,9 +1005,11 @@ class DentalChart {
                 if (state) state.loadFromDocRow(row, this.toothStatusCatalog);
             });
 
-            /* Track the loaded chart name */
+            /* Track the loaded chart name and status */
             this.savedChartName = doc.name;
+            this.chartStatus    = doc.status && DentalChart.STATUS_COLORS[doc.status] ? doc.status : 'Planned';
             _set('dc-pt-badge', doc.name);
+            this._renderChartStatus();
 
             this.render();
             frappe.show_alert({ message: `Chart loaded: ${doc.name}`, indicator: 'green' });
@@ -1143,6 +1161,7 @@ class DentalChart {
                         patient         : patientId,
                         chart_date      : frappe.datetime.get_today(),
                         provider        : providerVal,
+                        status          : this.chartStatus,   // ← adjust fieldname here if your doctype differs
                         clinical_notes  : clinicalNotes,
                         treatment_plan  : treatmentPlan,
                         tooth_conditions: rows,
@@ -1167,6 +1186,7 @@ class DentalChart {
                         patient         : patientId,
                         chart_date      : frappe.datetime.get_today(),
                         provider        : providerVal,
+                        status          : this.chartStatus,   // ← adjust fieldname here if your doctype differs
                         clinical_notes  : clinicalNotes,
                         treatment_plan  : treatmentPlan,
                         tooth_conditions: rows,
@@ -1193,7 +1213,9 @@ class DentalChart {
         this.savedChartName = null;
         this.treatmentPlan  = [];
         this.selectedIds    = new Set();
+        this.chartStatus    = 'Planned';
         _set('dc-pt-badge', 'New Chart');
+        this._renderChartStatus();
         this.render();
     }
 
@@ -1222,6 +1244,55 @@ class DentalChart {
             download: `dental_chart_${this.patient.value || 'unknown'}.json`,
         }).click();
         URL.revokeObjectURL(url);
+    }
+
+    /**
+     * Build a new, unsaved Sales Invoice prefilled with one line per
+     * treatment plan item (service, tooth/surface as description, price).
+     * Opens the standard Sales Invoice form so the person can review,
+     * fix any item-code mapping, and save it themselves — rather than
+     * inserting blind, which could fail on mandatory fields we can't
+     * predict (tax templates, price lists, item codes, etc).
+     */
+    async createSalesInvoice() {
+        const patientId = this.patient.value || frappe.utils.get_query_params().patient;
+
+        if (!patientId) {
+            frappe.msgprint({ title: 'No Patient Selected', message: 'Select a patient before creating an invoice.', indicator: 'orange' });
+            return;
+        }
+        if (!this.treatmentPlan.length) {
+            frappe.msgprint({ title: 'Treatment Plan Empty', message: 'Add at least one item to the treatment plan first.', indicator: 'orange' });
+            return;
+        }
+
+        /* Patients are often linked to a Customer record for billing — use it if present */
+        let customerId = null;
+        try {
+            const res = await frappe.db.get_value('Patient', patientId, 'customer');
+            customerId = res && res.message ? res.message.customer : null;
+        } catch (err) {
+            console.warn('[DentalChart] Could not resolve a linked customer for patient', patientId, err);
+        }
+
+        const planItems = this.treatmentPlan;
+
+        frappe.new_doc('Sales Invoice', {}, (doc) => {
+            if (customerId) doc.customer = customerId;
+
+            planItems.forEach(t => {
+                const row = frappe.model.add_child(doc, 'Sales Invoice Item', 'items');
+                if (t.serviceId) row.item_code = t.serviceId;   // ← assumes Treatment Service names line up with Item codes
+                row.item_name   = t.service || 'Service';
+                row.description = 'Tooth ' + (t.fdi === '00' ? 'General' : t.fdi)
+                    + (t.surface && t.surface !== 'All' ? ` · Surface ${t.surface}` : '')
+                    + (t.status ? ` · ${t.status}` : '');
+                row.qty  = 1;
+                row.rate = t.price || 0;
+            });
+        });
+
+        frappe.show_alert({ message: 'Draft Sales Invoice created from the treatment plan — review and save.', indicator: 'blue' });
     }
 
     /* ══════════════════════════════════════════════════════════════════════
@@ -1637,7 +1708,9 @@ class DentalChart {
     /**
      * Apply (or clear) the currently selected observation on one tooth/surface.
      * Shared by the palette "apply to selected tooth" flow and by clicking
-     * a surface region directly on the tooth diagram.
+     * a surface region directly on the tooth diagram. Applying the exact
+     * same observation to the exact same surface a second time toggles it
+     * back off, rolling back the change.
      */
     _applyStatusToTooth(fdi, surface) {
         if (!this.selStatus) return;
@@ -1651,12 +1724,22 @@ class DentalChart {
                 state.conditions = state.conditions.filter(c => c.surface !== surface && c.surface !== 'All');
             }
         } else {
-            state.addCondition({
-                type   : this.selStatus.id,
-                label  : this.selStatus.label,
-                color  : this.selStatus.color,
-                surface: surface,
-            });
+            const alreadyApplied = state.conditions.some(
+                c => c.type === this.selStatus.id && c.surface === surface
+            );
+            if (alreadyApplied) {
+                /* Toggle off — clicking the same observation again rolls it back */
+                state.conditions = state.conditions.filter(
+                    c => !(c.type === this.selStatus.id && c.surface === surface)
+                );
+            } else {
+                state.addCondition({
+                    type   : this.selStatus.id,
+                    label  : this.selStatus.label,
+                    color  : this.selStatus.color,
+                    surface: surface,
+                });
+            }
         }
         this.render();
     }
@@ -1761,6 +1844,24 @@ class DentalChart {
                 this.render();
             });
         });
+    }
+
+    _bindChartStatus() {
+        const sel = document.getElementById('dc-chart-status');
+        if (!sel) return;
+        sel.addEventListener('change', (e) => {
+            this.chartStatus = e.target.value;
+            this._renderChartStatus();
+        });
+    }
+
+    _renderChartStatus() {
+        const sel = document.getElementById('dc-chart-status');
+        if (!sel) return;
+        sel.value = this.chartStatus;
+        const color = DentalChart.STATUS_COLORS[this.chartStatus] || '#6b7a8d';
+        sel.style.background = color;
+        sel.style.color      = '#fff';
     }
 
     _bindSurfaceEvents() {
