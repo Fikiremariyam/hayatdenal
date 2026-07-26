@@ -937,7 +937,7 @@ class DentalChart {
         });
         try {
             /* Get list of charts for this patient, newest first */
-            const list = await frappe.db.get_list('Dental charting_', {
+            const list = await frappe.db.get_list('Dental charting', {
                 filters : { patient: patientId },
                 fields  : ['name', 'chart_date', 'provider', 'clinical_notes'],
                 order_by: 'chart_date desc',
@@ -965,7 +965,7 @@ class DentalChart {
      */
     async _loadChartByName(chartName) {
         try {
-            const doc = await frappe.db.get_doc('Dental charting_', chartName);
+            const doc = await frappe.db.get_doc('Dental charting', chartName);
 
             /* Reset first so stale data is cleared (both dentitions) */
             this._resetAllTeeth();
@@ -993,14 +993,14 @@ class DentalChart {
                 const fdi  = row.tooth_fdi || '00';
                 const meta = fullMeta.find(m => m.fdi === fdi);
 
-                /* Only the Link id is stored — fetch its label for display */
+                /* Only the Link id (an Item code) is stored — fetch its label for display */
                 let serviceLabel = row.service || '';
                 if (row.service) {
                     try {
-                        const res = await frappe.db.get_value('Treatment Service', row.service, 'service_name');
-                        serviceLabel = (res && res.message && res.message.service_name) || row.service;
+                        const res = await frappe.db.get_value('Item', row.service, 'item_name');
+                        serviceLabel = (res && res.message && res.message.item_name) || row.service;
                     } catch (e) {
-                        console.warn('[DentalChart] Could not resolve service label for', row.service, e);
+                        console.warn('[DentalChart] Could not resolve item label for', row.service, e);
                     }
                 }
 
@@ -1057,7 +1057,7 @@ class DentalChart {
         }
 
         try {
-            const list = await frappe.db.get_list('Dental charting_', {
+            const list = await frappe.db.get_list('Dental charting', {
                 filters : { patient: patientId },
                 fields  : ['name', 'chart_date', 'provider'],
                 order_by: 'chart_date desc',
@@ -1181,7 +1181,7 @@ class DentalChart {
                    we do, on some Frappe versions) would get wiped out instead of
                    updated. Fetch the real doc first, mutate it, then save it whole.
                 ────────────────────────────────────────────────────────────────*/
-                const existing = await frappe.db.get_doc('Dental charting_', this.savedChartName);
+                const existing = await frappe.db.get_doc('Dental charting', this.savedChartName);
                 existing.patient           = patientId;
                 existing.chart_date        = frappe.datetime.get_today();
                 existing.provider          = providerVal;
@@ -1205,13 +1205,13 @@ class DentalChart {
                 });
             } else {
                 /* ── CREATE new chart ───────────────────────────────────────────
-                   Insert a fresh Dental charting_ document.
+                   Insert a fresh Dental charting document.
                 ────────────────────────────────────────────────────────────────*/
                 frappe.call({
                     method  : 'frappe.client.insert',
                     args    : {
                         doc: {
-                            doctype          : 'Dental charting_',
+                            doctype          : 'Dental charting',
                             patient          : patientId,
                             chart_date       : frappe.datetime.get_today(),
                             provider         : providerVal,
@@ -1286,10 +1286,10 @@ class DentalChart {
     /**
      * Build a new, unsaved Sales Invoice prefilled with one line per
      * treatment plan item (service, tooth/surface as description, price).
-     * Opens the standard Sales Invoice form so the person can review,
-     * fix any item-code mapping, and save it themselves — rather than
-     * inserting blind, which could fail on mandatory fields we can't
-     * predict (tax templates, price lists, item codes, etc).
+     * Opens the standard Sales Invoice form so the person can review and
+     * save it themselves — rather than inserting blind, which could fail
+     * on mandatory fields we can't predict (tax templates, price lists,
+     * cost centers, etc).
      */
     async createSalesInvoice() {
         const patientId = this.patient.value || frappe.utils.get_query_params().patient;
@@ -1314,30 +1314,21 @@ class DentalChart {
 
         const planItems = this.treatmentPlan;
 
-        /* IMPORTANT: a Treatment Service's own id (e.g. "crown") is NOT a
-           valid Sales Invoice item_code unless it's genuinely linked to a
-           real Item record. Setting an item_code that doesn't exist as an
-           Item crashes ERPNext's price-list lookup (AttributeError: 'NoneType'
-           object has no attribute 'name' in apply_price_list). So: only use
-           item_code when we can confirm a linked Item actually exists —
-           otherwise leave it blank and let the person pick a real Item in
-           the form themselves. */
-        const itemCodeCache = {};
+        /* The Service field is now a direct Link to Item, so t.serviceId is
+           already a real Item code — but double-check existence anyway as a
+           safety net (e.g. against any stale data saved before this Item
+           link was introduced). Setting an item_code that doesn't exist as
+           a real Item crashes ERPNext's price-list lookup, so we never want
+           to hand over an unverified code. */
+        const itemExistsCache = {};
         for (const t of planItems) {
-            if (!t.serviceId || Object.prototype.hasOwnProperty.call(itemCodeCache, t.serviceId)) continue;
-            let linkedItemCode = null;
+            if (!t.serviceId || Object.prototype.hasOwnProperty.call(itemExistsCache, t.serviceId)) continue;
             try {
-                const svcDoc = await frappe.db.get_doc('Treatment Service', t.serviceId);
-                const candidate = svcDoc.item || svcDoc.item_code || svcDoc.sales_item || svcDoc.linked_item || null;
-                if (candidate) {
-                    /* Confirm it's a real, existing Item before trusting it */
-                    const exists = await frappe.db.exists('Item', candidate);
-                    if (exists) linkedItemCode = candidate;
-                }
+                itemExistsCache[t.serviceId] = !!(await frappe.db.exists('Item', t.serviceId));
             } catch (err) {
-                console.warn('[DentalChart] Could not resolve a linked Item for Treatment Service', t.serviceId, err);
+                console.warn('[DentalChart] Could not verify Item', t.serviceId, err);
+                itemExistsCache[t.serviceId] = false;
             }
-            itemCodeCache[t.serviceId] = linkedItemCode;
         }
 
         let anyMissingItemCode = false;
@@ -1347,10 +1338,10 @@ class DentalChart {
 
             planItems.forEach(t => {
                 const row = frappe.model.add_child(doc, 'Sales Invoice Item', 'items');
-                const linkedItemCode = t.serviceId ? itemCodeCache[t.serviceId] : null;
+                const validItemCode = t.serviceId && itemExistsCache[t.serviceId];
 
-                if (linkedItemCode) {
-                    row.item_code = linkedItemCode;
+                if (validItemCode) {
+                    row.item_code = t.serviceId;
                 } else {
                     anyMissingItemCode = true;
                 }
@@ -1367,7 +1358,7 @@ class DentalChart {
         if (anyMissingItemCode) {
             frappe.msgprint({
                 title    : 'Select Items Manually',
-                message  : 'One or more treatment plan services aren\'t linked to a real Item yet, so those rows were left without an Item Code. Please pick the correct Item for those rows before saving — leaving an invalid code in place can crash the price list lookup.',
+                message  : 'One or more treatment plan rows aren\'t linked to a valid Item, so those rows were left without an Item Code. Please pick the correct Item for those rows before saving — leaving an invalid code in place can crash the price list lookup.',
                 indicator: 'orange',
             });
         } else {
@@ -1861,9 +1852,11 @@ class DentalChart {
     }
 
     /**
-     * Mounts a real Frappe Link control (options: 'Treatment Service') into
-     * every row's Service cell — the service is always a genuine link to
-     * the Treatment Service doctype, never free text.
+     * Mounts a real Frappe Link control (options: 'Item') into every row's
+     * Service cell. Linking straight to the Item doctype — instead of a
+     * separate "Treatment Service" doctype — guarantees whatever gets
+     * picked here is a real, invoiceable Item, so Create Sales Invoice can
+     * never hand ERPNext a nonexistent item_code again.
      */
     _mountServiceLinkControls() {
         this.treatmentPlan.forEach(t => {
@@ -1879,22 +1872,17 @@ class DentalChart {
                 if (val === t.serviceId) return;   // guard against re-fetch loops from programmatic set_value
 
                 try {
-                    const doc = await frappe.db.get_doc('Treatment Service', val);
-                    console.log('[DentalChart] Treatment Service doc for', val, '→', doc);
+                    const doc = await frappe.db.get_doc('Item', val);
+                    console.log('[DentalChart] Item doc for', val, '→', doc);
 
-                    const label = doc.service_name || doc.title || doc.procedure_name || doc.description || val;
-                    const priceRaw = (doc.price !== undefined ? doc.price
-                        : doc.rate !== undefined ? doc.rate
-                        : doc.standard_rate !== undefined ? doc.standard_rate
-                        : doc.amount !== undefined ? doc.amount
-                        : doc.cost !== undefined ? doc.cost
-                        : 0);
+                    const label    = doc.item_name || val;
+                    const priceRaw = doc.standard_rate !== undefined ? doc.standard_rate : 0;
 
-                    t.serviceId = val;
+                    t.serviceId = val;             // this is now a real Item code
                     t.service   = label;
                     t.price     = parseFloat(priceRaw) || 0;
                 } catch (err) {
-                    console.error('[DentalChart] Failed to fetch Treatment Service', val, err);
+                    console.error('[DentalChart] Failed to fetch Item', val, err);
                     t.serviceId = val;
                     t.service   = val;
                 }
@@ -1905,9 +1893,10 @@ class DentalChart {
                 parent: $(container),
                 df: {
                     fieldtype  : 'Link',
-                    options    : 'Treatment Service',   // ← change this if your doctype is named differently
-                    fieldname  : 'treatment_service',
-                    placeholder: 'Search service…',
+                    options    : 'Item',
+                    fieldname  : 'item',
+                    placeholder: 'Search item…',
+                    get_query  : () => ({ filters: { disabled: 0 } }),
                     onchange   : () => handleChange(ctrl),
                 },
                 render_input: true,
