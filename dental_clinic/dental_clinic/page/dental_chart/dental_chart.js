@@ -54,6 +54,9 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .pal-btn:hover { border-color:var(--border2);background:#fff; }
 #dc-root .pal-btn.active{ border-color:currentColor; }
 #dc-root .pal-dot       { width:11px;height:11px;border-radius:3px;flex-shrink:0; }
+#dc-root .obs-search    { width:100%;box-sizing:border-box;border:1.5px solid var(--border);border-radius:7px;padding:6px 9px;font-size:12px;font-family:inherit;color:var(--text);background:var(--panel2);outline:none;margin-bottom:7px;transition:border-color .13s; }
+#dc-root .obs-search:focus{ border-color:var(--accent); }
+#dc-root .obs-list      { max-height:220px;overflow-y:auto;padding-right:2px; }
 #dc-root .surf-grid     { display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;padding:0 12px 10px; }
 #dc-root .surf-btn      { padding:5px 2px;border-radius:5px;border:1.5px solid var(--border);background:var(--panel2);font-family:'DM Mono',monospace;font-size:10px;font-weight:500;color:var(--muted);cursor:pointer;text-align:center;transition:all .13s; }
 #dc-root .surf-btn:hover{ border-color:var(--border2);color:var(--text); }
@@ -62,6 +65,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .arch-block    { background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:var(--shadow); }
 #dc-root .arch-bar      { background:var(--panel2);border-bottom:1px solid var(--border);padding:7px 14px;display:flex;align-items:center;gap:10px; }
 #dc-root .arch-title    { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-family:'DM Mono',monospace; }
+#dc-root .dentition-section-label { font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);margin:4px 2px -2px; }
 #dc-root .arch-legend   { display:flex;gap:10px;margin-left:auto; }
 #dc-root .al-item       { display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted); }
 #dc-root .al-dot        { width:7px;height:7px;border-radius:2px; }
@@ -144,6 +148,10 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .notes-row {   display: flex;    gap: 12px;}
 
 #dc-root .notes-card {flex: 1;    background: var(--panel);    border: 1px solid var(--border);border-radius: 10px;    padding: 12px;}
+#dc-root .notes-card-disclaimer { background:#fffaf0;border-color:#f0d9a8; }
+#dc-root .notes-card-disclaimer .notes-lbl { color:#b8860b; }
+#dc-root .sig-link { color:var(--accent);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;transition:opacity .13s; }
+#dc-root .sig-link:hover { opacity:.75; }
 #dc-root .notes-lbl     { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:7px;display:block; }
 /* signature row */
 #dc-root .sig-row       { background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--muted); }
@@ -200,7 +208,8 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 
       <div class="pal-section">
         <div class="pal-label">Observations</div>
-        <div id="dc-obs-list"></div>
+        <input type="text" id="dc-obs-search" class="obs-search" placeholder="Search observations…">
+        <div id="dc-obs-list" class="obs-list"></div>
       </div>
       <div class="pal-sep"></div>
 
@@ -214,13 +223,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         <button class="surf-btn" data-surf="D">D</button>
         <button class="surf-btn" data-surf="B">B/F</button>
         <button class="surf-btn" data-surf="L">L/P</button>
-      </div>
-      <div class="pal-sep"></div>
-
-      <div class="pal-section">
-        <div class="pal-label">Dentition</div>
-        <button class="pal-btn active" data-dentition="permanent" style="justify-content:center"><span style="font-size:13px">🦷</span>Permanent</button>
-        <button class="pal-btn"        data-dentition="primary"   style="justify-content:center"><span style="font-size:13px">👶</span>Primary (Child)</button>
       </div>
       <div class="pal-sep"></div>
 
@@ -245,6 +247,8 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
     <!-- MAIN -->
     <div class="dc-main">
 
+      <div class="dentition-section-label">Permanent Dentition</div>
+
       <!-- UPPER ARCH -->
       <div class="arch-block">
         <div class="arch-bar">
@@ -267,6 +271,26 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         </div>
         <div class="teeth-row lower-row" id="dc-lower-row"></div>
       </div>
+
+      <div class="dentition-section-label">Primary (Child) Dentition</div>
+
+      <!-- UPPER ARCH (CHILD) -->
+      <div class="arch-block">
+        <div class="arch-bar">
+          <div class="arch-title">Upper — Maxillary (Primary)</div>
+          <div style="font-size:10px;color:var(--muted2)">Right → Left · FDI 55–65</div>
+        </div>
+        <div class="teeth-row" id="dc-upper-row-child"></div>
+      </div>
+      <!-- LOWER ARCH (CHILD) -->
+      <div class="arch-block">
+        <div class="arch-bar">
+          <div class="arch-title">Lower — Mandibular (Primary)</div>
+          <div style="font-size:10px;color:var(--muted2)">Right → Left · FDI 85–75</div>
+        </div>
+        <div class="teeth-row lower-row" id="dc-lower-row-child"></div>
+      </div>
+
       <!-- SUMMARY TABLE -->
       <div class="arch-block">
         <div class="arch-bar">
@@ -297,9 +321,17 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         </div>
       </div>
 
+      <!-- DISCLAIMER -->
+      <div class="notes-row">
+        <div class="notes-card notes-card-disclaimer">
+          <span class="notes-lbl">Disclaimer</span>
+          <textarea class="dp-textarea" id="dc-notes-disclaimer" rows="2" placeholder="Doctor's disclaimer for this chart…"></textarea>
+        </div>
+      </div>
+
       <!-- SIGNATURE -->
       <div class="sig-row">
-        patient signature&nbsp; <b id="dc-pt-signature">—</b>
+        patient signature&nbsp; <b id="dc-pt-signature" class="sig-link">—</b>
       </div>
 
     </div>
@@ -843,10 +875,7 @@ class DentalChart {
         /* Condition (uid) currently checked in the Condition Summary grid */
         this.summarySelectedIds = new Set();
 
-        /* Which arch set is on screen: 'permanent' or 'primary' (child) */
-        this.dentition = 'permanent';
-
-        /* Tooth state is kept per-dentition so switching views never loses data */
+        /* Both dentitions are always kept and always shown side by side */
         this.teethSets = { permanent: {}, primary: {} };
         [...DentalChart.UPPER_META, ...DentalChart.LOWER_META]
             .forEach(m => { this.teethSets.permanent[m.fdi] = new ToothState(m); });
@@ -857,6 +886,8 @@ class DentalChart {
         this.toothStatusCatalog = [];
         /* Currently selected observation: { id, label, color, isHealthy } */
         this.selStatus = null;
+        /* Live search filter for the observations list */
+        this.obsSearchTerm = '';
 
         /* UI state */
         this.selFDI  = null;
@@ -876,12 +907,15 @@ class DentalChart {
         this._tip = document.getElementById('dc-tip');
     }
 
-    /** Tooth catalogue for the arch currently on screen. */
-    get upperMeta() { return this.dentition === 'primary' ? DentalChart.UPPER_META_CHILD : DentalChart.UPPER_META; }
-    get lowerMeta() { return this.dentition === 'primary' ? DentalChart.LOWER_META_CHILD : DentalChart.LOWER_META; }
-    get allMeta()   { return [...this.upperMeta, ...this.lowerMeta]; }
-    /** ToothState dict for the arch currently on screen, keyed by FDI. */
-    get teeth()     { return this.teethSets[this.dentition]; }
+    /** All permanent + primary teeth combined — both dentitions are always shown together. */
+    get allMeta() {
+        return [
+            ...DentalChart.UPPER_META,       ...DentalChart.LOWER_META,
+            ...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD,
+        ];
+    }
+    /** ToothState dict across both dentitions, keyed by FDI (codes never collide between the two). */
+    get teeth() { return { ...this.teethSets.permanent, ...this.teethSets.primary }; }
 
 
     /* ── init ───────────────────────────────────────────────────────────── */
@@ -915,12 +949,13 @@ class DentalChart {
 
         /* Bind all palette and surface events */
         this._loadToothStatuses();
+        this._bindObservationSearch();
         this._bindSurfaceEvents();
-        this._bindDentitionToggle();
         this._bindNumberingToggle();
         this._bindTooltip();
         this._bindChartStatus();
         this._renderChartStatus();
+        this._bindSignatureLink();
 
         /* Initial render */
         this.render();
@@ -982,6 +1017,9 @@ class DentalChart {
             /* Restore notes */
             const clinicalEl = document.getElementById('dc-notes-clinical');
             if (clinicalEl) clinicalEl.value = doc.clinical_notes || '';
+
+            const disclaimerEl = document.getElementById('dc-notes-disclaimer');
+            if (disclaimerEl) disclaimerEl.value = doc.disclaimer || '';   // ← adjust fieldname here if your doctype differs
 
             /* Restore treatment plan — a real child table (fieldname: treatment_plan)
                Fields: tooth_fdi, service, surface, price, status, date */
@@ -1170,8 +1208,9 @@ class DentalChart {
             date     : t.date,
         }));
 
-        const providerVal   = this.patient.providerValue || this.patient.provider || '';
-        const clinicalNotes = (document.getElementById('dc-notes-clinical') || {}).value || '';
+        const providerVal    = this.patient.providerValue || this.patient.provider || '';
+        const clinicalNotes  = (document.getElementById('dc-notes-clinical')   || {}).value || '';
+        const disclaimerText = (document.getElementById('dc-notes-disclaimer') || {}).value || '';
 
         try {
             if (this.savedChartName) {
@@ -1187,6 +1226,7 @@ class DentalChart {
                 existing.provider          = providerVal;
                 existing.status            = this.chartStatus;
                 existing.clinical_notes    = clinicalNotes;
+                existing.disclaimer        = disclaimerText;   // ← adjust fieldname here if your doctype differs
                 existing.treatment_plan    = treatmentPlanRows;
                 existing.condition_summary = conditionRows;
 
@@ -1217,6 +1257,7 @@ class DentalChart {
                             provider         : providerVal,
                             status           : this.chartStatus,
                             clinical_notes   : clinicalNotes,
+                            disclaimer       : disclaimerText,   // ← adjust fieldname here if your doctype differs
                             treatment_plan   : treatmentPlanRows,
                             condition_summary: conditionRows,
                         },
@@ -1298,8 +1339,19 @@ class DentalChart {
             frappe.msgprint({ title: 'No Patient Selected', message: 'Select a patient before creating an invoice.', indicator: 'orange' });
             return;
         }
+
+        const completedItems = this.treatmentPlan.filter(t => t.status === 'Completed');
+
         if (!this.treatmentPlan.length) {
             frappe.msgprint({ title: 'Treatment Plan Empty', message: 'Add at least one item to the treatment plan first.', indicator: 'orange' });
+            return;
+        }
+        if (!completedItems.length) {
+            frappe.msgprint({
+                title    : 'No Completed Items',
+                message  : 'Only items marked "Completed" in the treatment plan are billed. Mark the relevant rows as Completed first.',
+                indicator: 'orange',
+            });
             return;
         }
 
@@ -1312,7 +1364,7 @@ class DentalChart {
             console.warn('[DentalChart] Could not resolve a linked customer for patient', patientId, err);
         }
 
-        const planItems = this.treatmentPlan;
+        const planItems = completedItems;
 
         /* The Service field is now a direct Link to Item, so t.serviceId is
            already a real Item code — but double-check existence anyway as a
@@ -1362,8 +1414,50 @@ class DentalChart {
                 indicator: 'orange',
             });
         } else {
-            frappe.show_alert({ message: 'Draft Sales Invoice created from the treatment plan — review and save.', indicator: 'blue' });
+            frappe.show_alert({ message: `Draft Sales Invoice created from ${planItems.length} completed item(s) — review and save.`, indicator: 'blue' });
         }
+    }
+
+    /**
+     * Clicking the "patient signature" label opens a Consent Form for the
+     * current patient — either an existing one, or a fresh unsaved draft
+     * prefilled with the patient.
+     * ← Assumes a doctype named "Patient Consent Form" with a `patient`
+     *   Link field; adjust CONSENT_FORM_DOCTYPE below if yours differs.
+     */
+    _bindSignatureLink() {
+        const el = document.getElementById('dc-pt-signature');
+        if (!el) return;
+        el.addEventListener('click', async () => {
+            const patientId = this.patient.value || frappe.utils.get_query_params().patient;
+            if (!patientId) {
+                frappe.msgprint({ title: 'No Patient Selected', message: 'Select a patient first.', indicator: 'orange' });
+                return;
+            }
+
+            const CONSENT_FORM_DOCTYPE = 'Patient Consent Form';   // ← adjust if your doctype is named differently
+
+            try {
+                const existing = await frappe.db.get_list(CONSENT_FORM_DOCTYPE, {
+                    filters : { patient: patientId },
+                    fields  : ['name'],
+                    order_by: 'creation desc',
+                    limit   : 1,
+                });
+                if (existing && existing.length) {
+                    frappe.set_route('Form', CONSENT_FORM_DOCTYPE, existing[0].name);
+                } else {
+                    frappe.new_doc(CONSENT_FORM_DOCTYPE, { patient: patientId });
+                }
+            } catch (err) {
+                console.error('[DentalChart] Could not open consent form:', err);
+                frappe.msgprint({
+                    title    : 'Consent Form Not Found',
+                    message  : `Check that a "${CONSENT_FORM_DOCTYPE}" doctype exists in this system.`,
+                    indicator: 'red',
+                });
+            }
+        });
     }
 
     /* ══════════════════════════════════════════════════════════════════════
@@ -1371,14 +1465,16 @@ class DentalChart {
     ══════════════════════════════════════════════════════════════════════*/
 
     render() {
-        this._renderArch(this.upperMeta, 'dc-upper-row', true);
-        this._renderArch(this.lowerMeta, 'dc-lower-row', false);
+        this._renderArch(DentalChart.UPPER_META,       'dc-upper-row',       true,  'permanent');
+        this._renderArch(DentalChart.LOWER_META,       'dc-lower-row',       false, 'permanent');
+        this._renderArch(DentalChart.UPPER_META_CHILD, 'dc-upper-row-child', true,  'primary');
+        this._renderArch(DentalChart.LOWER_META_CHILD, 'dc-lower-row-child', false, 'primary');
         this._renderStats();
         this._renderSummary();
         this._renderTreatmentPlan();
     }
 
-    _renderArch(metaList, containerId, isUpper) {
+    _renderArch(metaList, containerId, isUpper, dentitionKey) {
         const row = document.getElementById(containerId);
         if (!row) return;
         row.innerHTML = '';
@@ -1391,7 +1487,7 @@ class DentalChart {
         metaList.forEach(meta => {
             row.appendChild(this._buildToothCell(meta, isUpper));
             /* Midline marker after the last tooth of the right side (varies by dentition) */
-            if (DentalChart.MIDLINE_AFTER[this.dentition].includes(meta.fdi)) {
+            if (DentalChart.MIDLINE_AFTER[dentitionKey].includes(meta.fdi)) {
                 const ml = document.createElement('div');
                 ml.className = 'midline-marker';
                 ml.title     = 'Midline';
@@ -2062,19 +2158,42 @@ class DentalChart {
             });
         }
 
+        /* Sort alphabetically client-side too, as a safety net */
+        this.toothStatusCatalog.sort((a, b) =>
+            (a.status_name || a.name).localeCompare(b.status_name || b.name)
+        );
+
         this._renderObservationList();
+    }
+
+    _bindObservationSearch() {
+        const input = document.getElementById('dc-obs-search');
+        if (!input) return;
+        input.addEventListener('input', (e) => {
+            this.obsSearchTerm = e.target.value || '';
+            this._renderObservationList();
+        });
     }
 
     _renderObservationList() {
         const wrap = document.getElementById('dc-obs-list');
         if (!wrap) return;
 
+        const term = (this.obsSearchTerm || '').trim().toLowerCase();
+        const filtered = term
+            ? this.toothStatusCatalog.filter(s => (s.status_name || s.name).toLowerCase().includes(term))
+            : this.toothStatusCatalog;
+
         if (!this.toothStatusCatalog.length) {
             wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">No observations found</div>`;
             return;
         }
+        if (!filtered.length) {
+            wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">No matches</div>`;
+            return;
+        }
 
-        wrap.innerHTML = this.toothStatusCatalog.map(s => {
+        wrap.innerHTML = filtered.map(s => {
             const label  = s.status_name || s.name;
             const color  = s.color || '#999999';
             const active = this.selStatus && this.selStatus.id === s.name;
@@ -2096,18 +2215,6 @@ class DentalChart {
                 };
                 this._renderObservationList();
                 if (this.selFDI) this._applyCondition();
-            });
-        });
-    }
-
-    _bindDentitionToggle() {
-        document.querySelectorAll('#dc-root .pal-btn[data-dentition]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('#dc-root .pal-btn[data-dentition]').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                this.dentition = btn.dataset.dentition;
-                this.selFDI    = null;
-                this.render();
             });
         });
     }
