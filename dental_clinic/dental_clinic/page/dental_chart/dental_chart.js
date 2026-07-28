@@ -207,8 +207,8 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
     <div class="dc-palette">
 
       <div class="pal-section">
-        <div class="pal-label">Observations</div>
-        <input type="text" id="dc-obs-search" class="obs-search" placeholder="Search observations…">
+        <div class="pal-label">Tooth Statuses</div>
+        <input type="text" id="dc-obs-search" class="obs-search" placeholder="Search tooth statuses…">
         <div id="dc-obs-list" class="obs-list"></div>
       </div>
       <div class="pal-sep"></div>
@@ -2140,7 +2140,7 @@ class DentalChart {
      */
     async _loadToothStatuses() {
         const wrap = document.getElementById('dc-obs-list');
-        if (wrap) wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">Loading observations…</div>`;
+        if (wrap) wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">Loading tooth statuses…</div>`;
 
         try {
             this.toothStatusCatalog = await frappe.db.get_list('Tooth Status', {
@@ -2152,7 +2152,7 @@ class DentalChart {
             console.error('[DentalChart] Failed to load Tooth Status list:', err);
             this.toothStatusCatalog = [];
             frappe.msgprint({
-                title: 'Could not load observations',
+                title: 'Could not load tooth statuses',
                 message: 'Check that the "Tooth Status" doctype exists and is readable.',
                 indicator: 'red',
             });
@@ -2185,7 +2185,7 @@ class DentalChart {
             : this.toothStatusCatalog;
 
         if (!this.toothStatusCatalog.length) {
-            wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">No observations found</div>`;
+            wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">No tooth statuses found</div>`;
             return;
         }
         if (!filtered.length) {
