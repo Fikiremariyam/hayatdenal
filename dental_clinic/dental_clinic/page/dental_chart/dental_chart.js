@@ -331,7 +331,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 
       <!-- SIGNATURE -->
       <div class="sig-row">
-        patient signature&nbsp; <b id="dc-pt-signature" class="sig-link">—</b>
+        patient Conscent  &nbsp; <b id="dc-pt-signature" class="sig-link">—</b>
       </div>
 
     </div>
@@ -1435,7 +1435,7 @@ class DentalChart {
                 return;
             }
 
-            const CONSENT_FORM_DOCTYPE = 'Patient Consent Form';   // ← adjust if your doctype is named differently
+            const CONSENT_FORM_DOCTYPE = 'Consent form';   // ← adjust if your doctype is named differently
 
             try {
                 const existing = await frappe.db.get_list(CONSENT_FORM_DOCTYPE, {
