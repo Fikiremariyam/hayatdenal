@@ -1971,12 +1971,12 @@ class DentalChart {
                     const doc = await frappe.db.get_doc('Item', val);
                     console.log('[DentalChart] Item doc for', val, '→', doc);
 
-                    const label    = doc.item_name || val;
-                    const priceRaw = doc.standard_rate !== undefined ? doc.standard_rate : 0;
+                    const label = doc.item_name || val;
+                    const price = await this._fetchSellingPrice(val, doc.standard_rate);
 
                     t.serviceId = val;             // this is now a real Item code
                     t.service   = label;
-                    t.price     = parseFloat(priceRaw) || 0;
+                    t.price     = price;
                 } catch (err) {
                     console.error('[DentalChart] Failed to fetch Item', val, err);
                     t.serviceId = val;
@@ -2003,6 +2003,41 @@ class DentalChart {
             /* Backup binding — some Frappe versions only fire this, not df.onchange */
             ctrl.$input.on('change', () => handleChange(ctrl));
         });
+    }
+
+    /**
+     * Look up the real Selling price for an Item from the "Item Price"
+     * doctype (selling: 1) — this is what ERPNext actually uses at
+     * transaction time, unlike Item.standard_rate which is just a base
+     * rate and often isn't the real selling price at all.
+     * Tries the "Standard Selling" price list first, then falls back to
+     * any other selling price list, then to standard_rate as a last resort.
+     */
+    async _fetchSellingPrice(itemCode, fallbackStandardRate) {
+        try {
+            let rows = await frappe.db.get_list('Item Price', {
+                filters : { item_code: itemCode, selling: 1, price_list: 'Standard Selling' },
+                fields  : ['price_list_rate'],
+                limit   : 1,
+            });
+            if (!rows.length) {
+                rows = await frappe.db.get_list('Item Price', {
+                    filters : { item_code: itemCode, selling: 1 },
+                    fields  : ['price_list_rate'],
+                    order_by: 'modified desc',
+                    limit   : 1,
+                });
+            }
+            if (rows.length) {
+                console.log('[DentalChart] Selling price for', itemCode, '→', rows[0].price_list_rate);
+                return parseFloat(rows[0].price_list_rate) || 0;
+            }
+        } catch (err) {
+            console.warn('[DentalChart] Could not fetch Item Price for', itemCode, err);
+        }
+        /* No Item Price record found for any selling price list — fall back to standard_rate */
+        console.warn('[DentalChart] No selling price list rate found for', itemCode, '— falling back to standard_rate');
+        return parseFloat(fallbackStandardRate) || 0;
     }
 
     /** Create a new, empty, fully-editable row — the ERPNext-grid "Add Row" pattern. */
