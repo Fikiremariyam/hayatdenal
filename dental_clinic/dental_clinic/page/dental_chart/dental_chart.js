@@ -56,10 +56,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .obs-search    { width:100%;box-sizing:border-box;border:1.5px solid var(--border);border-radius:7px;padding:6px 9px;font-size:12px;font-family:inherit;color:var(--text);background:var(--panel2);outline:none;margin-bottom:7px;transition:border-color .13s; }
 #dc-root .obs-search:focus{ border-color:var(--accent); }
 #dc-root .obs-list      { max-height:220px;overflow-y:auto;padding-right:2px; }
-#dc-root .surf-grid     { display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;padding:0 12px 10px; }
-#dc-root .surf-btn      { padding:5px 2px;border-radius:5px;border:1.5px solid var(--border);background:var(--panel2);font-family:'DM Mono',monospace;font-size:10px;font-weight:500;color:var(--muted);cursor:pointer;text-align:center;transition:all .13s; }
-#dc-root .surf-btn:hover{ border-color:var(--border2);color:var(--text); }
-#dc-root .surf-btn.active{ border-color:var(--accent);color:var(--accent);background:var(--accent-light); }
 /* arch */
 #dc-root .arch-block    { background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:var(--shadow); }
 #dc-root .arch-bar      { background:var(--panel2);border-bottom:1px solid var(--border);padding:7px 14px;display:flex;align-items:center;gap:10px; }
@@ -197,19 +193,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         <div class="pal-label">Observations</div>
         <input type="text" id="dc-obs-search" class="obs-search" placeholder="Search observations…">
         <div id="dc-obs-list" class="obs-list"></div>
-      </div>
-      <div class="pal-sep"></div>
-
-      <div class="pal-section"><div class="pal-label">Surface</div>
-    
-    </div>
-      <div class="surf-grid">
-        <button class="surf-btn active" data-surf="all">All</button>
-        <button class="surf-btn" data-surf="M">M</button>
-        <button class="surf-btn" data-surf="O">O/I</button>
-        <button class="surf-btn" data-surf="D">D</button>
-        <button class="surf-btn" data-surf="B">B/F</button>
-        <button class="surf-btn" data-surf="L">L/P</button>
       </div>
       <div class="pal-sep"></div>
 
@@ -858,7 +841,6 @@ class DentalChart {
 
         /* UI state */
         this.selFDI  = null;
-        this.selSurf = 'all';
         this.useFDI  = true;
 
         /* Patient sub-component */
@@ -917,7 +899,6 @@ class DentalChart {
         /* Bind all palette and surface events */
         this._loadToothStatuses();
         this._bindObservationSearch();
-        this._bindSurfaceEvents();
         this._bindNumberingToggle();
         this._bindTooltip();
         this._bindChartStatus();
@@ -1606,8 +1587,7 @@ class DentalChart {
             frappe.msgprint({ title: 'No Observation Selected', message: 'Pick an observation from the left panel first.', indicator: 'orange' });
             return;
         }
-        const surf = this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase();
-        this._applyStatusToTooth(this.selFDI, surf);
+        this._applyStatusToTooth(this.selFDI, 'All');
     }
 
     /** Clicking directly on a tooth surface applies the selected observation right there. */
@@ -1726,16 +1706,6 @@ class DentalChart {
         const color = DentalChart.STATUS_COLORS[this.chartStatus] || '#6b7a8d';
         sel.style.background = color;
         sel.style.color      = '#fff';
-    }
-
-    _bindSurfaceEvents() {
-        document.querySelectorAll('#dc-root .surf-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('#dc-root .surf-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                this.selSurf = btn.dataset.surf;
-            });
-        });
     }
 
     _bindNumberingToggle() {
