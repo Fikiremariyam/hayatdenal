@@ -11,7 +11,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
    page.set_primary_action("Save Chart",  () => window._dc?.save(),   "save");
    page.add_inner_button("Export JSON",   () => window._dc?.export());
    page.add_inner_button("Load History",  () => window._dc?.loadChartHistory());
-   page.add_inner_button("Create Sales Invoice", () => window._dc?.createSalesInvoice(), "Create");
    page.add_inner_button("Clear Chart",   () => {
        frappe.confirm("Clear all charting data for this session?", () => {
            window._dc?.clear();
@@ -118,7 +117,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .sum-tbl tr:hover td{ background:var(--panel2); }
 #dc-root .tp-row-rm       { color:var(--muted2);font-size:13px;line-height:1;opacity:.6;cursor:pointer;transition:opacity .12s; }
 #dc-root .tp-row-rm:hover { opacity:1; }
-#dc-root .tp-status-sel   { border:1px solid var(--border);background:var(--panel2);font-family:'DM Mono',monospace;font-size:10px;color:var(--text);padding:2px 5px;border-radius:4px;outline:none;cursor:pointer;width:100%; }
 #dc-root .tp-toolbar      { display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:10px; }
 #dc-root .tp-selall-wrap  { display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);margin-right:auto;cursor:pointer; }
 #dc-root .tp-selall-wrap input, #dc-root .tp-row-chk { cursor:pointer; }
@@ -131,14 +129,8 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .tp-del-btn:hover:not(:disabled){ background:var(--c-decay);color:#fff;border-color:var(--c-decay); }
 #dc-root .tp-chk-cell     { width:26px;text-align:center; }
 #dc-root .tp-idx-cell     { width:26px;text-align:center;color:var(--muted2);font-family:'DM Mono',monospace;font-size:11px; }
-#dc-root .tp-svc-ctrl .control-input-wrapper { width:100%; }
-#dc-root .tp-svc-ctrl input { font-size:12px !important;padding:3px 6px !important;height:auto !important;border-color:transparent !important;background:transparent !important; }
-#dc-root .tp-svc-ctrl input:hover, #dc-root .tp-svc-ctrl input:focus { border-color:var(--border2) !important;background:var(--panel2) !important; }
 #dc-root .tp-cell-input   { width:100%;border:1px solid transparent;background:transparent;font-family:inherit;font-size:12px;color:var(--text);padding:2px 4px;border-radius:4px;outline:none; }
 #dc-root .tp-cell-input:hover, #dc-root .tp-cell-input:focus { border-color:var(--border2);background:var(--panel2); }
-#dc-root .tp-cell-input.tp-price { font-family:'DM Mono',monospace; }
-#dc-root .tp-tooth-edit, #dc-root .tp-surf-edit { font-family:'DM Mono',monospace;cursor:pointer; }
-#dc-root .tp-date-edit    { font-family:'DM Mono',monospace;font-size:11px; }
 /* stat boxes */
 #dc-root .stat-grid     { display:grid;grid-template-columns:1fr 1fr;gap:5px; }
 #dc-root .stat-box      { background:var(--panel2);border:1px solid var(--border);border-radius:7px;padding:7px;text-align:center; }
@@ -150,12 +142,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .notes-card {flex: 1;    background: var(--panel);    border: 1px solid var(--border);border-radius: 10px;    padding: 12px;}
 #dc-root .notes-card-disclaimer { background:#fffaf0;border-color:#f0d9a8; }
 #dc-root .notes-card-disclaimer .notes-lbl { color:#b8860b; }
-#dc-root .sig-link { color:var(--accent);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;transition:opacity .13s; }
-#dc-root .sig-link:hover { opacity:.75; }
 #dc-root .notes-lbl     { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:7px;display:block; }
-/* signature row */
-#dc-root .sig-row       { background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--muted); }
-#dc-root .sig-row b     { color:var(--text); }
 /* status bar */
 #dc-root .dc-statusbar  { background:var(--panel);border-top:1px solid var(--border);padding:4px 14px;display:flex;align-items:center;gap:16px;font-size:11px;color:var(--muted);flex-wrap:wrap; }
 #dc-root .sb-chip       { display:flex;align-items:center;gap:5px;font-family:'DM Mono',monospace;font-size:10px; }
@@ -304,15 +291,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         </div>
       </div>
 
-      <!-- TREATMENT PLAN TABLE -->
-      <div class="arch-block">
-        <div class="arch-bar">
-          <div class="arch-title">Treatment Plan</div>
-          <div style="font-size:10px;color:var(--muted2);margin-left:auto">Add, edit and remove items directly in the table below</div>
-        </div>
-        <div style="padding:10px 14px;overflow-x:auto" id="dc-tp-wrap"></div>
-      </div>
-
       <!-- NOTES -->
       <div class="notes-row">
         <div class="notes-card">
@@ -327,11 +305,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
           <span class="notes-lbl">Disclaimer</span>
           <textarea class="dp-textarea" id="dc-notes-disclaimer" rows="2" placeholder="Doctor's disclaimer for this chart…"></textarea>
         </div>
-      </div>
-
-      <!-- SIGNATURE -->
-      <div class="sig-row">
-        patient signature&nbsp; <b id="dc-pt-signature" class="sig-link">—</b>
       </div>
 
     </div>
@@ -353,12 +326,10 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   DENTAL CHART ENGINE  –  Drop-in replacement for _dcInit()
+   DENTAL CHART ENGINE
    ► No HTML or CSS changes required
-   ► Replace everything below the frappe.after_ajax(() => _dcInit()); line
-     with: frappe.after_ajax(() => { window._dc = new DentalChart(); window._dc.init(); });
-   ► Also replace _dcSave / _dcClear / _dcExport toolbar references with:
-     page.set_primary_action("Save Chart", () => window._dc.save(), "save");
+   ► frappe.after_ajax(() => { window._dc = new DentalChart(); window._dc.init(); });
+   ► page.set_primary_action("Save Chart", () => window._dc.save(), "save");
      page.add_inner_button("Export JSON", () => window._dc.export());
      page.add_inner_button("Clear Chart", () => { frappe.confirm(..., () => window._dc.clear()); });
    ═══════════════════════════════════════════════════════════════════════════*/
@@ -868,10 +839,6 @@ class DentalChart {
 
     /* ── constructor ────────────────────────────────────────────────────── */
     constructor() {
-        /* Treatment plan items: [{ id, fdi, toothLabel, service, serviceId, price, surface, status, date }] */
-        this.treatmentPlan  = [];
-        /* Row ids currently checked in the treatment plan grid (for bulk delete/duplicate) */
-        this.selectedIds    = new Set();
         /* Condition (uid) currently checked in the Condition Summary grid */
         this.summarySelectedIds = new Set();
 
@@ -955,7 +922,6 @@ class DentalChart {
         this._bindTooltip();
         this._bindChartStatus();
         this._renderChartStatus();
-        this._bindSignatureLink();
 
         /* Initial render */
         this.render();
@@ -1004,8 +970,6 @@ class DentalChart {
 
             /* Reset first so stale data is cleared (both dentitions) */
             this._resetAllTeeth();
-            this.treatmentPlan     = [];
-            this.selectedIds       = new Set();
             this.summarySelectedIds = new Set();
 
             /* Make sure the observation catalog is available so saved condition
@@ -1020,40 +984,6 @@ class DentalChart {
 
             const disclaimerEl = document.getElementById('dc-notes-disclaimer');
             if (disclaimerEl) disclaimerEl.value = doc.disclaimer || '';   // ← adjust fieldname here if your doctype differs
-
-            /* Restore treatment plan — a real child table (fieldname: treatment_plan)
-               Fields: tooth_fdi, service, surface, price, status, date */
-            const fullMeta = [
-                ...DentalChart.UPPER_META,       ...DentalChart.LOWER_META,
-                ...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD,
-            ];
-            this.treatmentPlan = await Promise.all((doc.treatment_plan || []).map(async row => {
-                const fdi  = row.tooth_fdi || '00';
-                const meta = fullMeta.find(m => m.fdi === fdi);
-
-                /* Only the Link id (an Item code) is stored — fetch its label for display */
-                let serviceLabel = row.service || '';
-                if (row.service) {
-                    try {
-                        const res = await frappe.db.get_value('Item', row.service, 'item_name');
-                        serviceLabel = (res && res.message && res.message.item_name) || row.service;
-                    } catch (e) {
-                        console.warn('[DentalChart] Could not resolve item label for', row.service, e);
-                    }
-                }
-
-                return {
-                    id        : 'tp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
-                    fdi       : fdi,
-                    toothLabel: fdi === '00' ? 'General (non-tooth-specific)' : (meta ? meta.name : fdi),
-                    service   : serviceLabel,
-                    serviceId : row.service || null,
-                    price     : parseFloat(row.price) || 0,
-                    surface   : row.surface || 'All',
-                    status    : row.status || 'Planned',
-                    date      : row.date || frappe.datetime.get_today(),
-                };
-            }));
 
             /* Restore provider into link control and banner */
             if (doc.provider) {
@@ -1196,18 +1126,6 @@ class DentalChart {
             }
         });
 
-        /* Build "Treatment plan" child-table rows.
-           Fields: tooth_fdi, service, surface, price, status, date */
-        const treatmentPlanRows = this.treatmentPlan.map(t => ({
-            doctype  : 'Treatment plan',
-            tooth_fdi: t.fdi,
-            service  : t.serviceId || undefined,
-            surface  : t.surface,
-            price    : t.price,
-            status   : t.status,
-            date     : t.date,
-        }));
-
         const providerVal    = this.patient.providerValue || this.patient.provider || '';
         const clinicalNotes  = (document.getElementById('dc-notes-clinical')   || {}).value || '';
         const disclaimerText = (document.getElementById('dc-notes-disclaimer') || {}).value || '';
@@ -1227,7 +1145,6 @@ class DentalChart {
                 existing.status            = this.chartStatus;
                 existing.clinical_notes    = clinicalNotes;
                 existing.disclaimer        = disclaimerText;   // ← adjust fieldname here if your doctype differs
-                existing.treatment_plan    = treatmentPlanRows;
                 existing.condition_summary = conditionRows;
 
                 frappe.call({
@@ -1258,7 +1175,6 @@ class DentalChart {
                             status           : this.chartStatus,
                             clinical_notes   : clinicalNotes,
                             disclaimer       : disclaimerText,   // ← adjust fieldname here if your doctype differs
-                            treatment_plan   : treatmentPlanRows,
                             condition_summary: conditionRows,
                         },
                     },
@@ -1288,8 +1204,6 @@ class DentalChart {
         this._resetAllTeeth();
         this.selFDI             = null;
         this.savedChartName     = null;
-        this.treatmentPlan      = [];
-        this.selectedIds        = new Set();
         this.summarySelectedIds = new Set();
         this.chartStatus        = 'Planned';
         _set('dc-pt-badge', 'New Chart');
@@ -1299,11 +1213,10 @@ class DentalChart {
 
     export() {
         const payload = {
-            chart        : this.savedChartName,
-            patient      : this.patient.value,
-            exported     : new Date().toISOString(),
-            treatmentPlan: this.treatmentPlan,
-            state        : {},
+            chart   : this.savedChartName,
+            patient : this.patient.value,
+            exported: new Date().toISOString(),
+            state   : {},
         };
         this.allMeta.forEach(m => {
             const s = this.teeth[m.fdi];
@@ -1324,142 +1237,6 @@ class DentalChart {
         URL.revokeObjectURL(url);
     }
 
-    /**
-     * Build a new, unsaved Sales Invoice prefilled with one line per
-     * treatment plan item (service, tooth/surface as description, price).
-     * Opens the standard Sales Invoice form so the person can review and
-     * save it themselves — rather than inserting blind, which could fail
-     * on mandatory fields we can't predict (tax templates, price lists,
-     * cost centers, etc).
-     */
-    async createSalesInvoice() {
-        const patientId = this.patient.value || frappe.utils.get_query_params().patient;
-
-        if (!patientId) {
-            frappe.msgprint({ title: 'No Patient Selected', message: 'Select a patient before creating an invoice.', indicator: 'orange' });
-            return;
-        }
-
-        const completedItems = this.treatmentPlan.filter(t => t.status === 'Completed');
-
-        if (!this.treatmentPlan.length) {
-            frappe.msgprint({ title: 'Treatment Plan Empty', message: 'Add at least one item to the treatment plan first.', indicator: 'orange' });
-            return;
-        }
-        if (!completedItems.length) {
-            frappe.msgprint({
-                title    : 'No Completed Items',
-                message  : 'Only items marked "Completed" in the treatment plan are billed. Mark the relevant rows as Completed first.',
-                indicator: 'orange',
-            });
-            return;
-        }
-
-        /* Patients are often linked to a Customer record for billing — use it if present */
-        let customerId = null;
-        try {
-            const res = await frappe.db.get_value('Patient', patientId, 'customer');
-            customerId = res && res.message ? res.message.customer : null;
-        } catch (err) {
-            console.warn('[DentalChart] Could not resolve a linked customer for patient', patientId, err);
-        }
-
-        const planItems = completedItems;
-
-        /* The Service field is now a direct Link to Item, so t.serviceId is
-           already a real Item code — but double-check existence anyway as a
-           safety net (e.g. against any stale data saved before this Item
-           link was introduced). Setting an item_code that doesn't exist as
-           a real Item crashes ERPNext's price-list lookup, so we never want
-           to hand over an unverified code. */
-        const itemExistsCache = {};
-        for (const t of planItems) {
-            if (!t.serviceId || Object.prototype.hasOwnProperty.call(itemExistsCache, t.serviceId)) continue;
-            try {
-                itemExistsCache[t.serviceId] = !!(await frappe.db.exists('Item', t.serviceId));
-            } catch (err) {
-                console.warn('[DentalChart] Could not verify Item', t.serviceId, err);
-                itemExistsCache[t.serviceId] = false;
-            }
-        }
-
-        let anyMissingItemCode = false;
-
-        frappe.new_doc('Sales Invoice', {}, (doc) => {
-            if (customerId) doc.customer = customerId;
-
-            planItems.forEach(t => {
-                const row = frappe.model.add_child(doc, 'Sales Invoice Item', 'items');
-                const validItemCode = t.serviceId && itemExistsCache[t.serviceId];
-
-                if (validItemCode) {
-                    row.item_code = t.serviceId;
-                } else {
-                    anyMissingItemCode = true;
-                }
-
-                row.item_name   = t.service || 'Service';
-                row.description = 'Tooth ' + (t.fdi === '00' ? 'General' : t.fdi)
-                    + (t.surface && t.surface !== 'All' ? ` · Surface ${t.surface}` : '')
-                    + (t.status ? ` · ${t.status}` : '');
-                row.qty  = 1;
-                row.rate = t.price || 0;
-            });
-        });
-
-        if (anyMissingItemCode) {
-            frappe.msgprint({
-                title    : 'Select Items Manually',
-                message  : 'One or more treatment plan rows aren\'t linked to a valid Item, so those rows were left without an Item Code. Please pick the correct Item for those rows before saving — leaving an invalid code in place can crash the price list lookup.',
-                indicator: 'orange',
-            });
-        } else {
-            frappe.show_alert({ message: `Draft Sales Invoice created from ${planItems.length} completed item(s) — review and save.`, indicator: 'blue' });
-        }
-    }
-
-    /**
-     * Clicking the "patient signature" label opens a Consent Form for the
-     * current patient — either an existing one, or a fresh unsaved draft
-     * prefilled with the patient.
-     * ← Assumes a doctype named "Patient Consent Form" with a `patient`
-     *   Link field; adjust CONSENT_FORM_DOCTYPE below if yours differs.
-     */
-    _bindSignatureLink() {
-        const el = document.getElementById('dc-pt-signature');
-        if (!el) return;
-        el.addEventListener('click', async () => {
-            const patientId = this.patient.value || frappe.utils.get_query_params().patient;
-            if (!patientId) {
-                frappe.msgprint({ title: 'No Patient Selected', message: 'Select a patient first.', indicator: 'orange' });
-                return;
-            }
-
-            const CONSENT_FORM_DOCTYPE = 'Patient Consent Form';   // ← adjust if your doctype is named differently
-
-            try {
-                const existing = await frappe.db.get_list(CONSENT_FORM_DOCTYPE, {
-                    filters : { patient: patientId },
-                    fields  : ['name'],
-                    order_by: 'creation desc',
-                    limit   : 1,
-                });
-                if (existing && existing.length) {
-                    frappe.set_route('Form', CONSENT_FORM_DOCTYPE, existing[0].name);
-                } else {
-                    frappe.new_doc(CONSENT_FORM_DOCTYPE, { patient: patientId });
-                }
-            } catch (err) {
-                console.error('[DentalChart] Could not open consent form:', err);
-                frappe.msgprint({
-                    title    : 'Consent Form Not Found',
-                    message  : `Check that a "${CONSENT_FORM_DOCTYPE}" doctype exists in this system.`,
-                    indicator: 'red',
-                });
-            }
-        });
-    }
-
     /* ══════════════════════════════════════════════════════════════════════
        RENDER
     ══════════════════════════════════════════════════════════════════════*/
@@ -1471,7 +1248,6 @@ class DentalChart {
         this._renderArch(DentalChart.LOWER_META_CHILD, 'dc-lower-row-child', false, 'primary');
         this._renderStats();
         this._renderSummary();
-        this._renderTreatmentPlan();
     }
 
     _renderArch(metaList, containerId, isUpper, dentitionKey) {
@@ -1781,326 +1557,6 @@ class DentalChart {
         this.selFDI = fdi;
         this.render();
     }
-
-    /* ══════════════════════════════════════════════════════════════════════
-       TREATMENT PLAN
-    ══════════════════════════════════════════════════════════════════════*/
-
-    _renderTreatmentPlan() {
-        const wrap = document.getElementById('dc-tp-wrap');
-        if (!wrap) return;
-
-        const toothOptions = [
-            { value: '00', label: '00 — General' },
-            ...this.allMeta.map(m => ({ value: m.fdi, label: m.fdi })),
-        ];
-        const surfaceOptions = ['All', 'M', 'O', 'D', 'B', 'L'];
-        const total = this.treatmentPlan.reduce((sum, t) => sum + (t.price || 0), 0);
-        const nSel  = this.selectedIds.size;
-        const allChecked = this.treatmentPlan.length > 0 && nSel === this.treatmentPlan.length;
-
-        const rows = this.treatmentPlan.map((t, idx) => `
-            <tr>
-                <td class="tp-chk-cell"><input type="checkbox" class="tp-row-chk" data-id="${t.id}" ${this.selectedIds.has(t.id) ? 'checked' : ''}></td>
-                <td class="tp-idx-cell">${idx + 1}</td>
-                <td>
-                    <select class="tp-cell-input tp-tooth-edit" data-id="${t.id}" title="${(t.toothLabel || '').replace(/"/g, '&quot;')}">
-                        ${toothOptions.map(o => `<option value="${o.value}" ${o.value === t.fdi ? 'selected' : ''}>${o.label}</option>`).join('')}
-                    </select>
-                </td>
-                <td><div class="tp-svc-ctrl" id="tp-svc-ctrl-${t.id}"></div></td>
-                <td>
-                    <select class="tp-cell-input tp-surf-edit" data-id="${t.id}">
-                        ${surfaceOptions.map(s => `<option ${s === t.surface ? 'selected' : ''}>${s}</option>`).join('')}
-                    </select>
-                </td>
-                <td><input type="number" step="0.01" class="tp-cell-input tp-price tp-price-edit" data-id="${t.id}" value="${t.price || 0}"></td>
-                <td>
-                    <select class="tp-status-sel" data-id="${t.id}">
-                        <option ${t.status === 'Planned'     ? 'selected' : ''}>Planned</option>
-                        <option ${t.status === 'In Progress' ? 'selected' : ''}>In Progress</option>
-                        <option ${t.status === 'Completed'   ? 'selected' : ''}>Completed</option>
-                    </select>
-                </td>
-                <td><input type="date" class="tp-cell-input tp-date-edit" data-id="${t.id}" value="${t.date || ''}"></td>
-                <td><span class="tp-row-rm" data-id="${t.id}" title="Delete row">🗑</span></td>
-            </tr>`).join('');
-
-        wrap.innerHTML = `
-            <div class="tp-toolbar">
-                <label class="tp-selall-wrap">
-                    <input type="checkbox" id="dc-tp-select-all" ${allChecked ? 'checked' : ''} ${this.treatmentPlan.length ? '' : 'disabled'}>
-                    <span>Select All</span>
-                </label>
-                <button class="tp-add-btn" id="dc-tp-add-row-btn">＋ Add Row</button>
-                <button class="tp-add-btn tp-dup-btn" id="dc-tp-dup-btn" ${nSel ? '' : 'disabled'}>⧉ Duplicate${nSel ? ` (${nSel})` : ''}</button>
-                <button class="tp-add-btn tp-del-btn" id="dc-tp-del-btn" ${nSel ? '' : 'disabled'}>🗑 Delete${nSel ? ` (${nSel})` : ''}</button>
-            </div>
-            ${this.treatmentPlan.length ? `
-            <table class="sum-tbl tp-grid">
-                <thead>
-                    <tr>
-                        <th style="width:26px"></th>
-                        <th style="width:26px">#</th>
-                        <th style="width:70px">Tooth</th>
-                        <th>Service</th>
-                        <th style="width:70px">Surface</th>
-                        <th style="width:90px">Price</th>
-                        <th style="width:110px">Status</th>
-                        <th style="width:130px">Date</th>
-                        <th style="width:26px"></th>
-                    </tr>
-                </thead>
-                <tbody>${rows}</tbody>
-                <tfoot>
-                    <tr>
-                        <td colspan="5" style="text-align:right;font-weight:600;border-top:2px solid var(--border)">Total</td>
-                        <td style="font-family:'DM Mono',monospace;font-weight:700;border-top:2px solid var(--border)">${this._fmtCurrency(total)}</td>
-                        <td colspan="3" style="border-top:2px solid var(--border)"></td>
-                    </tr>
-                </tfoot>
-            </table>` : `<div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">No treatment planned yet — click "＋ Add Row" to start</div>`}
-        `;
-
-        this._bindTreatmentPlanEvents();
-        this._mountServiceLinkControls();
-    }
-
-    /** Wires up every control inside the freshly-rendered treatment plan grid. */
-    _bindTreatmentPlanEvents() {
-        const wrap = document.getElementById('dc-tp-wrap');
-        if (!wrap) return;
-
-        /* Toolbar */
-        const addBtn = document.getElementById('dc-tp-add-row-btn');
-        if (addBtn) addBtn.addEventListener('click', () => this._addBlankRow());
-
-        const dupBtn = document.getElementById('dc-tp-dup-btn');
-        if (dupBtn) dupBtn.addEventListener('click', () => this._duplicateSelected());
-
-        const delBtn = document.getElementById('dc-tp-del-btn');
-        if (delBtn) delBtn.addEventListener('click', () => this._deleteSelected());
-
-        const selAll = document.getElementById('dc-tp-select-all');
-        if (selAll) selAll.addEventListener('change', (e) => {
-            if (e.target.checked) this.treatmentPlan.forEach(t => this.selectedIds.add(t.id));
-            else this.selectedIds.clear();
-            this._renderTreatmentPlan();
-        });
-
-        /* Row checkboxes */
-        wrap.querySelectorAll('.tp-row-chk').forEach(el => {
-            el.addEventListener('change', (e) => {
-                if (e.target.checked) this.selectedIds.add(el.dataset.id);
-                else this.selectedIds.delete(el.dataset.id);
-                this._renderTreatmentPlan();
-            });
-        });
-
-        /* Row delete */
-        wrap.querySelectorAll('.tp-row-rm').forEach(el => {
-            el.addEventListener('click', () => this._removeTreatmentItem(el.dataset.id));
-        });
-
-        /* Inline edits */
-        wrap.querySelectorAll('.tp-tooth-edit').forEach(el => {
-            el.addEventListener('change', (e) => {
-                const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
-                if (!item) return;
-                item.fdi = e.target.value;
-                if (item.fdi === '00') {
-                    item.toothLabel = 'General (non-tooth-specific)';
-                } else {
-                    const fullMeta = [
-                        ...DentalChart.UPPER_META,       ...DentalChart.LOWER_META,
-                        ...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD,
-                    ];
-                    const meta = fullMeta.find(m => m.fdi === item.fdi);
-                    item.toothLabel = meta ? meta.name : item.fdi;
-                }
-            });
-        });
-        wrap.querySelectorAll('.tp-surf-edit').forEach(el => {
-            el.addEventListener('change', (e) => {
-                const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
-                if (item) item.surface = e.target.value;
-            });
-        });
-        wrap.querySelectorAll('.tp-status-sel').forEach(el => {
-            el.addEventListener('change', (e) => {
-                const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
-                if (item) item.status = e.target.value;
-            });
-        });
-        wrap.querySelectorAll('.tp-date-edit').forEach(el => {
-            el.addEventListener('change', (e) => {
-                const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
-                if (item) item.date = e.target.value;
-            });
-        });
-        wrap.querySelectorAll('.tp-price-edit').forEach(el => {
-            el.addEventListener('change', (e) => {
-                const item = this.treatmentPlan.find(t => t.id === el.dataset.id);
-                if (item) item.price = parseFloat(e.target.value) || 0;
-                this._renderTreatmentPlan();   // refresh the total
-            });
-        });
-    }
-
-    /**
-     * Mounts a real Frappe Link control (options: 'Item') into every row's
-     * Service cell. Linking straight to the Item doctype — instead of a
-     * separate "Treatment Service" doctype — guarantees whatever gets
-     * picked here is a real, invoiceable Item, so Create Sales Invoice can
-     * never hand ERPNext a nonexistent item_code again.
-     */
-    _mountServiceLinkControls() {
-        this.treatmentPlan.forEach(t => {
-            const container = document.getElementById(`tp-svc-ctrl-${t.id}`);
-            if (!container) return;
-
-            const handleChange = async (ctrl) => {
-                const val = ctrl.get_value();
-                if (!val) {
-                    if (t.serviceId !== null) { t.serviceId = null; this._renderTreatmentPlan(); }
-                    return;
-                }
-                if (val === t.serviceId) return;   // guard against re-fetch loops from programmatic set_value
-
-                try {
-                    const doc = await frappe.db.get_doc('Item', val);
-                    console.log('[DentalChart] Item doc for', val, '→', doc);
-
-                    const label = doc.item_name || val;
-                    const price = await this._fetchSellingPrice(val, doc.standard_rate);
-
-                    t.serviceId = val;             // this is now a real Item code
-                    t.service   = label;
-                    t.price     = price;
-                } catch (err) {
-                    console.error('[DentalChart] Failed to fetch Item', val, err);
-                    t.serviceId = val;
-                    t.service   = val;
-                }
-                this._renderTreatmentPlan();
-            };
-
-            const ctrl = frappe.ui.form.make_control({
-                parent: $(container),
-                df: {
-                    fieldtype  : 'Link',
-                    options    : 'Item',
-                    fieldname  : 'item',
-                    placeholder: 'Search item…',
-                    get_query  : () => ({ filters: { disabled: 0 } }),
-                    onchange   : () => handleChange(ctrl),
-                },
-                render_input: true,
-            });
-            ctrl.refresh();
-            if (t.serviceId) ctrl.set_value(t.serviceId);
-
-            /* Backup binding — some Frappe versions only fire this, not df.onchange */
-            ctrl.$input.on('change', () => handleChange(ctrl));
-        });
-    }
-
-    /**
-     * Look up the real Selling price for an Item from the "Item Price"
-     * doctype (selling: 1) — this is what ERPNext actually uses at
-     * transaction time, unlike Item.standard_rate which is just a base
-     * rate and often isn't the real selling price at all.
-     * Tries the "Standard Selling" price list first, then falls back to
-     * any other selling price list, then to standard_rate as a last resort.
-     */
-    async _fetchSellingPrice(itemCode, fallbackStandardRate) {
-        try {
-            let rows = await frappe.db.get_list('Item Price', {
-                filters : { item_code: itemCode, selling: 1, price_list: 'Standard Selling' },
-                fields  : ['price_list_rate'],
-                limit   : 1,
-            });
-            if (!rows.length) {
-                rows = await frappe.db.get_list('Item Price', {
-                    filters : { item_code: itemCode, selling: 1 },
-                    fields  : ['price_list_rate'],
-                    order_by: 'modified desc',
-                    limit   : 1,
-                });
-            }
-            if (rows.length) {
-                console.log('[DentalChart] Selling price for', itemCode, '→', rows[0].price_list_rate);
-                return parseFloat(rows[0].price_list_rate) || 0;
-            }
-        } catch (err) {
-            console.warn('[DentalChart] Could not fetch Item Price for', itemCode, err);
-        }
-        /* No Item Price record found for any selling price list — fall back to standard_rate */
-        console.warn('[DentalChart] No selling price list rate found for', itemCode, '— falling back to standard_rate');
-        return parseFloat(fallbackStandardRate) || 0;
-    }
-
-    /** Create a new, empty, fully-editable row — the ERPNext-grid "Add Row" pattern. */
-    _addBlankRow() {
-        const fdi  = this.selFDI || (this.allMeta[0] && this.allMeta[0].fdi) || '';
-        const meta = this.allMeta.find(m => m.fdi === fdi);
-        this.treatmentPlan.push({
-            id        : 'tp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
-            fdi       : fdi,
-            toothLabel: meta ? meta.name : fdi,
-            service   : '',
-            serviceId : null,
-            price     : 0,
-            surface   : this.selSurf === 'all' ? 'All' : this.selSurf.toUpperCase(),
-            status    : 'Planned',
-            date      : frappe.datetime.get_today(),
-        });
-        this._renderTreatmentPlan();
-    }
-
-    /** Duplicate every selected row, inserting the copy right after its source. */
-    _duplicateSelected() {
-        if (!this.selectedIds.size) return;
-        const next = [];
-        this.treatmentPlan.forEach(t => {
-            next.push(t);
-            if (this.selectedIds.has(t.id)) {
-                next.push({
-                    ...t,
-                    id: 'tp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
-                });
-            }
-        });
-        this.treatmentPlan = next;
-        this.selectedIds   = new Set();
-        this._renderTreatmentPlan();
-    }
-
-    /** Bulk-delete every checked row. */
-    _deleteSelected() {
-        if (!this.selectedIds.size) return;
-        this.treatmentPlan = this.treatmentPlan.filter(t => !this.selectedIds.has(t.id));
-        this.selectedIds   = new Set();
-        this._renderTreatmentPlan();
-    }
-
-    /** Remove a single treatment plan row and re-render the grid. */
-    _removeTreatmentItem(id) {
-        this.treatmentPlan = this.treatmentPlan.filter(t => t.id !== id);
-        this.selectedIds.delete(id);
-        this._renderTreatmentPlan();
-    }
-
-    /* Small currency formatter — uses frappe's if available, else a plain fallback */
-    _fmtCurrency(val) {
-        const n = parseFloat(val) || 0;
-        try {
-            return format_currency(n);           // Frappe global helper
-        } catch (e) {
-            return n.toFixed(2);
-        }
-    }
-
 
     /**
      * Apply (or clear) the currently selected observation on one tooth/surface.
