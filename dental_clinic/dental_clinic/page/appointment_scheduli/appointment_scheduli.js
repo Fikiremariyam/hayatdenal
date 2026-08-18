@@ -805,84 +805,48 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Availability check (mirrors the standard Patient Appointment booking flow) ──
-    // Tries the standard Healthcare availability API first; if that isn't available
-    // (older/newer schema, method not found, etc.) it falls back to checking the
-    // practitioner's schedule + existing appointments + approved leave itself.
+    // Healthcare's own `get_availability_data(date, appointment)` is designed to be
+    // called against an existing/in-progress Patient Appointment document (that's
+    // where it pulls the practitioner from), so it isn't usable for a pre-insert
+    // check against a bare practitioner + date/time. Instead this reproduces the
+    // same checks the standard doctype's validation does: the practitioner's
+    // schedule window, approved leave, and clashes with existing appointments —
+    // all run BEFORE the record is inserted, so a bad slot never reaches insert.
     function check_slot_availability(practitioner, date, time_str, duration, callback) {
+        if (!is_slot_bookable(date, time_str, duration)) {
+            callback(false, (practitioner || 'This practitioner') + ' is not scheduled to work this slot on ' + frappe.datetime.str_to_user(date) + '.');
+            return;
+        }
+        if (practitioner === current_practitioner && last_leaves_by_date[date] && last_leaves_by_date[date].length) {
+            callback(false, (practitioner || 'The practitioner') + ' is on approved leave on ' + frappe.datetime.str_to_user(date) + '.');
+            return;
+        }
         frappe.call({
-            method: 'healthcare.healthcare.doctype.patient_appointment.patient_appointment.get_availability_data',
-            args: { appointment_date: date, practitioner: practitioner },
-            callback: function(r) {
-                var parsed = parse_standard_availability(r.message, time_str);
-                if (parsed) callback(parsed.available, parsed.message);
-                else fallback();
+            method: 'frappe.client.get_list',
+            args: {
+                doctype: 'Patient Appointment',
+                fields: ['name', 'appointment_time', 'duration'],
+                filters: [
+                    ['practitioner', '=', practitioner],
+                    ['appointment_date', '=', date],
+                    ['status', '!=', 'Cancelled']
+                ],
+                limit_page_length: 200
             },
-            error: function() { fallback(); }
-        });
-
-        function fallback() {
-            if (!is_slot_bookable(date, time_str, duration)) {
-                callback(false, (practitioner || 'This practitioner') + ' is not scheduled to work this slot on ' + frappe.datetime.str_to_user(date) + '.');
-                return;
-            }
-            if (practitioner === current_practitioner && last_leaves_by_date[date] && last_leaves_by_date[date].length) {
-                callback(false, (practitioner || 'The practitioner') + ' is on approved leave on ' + frappe.datetime.str_to_user(date) + '.');
-                return;
-            }
-            frappe.call({
-                method: 'frappe.client.get_list',
-                args: {
-                    doctype: 'Patient Appointment',
-                    fields: ['name', 'appointment_time', 'duration'],
-                    filters: [
-                        ['practitioner', '=', practitioner],
-                        ['appointment_date', '=', date],
-                        ['status', '!=', 'Cancelled']
-                    ],
-                    limit_page_length: 200
-                },
-                callback: function(r) {
-                    var existing = r.message || [];
-                    var req_start = time_str_to_minutes(time_str);
-                    var req_end   = req_start + (duration || 15);
-                    var clash = existing.find(function(a) {
-                        var s = time_str_to_minutes(a.appointment_time);
-                        var e = s + (a.duration || 15);
-                        return req_start < e && s < req_end;
-                    });
-                    if (clash) callback(false, 'That time overlaps an existing appointment (' + clash.name + ').');
-                    else callback(true, 'Slot is available.');
-                },
-                error: function() { callback(true, 'Could not fully verify with the server — double-check before confirming.'); }
-            });
-        }
-    }
-
-    // Best-effort parser for the standard get_availability_data() response shape
-    // ({ slot_details: [{ service_unit, avail_slot: [{from_time,to_time}, ...] }] }).
-    // Returns null (meaning "couldn't parse, use the fallback") rather than guessing.
-    function parse_standard_availability(message, time_str) {
-        try {
-            if (!message || !message.slot_details) return null;
-            var mins = time_str_to_minutes(time_str);
-            var found = false;
-            message.slot_details.forEach(function(sd) {
-                var slots = sd.avail_slot || sd.slot_details || [];
-                slots.forEach(function(slot) {
-                    var from = slot.from_time || slot.from;
-                    var to   = slot.to_time || slot.to;
-                    if (!from) return;
-                    if (from.length === 5) from += ':00';
-                    if (to && to.length === 5) to += ':00';
-                    var fmin = time_str_to_minutes(from);
-                    var tmin = to ? time_str_to_minutes(to) : fmin + SLOT_MINUTES;
-                    if (mins >= fmin && mins < tmin) found = true;
+            callback: function(r) {
+                var existing = r.message || [];
+                var req_start = time_str_to_minutes(time_str);
+                var req_end   = req_start + (duration || 15);
+                var clash = existing.find(function(a) {
+                    var s = time_str_to_minutes(a.appointment_time);
+                    var e = s + (a.duration || 15);
+                    return req_start < e && s < req_end;
                 });
-            });
-            return { available: found, message: found ? 'Slot is available.' : 'That time is not free — pick another slot.' };
-        } catch (e) {
-            return null;
-        }
+                if (clash) callback(false, 'That time overlaps an existing appointment (' + clash.name + ').');
+                else callback(true, 'Slot is available.');
+            },
+            error: function() { callback(true, 'Could not fully verify with the server — double-check before confirming.'); }
+        });
     }
 
     // ── Booking dialog ───────────────────────────────────────────
