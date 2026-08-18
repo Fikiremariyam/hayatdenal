@@ -306,12 +306,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || 0, 10);
     }
 
+    // 24-hour "HH:MM" label — matches the exact time stored on the schedule.
     function format_time_label(mins) {
         var h24 = Math.floor(mins / 60) % 24;
         var m   = ((mins % 60) + 60) % 60;
-        var ampm = h24 >= 12 ? 'PM' : 'AM';
-        var h12 = h24 % 12; if (h12 === 0) h12 = 12;
-        return h12 + ':' + (m < 10 ? '0' + m : m) + ' ' + ampm;
+        return (h24 < 10 ? '0' + h24 : h24) + ':' + (m < 10 ? '0' + m : m);
     }
 
     // ── Dynamic time-slot grid, driven by the practitioner's schedule ──
@@ -347,8 +346,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             grid_start_minutes = 8 * 60;
             grid_end_minutes   = 17 * 60 + 30;
         } else {
-            grid_start_minutes = Math.floor(min_start / SLOT_MINUTES) * SLOT_MINUTES;
-            grid_end_minutes   = Math.ceil(max_end / SLOT_MINUTES) * SLOT_MINUTES;
+            // Anchor exactly to the schedule's own start/end time — no rounding —
+            // so the left-hand time column reflects the times actually set on the
+            // Practitioner Schedule (e.g. a 8:15 start stays 8:15, not 8:00).
+            grid_start_minutes = min_start;
+            grid_end_minutes   = max_end;
             if (grid_end_minutes <= grid_start_minutes) grid_end_minutes = grid_start_minutes + SLOT_MINUTES;
         }
         build_time_slots();
@@ -433,8 +435,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             return;
         }
 
-        document.getElementById('btn-new-appt').disabled = false;
         document.getElementById('btn-mark-unavailable').disabled = false;
+        document.getElementById('btn-new-appt').disabled = true; // re-enabled once we know slots exist
 
         fetch_practitioner_schedule(val, function(windows) {
             // ignore stale responses if the user switched practitioners meanwhile
@@ -531,13 +533,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 
         var f = from_date, t = to_date;
         if (lbl) {
-            var note = '';
-            if (practitioner_schedule_windows && total_window_count() === 0) {
-                note = ' <span class="cal-range-note">(no schedule configured for this practitioner — hours unrestricted)</span>';
-            }
-            lbl.innerHTML = frappe.datetime.str_to_user(f)
-                + (f !== t ? ' \u2013 ' + frappe.datetime.str_to_user(t) : '')
-                + note;
+            lbl.textContent = frappe.datetime.str_to_user(f)
+                + (f !== t ? ' \u2013 ' + frappe.datetime.str_to_user(t) : '');
         }
 
         var filters = [
@@ -565,6 +562,20 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 render_stats(appts, stats);
                 fetch_leaves(f, t, pf, function(leaves_by_date) {
                     last_leaves_by_date = leaves_by_date || {};
+
+                    // Explicit "no schedule at all" case (as opposed to a fetch failure,
+                    // which fails open) — don't guess at a default grid, say so plainly.
+                    if (practitioner_schedule_windows && total_window_count() === 0) {
+                        wrap.innerHTML =
+                            '<div class="cal-empty">Slots not assigned.<br>'
+                            + 'This practitioner has no Practitioner Schedule set up under '
+                            + '"Practitioner Schedules" on their Healthcare Practitioner record, '
+                            + 'so no bookable time slots can be shown.</div>';
+                        document.getElementById('btn-new-appt').disabled = true;
+                        return;
+                    }
+
+                    document.getElementById('btn-new-appt').disabled = false;
                     render_calendar(appts, wrap, f, t, leaves_by_date);
                 });
             }
