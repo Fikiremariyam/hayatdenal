@@ -225,6 +225,14 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             frappe.msgprint({ message: 'Please select a Healthcare Practitioner first.', indicator: 'orange' });
             return;
         }
+        if (is_on_leave(from_date)) {
+            frappe.msgprint({
+                title: 'Not Available',
+                message: prac + ' is on approved leave on ' + frappe.datetime.str_to_user(from_date) + '. Pick a different day instead.',
+                indicator: 'orange'
+            });
+            return;
+        }
         if (!is_day_working(from_date)) {
             frappe.msgprint({
                 title: 'Not Available',
@@ -414,6 +422,18 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             var s = time_str_to_minutes(w.from), e = time_str_to_minutes(w.to);
             return start >= s && end <= e;
         });
+    }
+
+    // Is the practitioner on approved leave on this date? Backed by whatever leave
+    // data was fetched for the currently-loaded date range (see last_leaves_by_date).
+    function is_on_leave(date) {
+        return !!(last_leaves_by_date[date] && last_leaves_by_date[date].length);
+    }
+
+    // Combined day-level bookability: scheduled to work AND not on leave. This is
+    // what actually drives the brown/non-bookable column treatment in the grid.
+    function is_day_bookable(date) {
+        return is_day_working(date) && !is_on_leave(date);
     }
 
     // ── Practitioner selection gate ───────────────────────────────
@@ -689,11 +709,12 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         }
 
         // Per-date / per-slot bookability, computed once for this render and reused
-        // by both the markup and the click handlers below.
+        // by both the markup and the click handlers below. A day is bookable only if
+        // the practitioner is scheduled to work AND not on approved leave.
         var day_working = {};
         var slot_ok = {};
         dates.forEach(function(d) {
-            day_working[d] = is_day_working(d);
+            day_working[d] = is_day_bookable(d);
             slot_ok[d] = TIME_SLOTS.map(function(_, si) {
                 return day_working[d] && is_slot_bookable(d, slot_to_time(si), SLOT_MINUTES);
             });
@@ -719,9 +740,10 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         html += '<div class="cal-head-row" style="grid-template-columns:' + grid_tpl + '">';
         html += '<div class="cal-head-cell"></div>';
         dates.forEach(function(d) {
+            var off_label = day_working[d] ? '' : (is_on_leave(d) ? 'on leave' : 'not working');
             html += '<div class="cal-head-cell' + (d === today ? ' today' : '') + '">'
                 + fmt_date_header(d)
-                + (day_working[d] ? '' : '<span class="cal-head-off">not working</span>')
+                + (off_label ? '<span class="cal-head-off">' + off_label + '</span>' : '')
                 + '</div>';
         });
         html += '</div>';
@@ -807,13 +829,16 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 var si = parseInt(el.dataset.slot, 10);
 
                 if (!slot_ok[d][si]) {
-                    frappe.msgprint({
-                        title: 'Not Available',
-                        message: !day_working[d]
-                            ? (practitioner_field.get_value() || 'This practitioner') + ' is not scheduled to work on ' + frappe.datetime.str_to_user(d) + '.'
-                            : 'That time is outside ' + (practitioner_field.get_value() || 'the practitioner') + "'s working hours on " + frappe.datetime.str_to_user(d) + '.',
-                        indicator: 'orange'
-                    });
+                    var prac_label = practitioner_field.get_value() || 'This practitioner';
+                    var msg;
+                    if (is_on_leave(d)) {
+                        msg = prac_label + ' is on approved leave on ' + frappe.datetime.str_to_user(d) + '.';
+                    } else if (!is_day_working(d)) {
+                        msg = prac_label + ' is not scheduled to work on ' + frappe.datetime.str_to_user(d) + '.';
+                    } else {
+                        msg = 'That time is outside ' + prac_label + "'s working hours on " + frappe.datetime.str_to_user(d) + '.';
+                    }
+                    frappe.msgprint({ title: 'Not Available', message: msg, indicator: 'orange' });
                     return;
                 }
 
@@ -1043,7 +1068,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 },
                 {
                     fieldtype: 'Link', fieldname: 'leave_type', label: 'Reason / Leave Type',
-                    options: 'Leave Type', reqd: 1
+                    options: 'Leave Type', reqd: 1,
+                    description: 'This will be set to Approved immediately, so the day is blocked on the calendar right away — even if the record can\'t be submitted (e.g. no leave balance allocated yet).'
                 },
                 { fieldtype: 'Column Break' },
                 {
@@ -1082,7 +1108,12 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                                     from_date: values.from_date,
                                     to_date: values.to_date,
                                     half_day: values.half_day,
-                                    description: values.description
+                                    description: values.description,
+                                    // Set directly rather than relying on submit()/workflow to get
+                                    // here — the calendar's leave lookup keys off this field, so
+                                    // this is what actually blocks the day, independent of whether
+                                    // the record can be submitted (e.g. no leave balance allocated).
+                                    status: 'Approved'
                                 }
                             },
                             freeze: true,
@@ -1090,19 +1121,44 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                             callback: function(ir) {
                                 var leave_name = ir.message && ir.message.name;
                                 if (!leave_name) return;
-                                // Attempt to submit so it takes effect immediately.
-                                // If the company requires leave approval, this may fail —
-                                // that's fine, it's saved as a pending request either way.
+
+                                // The day is already blocked on the calendar now (status is
+                                // Approved). Still try to submit so the record is fully official
+                                // for HR/payroll purposes — but don't treat a submit failure as
+                                // blocking, since the calendar doesn't depend on it.
                                 frappe.call({
                                     method: 'frappe.client.submit',
                                     args: { doc: ir.message },
                                     callback: function() {
-                                        frappe.show_alert({ message: 'Marked unavailable (' + leave_name + ')', indicator: 'green' });
+                                        frappe.show_alert({ message: 'Marked unavailable and approved (' + leave_name + ')', indicator: 'green' });
                                         dialog.hide();
                                         load_schedule();
                                     },
-                                    error: function() {
-                                        frappe.show_alert({ message: leave_name + ' saved, pending approval', indicator: 'orange' });
+                                    error: function(r) {
+                                        // Most commonly this is a Leave Type requiring a prior
+                                        // allocation the employee doesn't have — typical for
+                                        // unplanned sick days. Surface the real reason, but make
+                                        // clear the calendar is already blocked either way.
+                                        var reason = '';
+                                        try {
+                                            var sm = r && r._server_messages && JSON.parse(r._server_messages);
+                                            if (sm && sm.length) {
+                                                var first = JSON.parse(sm[0]);
+                                                if (first && first.message) reason = first.message;
+                                            }
+                                        } catch (e) { /* fall through to generic message */ }
+
+                                        frappe.msgprint({
+                                            title: 'Day Blocked — Record Left as Draft',
+                                            message: leave_name + ' is Approved and this day is now blocked on the calendar.'
+                                                + '<br><br>It could not also be submitted'
+                                                + (reason ? ':<br><br><i>' + frappe.utils.escape_html(reason) + '</i>' : '.')
+                                                + '<br><br>This usually happens when the Leave Type needs a leave balance '
+                                                + 'the employee hasn\'t been allocated. It\'ll stay a Draft record until '
+                                                + 'HR either allocates leave, enables <b>"Allow Negative Balance"</b> on '
+                                                + 'the Leave Type, or switches it to <b>Leave Without Pay</b>.',
+                                            indicator: 'orange'
+                                        });
                                         dialog.hide();
                                         load_schedule();
                                     }
