@@ -314,56 +314,55 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Dynamic time-slot grid, driven by the practitioner's schedule ──
+    // Rows are generated directly from each schedule window's own from/to time —
+    // NOT stepped uniformly from one global start — so a slot only ever exists
+    // where it exactly fits inside a real working window. A practitioner with
+    // different hours on different days (e.g. 9:00–12:00 one day, 8:15–11:00
+    // another) previously shared one 30-min ladder anchored to the earliest
+    // start, which could misalign with other days' windows and wrongly mark
+    // real slots as "outside working hours". Generating per-window avoids that.
     var SLOT_MINUTES = 30;
-    var grid_start_minutes = 8 * 60;
-    var grid_end_minutes   = 17 * 60 + 30;
-    var TIME_SLOTS = [];
+    var TIME_SLOTS = [];         // display labels, e.g. "09:00"
+    var TIME_SLOT_MINUTES = [];  // parallel array of minutes-from-midnight for each row
 
-    function build_time_slots() {
-        TIME_SLOTS = [];
-        for (var m = grid_start_minutes; m < grid_end_minutes; m += SLOT_MINUTES) {
-            TIME_SLOTS.push(format_time_label(m));
-        }
-        if (!TIME_SLOTS.length) TIME_SLOTS.push(format_time_label(grid_start_minutes));
-    }
-
-    // Widens the grid to cover the earliest start / latest end across all of the
-    // practitioner's schedule windows. Falls back to the default 8:00–5:00 grid
-    // when there's no schedule data to go on (fail-open case).
-    function compute_grid_bounds(windows) {
-        var min_start = null, max_end = null;
+    function build_time_slots(windows) {
+        var minute_set = {};
         if (windows) {
             Object.keys(windows).forEach(function(day) {
                 windows[day].forEach(function(w) {
                     var s = time_str_to_minutes(w.from);
                     var e = time_str_to_minutes(w.to);
-                    if (min_start === null || s < min_start) min_start = s;
-                    if (max_end   === null || e > max_end)   max_end   = e;
+                    for (var m = s; m + SLOT_MINUTES <= e; m += SLOT_MINUTES) {
+                        minute_set[m] = true;
+                    }
                 });
             });
         }
-        if (min_start === null) {
-            grid_start_minutes = 8 * 60;
-            grid_end_minutes   = 17 * 60 + 30;
-        } else {
-            // Anchor exactly to the schedule's own start/end time — no rounding —
-            // so the left-hand time column reflects the times actually set on the
-            // Practitioner Schedule (e.g. a 8:15 start stays 8:15, not 8:00).
-            grid_start_minutes = min_start;
-            grid_end_minutes   = max_end;
-            if (grid_end_minutes <= grid_start_minutes) grid_end_minutes = grid_start_minutes + SLOT_MINUTES;
+        var minutes = Object.keys(minute_set).map(Number).sort(function(a, b) { return a - b; });
+        if (!minutes.length) {
+            // No schedule to derive rows from — default 8:00–17:00 ladder (only
+            // ever shown while no practitioner is selected, since a practitioner
+            // with zero real windows renders the "Slots not assigned" message
+            // instead of this grid).
+            minutes = [];
+            for (var mm = 8 * 60; mm < 17 * 60 + 30; mm += SLOT_MINUTES) minutes.push(mm);
         }
-        build_time_slots();
+        TIME_SLOT_MINUTES = minutes;
+        TIME_SLOTS = minutes.map(format_time_label);
     }
-    build_time_slots(); // populate the default grid up-front
+    build_time_slots(null); // populate the default grid up-front
 
+    // Exact match only — an appointment time that doesn't land on a generated
+    // row (e.g. booked outside the current schedule by other means) falls back
+    // to the all-day row, same as before.
     function time_to_slot(time_str) {
         if (!time_str) return -1;
-        return Math.floor((time_str_to_minutes(time_str) - grid_start_minutes) / SLOT_MINUTES);
+        return TIME_SLOT_MINUTES.indexOf(time_str_to_minutes(time_str));
     }
 
     function slot_to_time(slot_index) {
-        var total_mins = grid_start_minutes + slot_index * SLOT_MINUTES;
+        var total_mins = TIME_SLOT_MINUTES[slot_index];
+        if (total_mins === undefined) total_mins = 0;
         var h = Math.floor(total_mins / 60), m = total_mins % 60;
         return (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m) + ':00';
     }
@@ -444,7 +443,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             // ignore stale responses if the user switched practitioners meanwhile
             if (practitioner_field.get_value() !== val) return;
             practitioner_schedule_windows = windows;
-            compute_grid_bounds(windows);
+            build_time_slots(windows);
             load_schedule();
         });
     }
