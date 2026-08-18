@@ -392,19 +392,21 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // Is the practitioner scheduled to work AT ALL on this date? (day-level, for
-    // the brown/non-bookable column treatment)
+    // the brown/non-bookable column treatment). Fails CLOSED: if we don't have a
+    // real, non-empty schedule for this practitioner, the day is not bookable —
+    // we never guess "available" when the schedule is unknown or empty.
     function is_day_working(date) {
-        if (!practitioner_schedule_windows) return true;   // unknown -> fail open
-        if (total_window_count() === 0) return true;       // no schedule configured -> fail open
+        if (!practitioner_schedule_windows) return false;
+        if (total_window_count() === 0) return false;
         var day_windows = practitioner_schedule_windows[get_weekday_name(date)] || [];
         return day_windows.length > 0;
     }
 
     // Is this specific date/time (+ duration) fully inside one of the practitioner's
-    // schedule windows for that weekday?
+    // schedule windows for that weekday? Same fail-closed rule as is_day_working.
     function is_slot_bookable(date, time_str, duration) {
-        if (!practitioner_schedule_windows) return true;
-        if (total_window_count() === 0) return true;
+        if (!practitioner_schedule_windows) return false;
+        if (total_window_count() === 0) return false;
         var day_windows = practitioner_schedule_windows[get_weekday_name(date)] || [];
         if (!day_windows.length) return false;
         var start = time_str_to_minutes(time_str);
@@ -563,9 +565,21 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 fetch_leaves(f, t, pf, function(leaves_by_date) {
                     last_leaves_by_date = leaves_by_date || {};
 
-                    // Explicit "no schedule at all" case (as opposed to a fetch failure,
-                    // which fails open) — don't guess at a default grid, say so plainly.
-                    if (practitioner_schedule_windows && total_window_count() === 0) {
+                    // Couldn't determine the schedule at all (lookup failed) — don't
+                    // guess either way, say so and offer a retry.
+                    if (!practitioner_schedule_windows) {
+                        wrap.innerHTML =
+                            '<div class="cal-empty">Couldn\'t load this practitioner\'s schedule.'
+                            + '<br><button class="cal-nav-btn" id="btn-retry-schedule" style="margin-top:10px">Retry</button></div>';
+                        document.getElementById('btn-new-appt').disabled = true;
+                        var retry_btn = document.getElementById('btn-retry-schedule');
+                        if (retry_btn) retry_btn.addEventListener('click', on_practitioner_changed);
+                        return;
+                    }
+
+                    // Explicit "no schedule at all" case — the Practitioner Schedules
+                    // table on this practitioner is empty (or resolves to zero slots).
+                    if (total_window_count() === 0) {
                         wrap.innerHTML =
                             '<div class="cal-empty">Slots not assigned.<br>'
                             + 'This practitioner has no Practitioner Schedule set up under '
