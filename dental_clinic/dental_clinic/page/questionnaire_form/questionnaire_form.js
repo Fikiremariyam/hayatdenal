@@ -77,7 +77,7 @@ function renderQuestionnaire(app, q) {
     var answers = {};
 
     function getOptions(question) {
-        return (question.custom_options_ || '')
+        return (question.custom_options || '')
             .split('\n')
             .map(function(o) { return o.trim(); })
             .filter(function(o) { return o; });
