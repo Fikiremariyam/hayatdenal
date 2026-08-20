@@ -46,6 +46,7 @@ frappe.pages['questionnaire-form'].on_page_load = function(wrapper) {
             );
             return;
         }
+        console.log('Questionnaire loaded:');
          console.log(data.message.questions);
         renderQuestionnaire(app, data.message);
     })
