@@ -1,5 +1,3 @@
-
-
 frappe.pages['questionnaire-form'].on_page_load = function(wrapper) {
 
     // ── CREATE THE APP DIV ──────────────────────────────────────
@@ -46,8 +44,6 @@ frappe.pages['questionnaire-form'].on_page_load = function(wrapper) {
             );
             return;
         }
-        console.log('Questionnaire loaded:');
-         console.log(data.message.questions);
         renderQuestionnaire(app, data.message);
     })
     .catch(function(err) {
@@ -78,11 +74,59 @@ function renderQuestionnaire(app, q) {
     var currentSection = 0;
     var answers = {};
 
+    // ── HARDENED OPTION PARSER ──────────────────────────────────
+    // Handles: plain \n separated text, \r\n (Windows line endings),
+    // stray HTML if the field type ever gets changed to Text Editor,
+    // and falls back to comma/semicolon separation if no newlines exist.
     function getOptions(question) {
-        return (question.custom_options || '')
-            .split('\n')
+        var raw = question.custom_options;
+
+        if (raw === undefined || raw === null) {
+            console.warn(
+                '[questionnaire-form] custom_options missing on question:',
+                question.name, question.label
+            );
+            return [];
+        }
+
+        raw = String(raw);
+
+        // Strip HTML tags in case the field ever holds rich text
+        if (/<[a-z][\s\S]*>/i.test(raw)) {
+            raw = raw
+                .replace(/<\/(p|div|li)>/gi, '\n')
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<[^>]+>/g, '');
+        }
+
+        // Normalize Windows line endings
+        raw = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+        var parts;
+        if (raw.indexOf('\n') !== -1) {
+            parts = raw.split('\n');
+        } else if (raw.indexOf(',') !== -1) {
+            // Fallback: comma-separated on a single line
+            parts = raw.split(',');
+        } else if (raw.indexOf(';') !== -1) {
+            // Fallback: semicolon-separated on a single line
+            parts = raw.split(';');
+        } else {
+            parts = [raw];
+        }
+
+        var options = parts
             .map(function(o) { return o.trim(); })
             .filter(function(o) { return o; });
+
+        if (options.length === 0) {
+            console.warn(
+                '[questionnaire-form] custom_options resolved to 0 options for:',
+                question.name, question.label, '-> raw value was:', JSON.stringify(question.custom_options)
+            );
+        }
+
+        return options;
     }
 
     function renderSection(idx) {
@@ -123,7 +167,8 @@ function renderQuestionnaire(app, q) {
             if (question.question_type === 'Select') {
                 var sel = $('<select class="form-control" style="max-width:420px"></select>');
                 sel.append('<option value="">\u2014 choose \u2014</option>');
-                getOptions(question).forEach(function(opt) {
+                var opts = getOptions(question);
+                opts.forEach(function(opt) {
                     sel.append(
                         '<option value="' + opt + '"'
                         + (saved === opt ? ' selected' : '') + '>'
