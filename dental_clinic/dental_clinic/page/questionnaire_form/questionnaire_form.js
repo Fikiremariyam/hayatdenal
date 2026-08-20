@@ -79,7 +79,7 @@ function renderQuestionnaire(app, q) {
     // stray HTML if the field type ever gets changed to Text Editor,
     // and falls back to comma/semicolon separation if no newlines exist.
     function getOptions(question) {
-        var raw = question.custom_options;
+        var raw = question.options;
 
         if (raw === undefined || raw === null) {
             console.warn(
