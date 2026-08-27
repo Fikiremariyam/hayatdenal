@@ -1,390 +1,372 @@
 /**
- * perio_comparison.js  —  ERPNext 15 · Dental Chart Page
- * (Tooth-diagram edition — adds a visual arch chart above each data table)
+ * perio_exam.js  —  ERPNext 15 · Dental Chart Page
+ * (Single-exam entry tool — modeled on "Appendix D. Dental sheet")
  *
  * ── HOW TO USE ────────────────────────────────────────────────────────────
- * 1. Desk → Search "Page" → open "perio_comparison"
+ * 1. Desk → Search "Page" → New Page (or reuse an existing one)
+ *      Page Name : perio_exam
+ *      Title     : Periodontal Examination
  * 2. Click the "Script" tab
  * 3. SELECT ALL existing code and DELETE it
  * 4. PASTE the entire contents of this file
  * 5. Click Save
- * 6. Navigate to /app/perio-comparison  (or ?patient=PT-XXXXX)
+ * 6. Navigate to /app/perio-exam            → blank new exam
+ *    or /app/perio-exam?patient=PT-00001    → new exam pre-loaded for a patient
+ *    or /app/perio-exam?name=DPE-00007      → open an existing exam for editing
  *
- * ── DocTypes required ────────────────────────────────────────────────────
- *   "Dental Chart"       — parent, Is Submittable ✓
- *   "Dental Chart Tooth" — child,  Is Child Table ✓
- *   "Dental Perio Exam"  — parent, with child table "perio_measurements"
- *      containing: tooth_number, sequence, pd_1/2/3, bop_1/2/3
+ * ── DocType required: "Dental Perio Exam" ───────────────────────────────
+ *   Parent fields:
+ *     patient (Link: Patient), exam_date (Date), assessed_by (Data),
+ *     total_teeth_present (Int), total_teeth_lost (Int),
+ *     periodontitis (Select: Present\nAbsent),
+ *     severity (Select: \nMild\nModerate\nSevere),
+ *     other_findings (Small Text), recommendation (Small Text),
+ *     missing_teeth (Data — comma separated tooth numbers)
+ *   Child table "perio_measurements" (doctype "Dental Perio Exam Measurement"):
+ *     tooth_number (Int), surface (Select: Buccal\nPalatal\nLingual),
+ *     recession (Int), pocket_depth (Int), mobility (Int)
  *
- * ── Tooth numbering assumed ──────────────────────────────────────────────
- *   Universal Numbering System (1–32).
- *   Upper arch: 1 (upper-right 3rd molar) → 16 (upper-left 3rd molar)
- *   Lower arch: 17 (lower-left 3rd molar) → 32 (lower-right 3rd molar)
- *   Tooth 1 sits directly above tooth 32, tooth 16 above tooth 17, so the
- *   diagram renders the lower row in reverse (32→17) to stay anatomically
- *   aligned under the upper row.
- *
- * ── Open with patient context ────────────────────────────────────────────
- *   /app/perio-comparison?patient=PT-00001
- *   (add a button to the Patient form via Client Script — see docs)
+ * ── Tooth numbering ──────────────────────────────────────────────────────
+ *   Universal Numbering System (1–32), read left→right exactly as the
+ *   paper sheet is laid out (R side of chart first, L side last):
+ *     Upper arch : 1  (upper right 3rd molar)  → 16 (upper left 3rd molar)
+ *     Lower arch : 32 (lower right 3rd molar)  → 17 (lower left 3rd molar)
+ *   The Buccal/Palatal rows share the upper-arch columns; the
+ *   Lingual/Buccal rows share the lower-arch columns — exactly as in the
+ *   reference sheet, where each surface view lines up over the same tooth.
  */
 
-frappe.pages["perio_comparison"].on_page_load = function (wrapper) {
+frappe.pages["perio_exam"].on_page_load = function (wrapper) {
     const page = frappe.ui.make_app_page({
         parent: wrapper,
-        title: "Perio Exam Comparison",
+        title: "Periodontal Examination",
         single_column: true,
     });
 
     // ── Inject CSS
     //─────────────────────────────────────────────────────────
     frappe.dom.set_style(`
-.perio-comparison-root {
+.pe-root {
 padding: 16px;
 font-family: -apple-system, "Segoe UI", Arial, sans-serif;
 font-size: 13px;
 color: #222;
+max-width: 1180px;
 }
-/* Controls */
-.pc-controls {
-background: #f4f8fc;
+.pe-card {
+background: #fff;
 border: 1px solid #d0dce8;
 border-radius: 6px;
-padding: 12px 16px;
+padding: 16px 18px;
 margin-bottom: 16px;
 }
-.pc-controls-inner {
-display: flex;
-align-items: flex-end;
-gap: 16px;
-flex-wrap: wrap;
+.pe-title {
+font-size: 15px;
+font-weight: 700;
+color: #1B4F8A;
+margin-bottom: 2px;
 }
-.pc-field {
+.pe-subtitle {
+font-size: 11px;
+color: #888;
+margin-bottom: 14px;
+}
+/* Header grid */
+.pe-header-grid {
+display: grid;
+grid-template-columns: repeat(4, 1fr);
+gap: 12px 16px;
+}
+.pe-field {
 display: flex;
 flex-direction: column;
 gap: 4px;
-min-width: 200px;
-flex: 1;
 }
-.pc-label {
-font-size: 11px;
+.pe-field.pe-span2 { grid-column: span 2; }
+.pe-field.pe-span4 { grid-column: span 4; }
+.pe-label {
+font-size: 10.5px;
 font-weight: 600;
 color: #555;
 text-transform: uppercase;
 letter-spacing: 0.4px;
 }
-.pc-select {
-height: 32px;
-padding: 0 8px;
+.pe-input, .pe-select, .pe-textarea {
 border: 1px solid #d1d8dd;
 border-radius: 4px;
 font-size: 13px;
+padding: 6px 8px;
 background: #fff;
-cursor: pointer;
 color: #222;
 }
-.pc-select:focus {
-outline: none;
-border-color: #1B4F8A;
-box-shadow: 0 0 0 2px rgba(27,79,138,0.12);
+.pe-input:disabled, .pe-input[readonly] { background: #f4f6f8; color: #667; }
+.pe-textarea { resize: vertical; min-height: 42px; font-family: inherit; }
+.pe-radio-row { display: flex; gap: 16px; align-items: center; height: 30px; }
+.pe-radio-row label { display: flex; align-items: center; gap: 5px; font-size: 12.5px; cursor: pointer; }
+.pe-patient-input, .pe-exam-picker { min-height: 30px; }
+/* Section (one surface row) */
+.pe-section {
+margin-bottom: 4px;
 }
-.pc-btn {
-height: 32px;
+.pe-section-head {
+display: flex;
+align-items: baseline;
+gap: 8px;
+margin-bottom: 6px;
+}
+.pe-section-name {
+font-size: 12px;
+font-weight: 700;
+letter-spacing: 0.6px;
+text-transform: uppercase;
+color: #1B4F8A;
+}
+.pe-section-rl {
+font-size: 10px;
+color: #999;
+}
+.pe-diagram-wrap { overflow-x: auto; margin-bottom: 4px; }
+.pe-diagram-wrap svg { display: block; }
+.pe-tooth-shape { stroke: #b8c4d0; stroke-width: 1; cursor: pointer; }
+.pe-tooth-shape:hover { stroke: #1B4F8A; stroke-width: 1.6; }
+.pe-tooth-shape.missing { fill: #e9ecef; stroke: #cbd3db; stroke-dasharray: 2,2; }
+.pe-tooth-num { font-size: 8px; font-weight: 700; fill: #555; text-anchor: middle; pointer-events: none; }
+.pe-tooth-x { font-size: 12px; font-weight: 700; fill: #b33; text-anchor: middle; pointer-events: none; }
+/* Data grid */
+.pe-grid-wrap { overflow-x: auto; margin-bottom: 18px; }
+.pe-grid {
+border-collapse: collapse;
+font-size: 11px;
+}
+.pe-grid th, .pe-grid td {
+border: 1px solid #e3e9f0;
+padding: 0;
+text-align: center;
+}
+.pe-grid thead th {
+background: #eef2f7;
+color: #555;
+font-size: 9px;
+font-weight: 700;
+padding: 4px 2px;
+}
+.pe-grid thead th:first-child { min-width: 84px; text-align: left; padding-left: 6px; }
+.pe-grid tbody th {
+background: #f5f7fa;
+color: #555;
+font-size: 10px;
+font-weight: 600;
+text-align: left;
+padding: 4px 6px;
+white-space: nowrap;
+}
+.pe-grid td { width: 30px; }
+.pe-cell-input {
+width: 28px;
+height: 24px;
+border: none;
+text-align: center;
+font-size: 11px;
+font-weight: 700;
+background: transparent;
+color: #222;
+}
+.pe-cell-input:focus { outline: 2px solid #1B4F8A; outline-offset: -2px; background: #eef4fb; }
+.pe-cell-input:disabled { background: #f0f2f5; color: #ccc; }
+.pe-cell-input.pd-h { color: #1a7a1a; }
+.pe-cell-input.pd-w { color: #b8860b; }
+.pe-cell-input.pd-d { color: #cc0000; }
+/* Actions */
+.pe-actions {
+display: flex;
+gap: 10px;
+justify-content: flex-end;
+align-items: center;
+margin-top: 4px;
+}
+.pe-btn {
+height: 34px;
 padding: 0 22px;
-background: #1B4F8A;
-color: #fff;
 border: none;
 border-radius: 4px;
 font-size: 13px;
 font-weight: 600;
 cursor: pointer;
 letter-spacing: 0.3px;
-flex-shrink: 0;
-transition: background 0.15s;
 }
-.pc-btn:hover { background: #163d6e; }
-.pc-btn:active { background: #0f2c50; }
-.pc-btn:disabled { background: #a0adb8; cursor: not-allowed; }
-/* Loading */
-.pc-loading {
-display: flex;
-align-items: center;
-justify-content: center;
-gap: 12px;
-padding: 48px;
-color: #888;
-font-size: 14px;
+.pe-btn-primary { background: #1B4F8A; color: #fff; }
+.pe-btn-primary:hover { background: #163d6e; }
+.pe-btn-primary:disabled { background: #a0adb8; cursor: not-allowed; }
+.pe-btn-secondary { background: #eef2f7; color: #444; }
+.pe-btn-secondary:hover { background: #e2e8f0; }
+.pe-save-msg { font-size: 11.5px; color: #0E7C7B; margin-right: auto; }
+.pe-legend {
+display: flex; flex-wrap: wrap; gap: 14px;
+padding: 2px 2px 0; font-size: 10.5px; color: #666;
 }
-.pc-spinner {
-width: 22px; height: 22px;
-border: 3px solid #d0dce8;
-border-top-color: #1B4F8A;
-border-radius: 50%;
-animation: pc-spin 0.7s linear infinite;
-}
-@keyframes pc-spin { to { transform: rotate(360deg); } }
-/* Empty state */
-.pc-empty { text-align: center; padding: 64px 24px; }
-.pc-empty-icon { font-size: 44px; margin-bottom: 14px; }
-.pc-empty p { font-size: 14px; color: #888; line-height: 1.6; }
-/* Split layout */
-.pc-split {
-display: flex;
-align-items: stretch;
-border: 1px solid #d0dce8;
-border-radius: 6px;
-overflow: hidden;
-margin-bottom: 10px;
-}
-.pc-pane { flex: 1; min-width: 0; overflow-x: auto; }
-/* Pane headers */
-.pc-pane-header {
-display: flex;
-justify-content: space-between;
-align-items: center;
-padding: 9px 12px;
-font-size: 11px;
-font-weight: 700;
-text-transform: uppercase;
-letter-spacing: 0.6px;
-}
-.pc-header-left { background: #1B4F8A; color: #fff; }
-.pc-header-right { background: #0E7C7B; color: #fff; }
-.pc-pane-date { font-weight: 400; opacity: 0.9; }
-/* Meta block */
-.pc-pane-meta {
-display: grid;
-grid-template-columns: repeat(3, 1fr);
-gap: 2px;
-padding: 8px 10px;
-background: #f9fbfd;
-border-bottom: 1px solid #e0e8f0;
-font-size: 11px;
-}
-.pc-meta-cell label {
-display: block;
-font-size: 9px;
-color: #999;
-text-transform: uppercase;
-letter-spacing: 0.4px;
-}
-.pc-meta-cell span { font-weight: 700; color: #222; }
-/* ── Tooth diagram ──────────────────────────────────────────────────── */
-.pc-diagram-wrap {
-padding: 10px 10px 4px;
-background: #fcfdfe;
-border-bottom: 1px solid #e0e8f0;
-overflow-x: auto;
-}
-.pc-diagram-wrap svg { display: block; margin: 0 auto; }
-.pc-tooth-shape {
-stroke: #b8c4d0;
-stroke-width: 1;
-cursor: default;
-transition: opacity 0.1s;
-}
-.pc-tooth-shape:hover { opacity: 0.75; stroke: #1B4F8A; stroke-width: 1.6; }
-.pc-tooth-num {
-font-size: 8px;
-font-weight: 700;
-fill: #555;
-text-anchor: middle;
-pointer-events: none;
-}
-.pc-tooth-pd-label {
-font-size: 8px;
-font-weight: 700;
-fill: #fff;
-text-anchor: middle;
-pointer-events: none;
-}
-.pc-tooth-bop {
-fill: #cc0000;
-stroke: #fff;
-stroke-width: 0.6;
-}
-.pc-tooth-missing {
-fill: #f0f2f5;
-stroke: #d5dce4;
-stroke-dasharray: 2,2;
-}
-/* Perio tables */
-.pc-pane-table { padding: 0 8px 10px; }
-.pc-tbl {
-width: 100%;
-border-collapse: collapse;
-font-size: 11px;
-table-layout: fixed;
-}
-.pc-tbl thead th {
-background: #eef2f7;
-color: #555;
-font-size: 9px;
-font-weight: 700;
-text-align: center;
-padding: 5px 2px;
-border: 1px solid #dde5ef;
-position: sticky;
-top: 0;
-z-index: 1;
-}
-.pc-tbl thead th:first-child {
-text-align: left;
-padding-left: 6px;
-width: 80px;
-}
-.pc-tbl tbody td {
-text-align: center;
-padding: 3px 2px;
-border: 1px solid #eef2f7;
-font-weight: 700;
-}
-.pc-tbl tbody td:first-child {
-text-align: left;
-padding-left: 6px;
-background: #f5f7fa;
-color: #555;
-font-size: 10px;
-font-weight: 600;
-}
-.pc-tbl tbody tr:nth-child(even) td { background: #fafcff; }
-.pc-tbl tbody tr:nth-child(even) td:first-child { background: #f0f3f8; }
-/* PD colour classes — consistent with print format */
-.pd-h { color: #1a7a1a; }
-.pd-w { color: #FFBF00; }
-.pd-d { color: #cc0000; }
-.pd-e { color: #ccc; }
-/* BOP dot */
-.bop-dot {
-display: inline-block;
-width: 5px; height: 5px;
-border-radius: 50%;
-background: #cc0000;
-vertical-align: middle;
-margin-left: 2px;
-}
-/* Legend */
-.pc-legend {
-display: flex;
-flex-wrap: wrap;
-gap: 14px;
-padding: 8px 4px 4px;
-font-size: 11px;
-color: #555;
-}
-.pc-legend-item { display: flex; align-items: center; gap: 5px; }
-.pc-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.pe-legend-item { display: flex; align-items: center; gap: 5px; }
+.pe-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; }
 `);
 
-    // ── PD colour scale (shared by table cells + tooth diagram) ────────────
-    const PD_COLORS = { h: "#1a7a1a", w: "#FFBF00", d: "#cc0000", e: "#dbe0e6" };
+    // ── Constants
+    //───────────────────────────────────────────────────────────
+    const UPPER_TEETH = Array.from({ length: 16 }, (_, i) => i + 1); // 1..16
+    const LOWER_TEETH = Array.from({ length: 16 }, (_, i) => 32 - i); // 32..17
     function pdBand(v) {
-        if (!v || v <= 0) return "e";
-        if (v <= 3) return "h";
-        if (v <= 5) return "w";
-        return "d";
+        if (!v || v <= 0) return "";
+        if (v <= 3) return "pd-h";
+        if (v <= 5) return "pd-w";
+        return "pd-d";
     }
+
+    // ── State
+    //──────────────────────────────────────────────────────────────
+    let selectedPatient = frappe.utils.get_url_arg("patient") || null;
+    let existingExamName = frappe.utils.get_url_arg("name") || null;
+    let missingTeeth = new Set(); // universal tooth numbers currently marked missing
 
     // ── Mount HTML template
     //──────────────────────────────────────────────────────
     page.main.html(`
-    <div class="perio-comparison-root">
-<!-- ── Control bar ──────────────────────────────────────── -->
-<div class="pc-controls">
-<div class="pc-controls-inner">
-<div class="pc-field">
-<label class="pc-label">Patient</label>
-<div class="pc-patient-input"></div>
+    <div class="pe-root">
+
+<!-- ── Patient / exam picker ─────────────────────────────── -->
+<div class="pe-card">
+<div class="pe-header-grid">
+<div class="pe-field pe-span2">
+<label class="pe-label">Patient</label>
+<div class="pe-patient-input"></div>
 </div>
-<div class="pc-field">
-<label class="pc-label" for="pc-exam-left">Baseline Exam</label>
-<select id="pc-exam-left" class="pc-select">
-<option value="">— Select exam —</option>
+<div class="pe-field pe-span2">
+<label class="pe-label">Load Existing Exam</label>
+<select id="pe-exam-picker" class="pe-select pe-exam-picker">
+<option value="">— New exam —</option>
 </select>
 </div>
-<div class="pc-field">
-<label class="pc-label" for="pc-exam-right">Current Exam</label>
-<select id="pc-exam-right" class="pc-select">
-<option value="">— Select exam —</option>
-</select>
-</div>
-<button id="pc-compare-btn" class="pc-btn">Compare Exams</button>
 </div>
 </div>
-<!-- ── Empty state ──────────────────────────────────────── -->
-<div id="pc-empty" class="pc-empty">
-<div class="pc-empty-icon">🦷</div>
-<p>
-Select a patient and two exam dates above, then click
-<strong>Compare Exams</strong>.
-</p>
+
+<!-- ── Appendix D style header ──────────────────────────────── -->
+<div class="pe-card">
+<div class="pe-title">Periodontal Examination</div>
+<div class="pe-subtitle">Appendix D · Dental sheet</div>
+<div class="pe-header-grid">
+<div class="pe-field">
+<label class="pe-label">Exam Date</label>
+<input id="pe-exam-date" type="date" class="pe-input" />
 </div>
-<!-- ── Loading state ────────────────────────────────────── -->
-<div id="pc-loading" class="pc-loading" style="display:none;">
-<div class="pc-spinner"></div>
-<span>Loading examination data...</span>
+<div class="pe-field">
+<label class="pe-label">Total Teeth Present</label>
+<input id="pe-teeth-present" type="text" class="pe-input" readonly />
 </div>
-<!-- ── Split-screen layout ──────────────────────────────── -->
-<div id="pc-split" class="pc-split" style="display:none;">
-<!-- LEFT — Baseline -->
-<div class="pc-pane">
-<div class="pc-pane-header pc-header-left">
-<span class="pc-pane-label">Baseline</span>
-<span id="pc-date-left" class="pc-pane-date"></span>
+<div class="pe-field">
+<label class="pe-label">Total Teeth Lost</label>
+<input id="pe-teeth-lost" type="text" class="pe-input" readonly />
 </div>
-<div id="pc-meta-left" class="pc-pane-meta"></div>
-<div id="pc-diagram-left" class="pc-diagram-wrap"></div>
-<div id="pc-table-left" class="pc-pane-table"></div>
+<div class="pe-field">
+<label class="pe-label">Assessed By</label>
+<input id="pe-assessed-by" type="text" class="pe-input" placeholder="Practitioner name" />
 </div>
-<!-- CENTRE — Delta -->
-<div class="pc-divider">
-<div class="pc-divider-label">Δ</div>
-<div id="pc-delta-col" class="pc-delta-col"></div>
-</div>
-<!-- RIGHT — Current -->
-<div class="pc-pane">
-<div class="pc-pane-header pc-header-right">
-<span class="pc-pane-label">Current</span>
-<span id="pc-date-right" class="pc-pane-date"></span>
-</div>
-<div id="pc-meta-right" class="pc-pane-meta"></div>
-<div id="pc-diagram-right" class="pc-diagram-wrap"></div>
-<div id="pc-table-right" class="pc-pane-table"></div>
+
+<div class="pe-field pe-span2">
+<label class="pe-label">Periodontitis</label>
+<div class="pe-radio-row">
+<label><input type="radio" name="pe-periodontitis" value="Present"> Present</label>
+<label><input type="radio" name="pe-periodontitis" value="Absent" checked> Absent</label>
 </div>
 </div>
-<!-- ── Legend ───────────────────────────────────────────── -->
-<div id="pc-legend" class="pc-legend" style="display:none;">
-<div class="pc-legend-item">
-<span class="pc-swatch" style="background:#1a7a1a;"></span>PD 1–3mm — Healthy
-</div>
-<div class="pc-legend-item">
-<span class="pc-swatch" style="background:#FFBF00;"></span>PD 4–5mm — Monitor
-</div>
-<div class="pc-legend-item">
-<span class="pc-swatch" style="background:#cc0000;"></span>PD ≥ 6mm — Disease
-</div>
-<div class="pc-legend-item">
-<span style="display:inline-block;width:8px;height:8px;border-radius:50%;
-background:#cc0000;margin-right:4px;"></span>Bleeding on Probing
-</div>
-<div class="pc-legend-item">
-<span class="pc-swatch" style="background:#0E7C7B;"></span>Δ Improved (↓ max PD)
-</div>
-<div class="pc-legend-item">
-<span class="pc-swatch" style="background:#cc0000;"></span>Δ Worsened (↑ max PD)
+<div class="pe-field pe-span2">
+<label class="pe-label">Severity of Periodontitis</label>
+<div class="pe-radio-row" id="pe-severity-row">
+<label><input type="radio" name="pe-severity" value="Mild"> Mild</label>
+<label><input type="radio" name="pe-severity" value="Moderate"> Moderate</label>
+<label><input type="radio" name="pe-severity" value="Severe"> Severe</label>
 </div>
 </div>
+
+<div class="pe-field pe-span4">
+<label class="pe-label">Other Findings</label>
+<textarea id="pe-other-findings" class="pe-textarea"></textarea>
+</div>
+<div class="pe-field pe-span4">
+<label class="pe-label">Recommendation</label>
+<textarea id="pe-recommendation" class="pe-textarea"></textarea>
+</div>
+</div>
+</div>
+
+<!-- ── Charting card ─────────────────────────────────────────── -->
+<div class="pe-card">
+
+<div class="pe-section" id="pe-section-buccal-upper">
+<div class="pe-section-head">
+<span class="pe-section-name">Buccal</span>
+<span class="pe-section-rl">(upper arch — click a tooth to mark it missing)</span>
+</div>
+<div id="pe-diagram-upper" class="pe-diagram-wrap"></div>
+<div class="pe-grid-wrap">
+<table class="pe-grid" id="pe-grid-buccal-upper"></table>
+</div>
+</div>
+
+<div class="pe-section" id="pe-section-palatal">
+<div class="pe-section-head">
+<span class="pe-section-name">Palatal</span>
+<span class="pe-section-rl">(upper arch)</span>
+</div>
+<div class="pe-grid-wrap">
+<table class="pe-grid" id="pe-grid-palatal"></table>
+</div>
+</div>
+
+<div class="pe-section" id="pe-section-lingual">
+<div class="pe-section-head">
+<span class="pe-section-name">Lingual</span>
+<span class="pe-section-rl">(lower arch — click a tooth to mark it missing)</span>
+</div>
+<div id="pe-diagram-lower" class="pe-diagram-wrap"></div>
+<div class="pe-grid-wrap">
+<table class="pe-grid" id="pe-grid-lingual"></table>
+</div>
+</div>
+
+<div class="pe-section" id="pe-section-buccal-lower">
+<div class="pe-section-head">
+<span class="pe-section-name">Buccal</span>
+<span class="pe-section-rl">(lower arch)</span>
+</div>
+<div class="pe-grid-wrap">
+<table class="pe-grid" id="pe-grid-buccal-lower"></table>
+</div>
+</div>
+
+<div class="pe-legend">
+<div class="pe-legend-item"><span class="pe-swatch" style="background:#1a7a1a;"></span>PD 1–3mm — Healthy</div>
+<div class="pe-legend-item"><span class="pe-swatch" style="background:#b8860b;"></span>PD 4–5mm — Monitor</div>
+<div class="pe-legend-item"><span class="pe-swatch" style="background:#cc0000;"></span>PD ≥ 6mm — Disease</div>
+<div class="pe-legend-item"><span class="pe-swatch" style="background:#e9ecef;border:1px dashed #cbd3db;"></span>Missing tooth</div>
+</div>
+
+</div>
+
+<!-- ── Save bar ──────────────────────────────────────────────── -->
+<div class="pe-actions">
+<span id="pe-save-msg" class="pe-save-msg"></span>
+<button id="pe-clear-btn" class="pe-btn pe-btn-secondary">Clear Form</button>
+<button id="pe-save-btn" class="pe-btn pe-btn-primary">Save Exam</button>
+</div>
+
 </div>
 `);
 
-    // ── State
-    //──────────────────────────────────────────────────────────────
-    let selectedPatient = null;
+    // ── Default exam date = today
+    //────────────────────────────────────────
+    $("#pe-exam-date").val(frappe.datetime.get_today());
 
     // ── Patient Link control
     //───────────────────────────────────────────────
     const patientCtrl = frappe.ui.form.make_control({
-        parent: $(".pc-patient-input"),
+        parent: $(".pe-patient-input"),
         df: {
             fieldtype: "Link",
             options: "Patient",
@@ -394,412 +376,357 @@ background:#cc0000;margin-right:4px;"></span>Bleeding on Probing
         },
         render_input: true,
     });
+    if (selectedPatient) patientCtrl.set_value(selectedPatient);
     patientCtrl.$input.on("change", function () {
         const val = patientCtrl.get_value();
         if (val && val !== selectedPatient) {
             selectedPatient = val;
-            fetchExamList(selectedPatient);
+            existingExamName = null;
+            fetchExamPicker(selectedPatient);
         }
     });
 
-    // ── Fetch all Perio Exams for patient ──────────────────────────────────
-    function fetchExamList(patient) {
-        ["#pc-exam-left", "#pc-exam-right"].forEach((id) => {
-            $(id).html('<option value="">Loading...</option>').prop("disabled", true);
+    // ── Severity row enabled only when Periodontitis = Present ─────────────
+    function refreshSeverityState() {
+        const present = $('input[name="pe-periodontitis"]:checked').val() === "Present";
+        $("#pe-severity-row input").prop("disabled", !present);
+        if (!present) $("#pe-severity-row input").prop("checked", false);
+    }
+    $(document).on("change", 'input[name="pe-periodontitis"]', refreshSeverityState);
+    refreshSeverityState();
+
+    // ── Build one grid (Recession / Pocket Depth [/ Mobility]) ──────────────
+    function buildGrid(elId, teeth, surface, includeMobility) {
+        const rowsDef = [
+            { key: "recession", label: "Recession (mm)" },
+            { key: "pocket_depth", label: "Pocket Depth (mm)" },
+        ];
+        if (includeMobility) rowsDef.push({ key: "mobility", label: "Mobility (0–3)" });
+
+        let html = `<thead><tr><th>Tooth #</th>`;
+        teeth.forEach((tn) => (html += `<th>${tn}</th>`));
+        html += `</tr></thead><tbody>`;
+        rowsDef.forEach((r) => {
+            html += `<tr><th>${r.label}</th>`;
+            teeth.forEach((tn) => {
+                const max = r.key === "mobility" ? 3 : 20;
+                html += `<td><input type="number" min="0" max="${max}" step="1"
+class="pe-cell-input" data-field="${r.key}" data-surface="${surface}" data-tooth="${tn}" /></td>`;
+            });
+            html += `</tr>`;
         });
+        html += `</tbody>`;
+        $(`#${elId}`).html(html);
+    }
+    buildGrid("pe-grid-buccal-upper", UPPER_TEETH, "Buccal", true);
+    buildGrid("pe-grid-palatal", UPPER_TEETH, "Palatal", false);
+    buildGrid("pe-grid-lingual", LOWER_TEETH, "Lingual", false);
+    buildGrid("pe-grid-buccal-lower", LOWER_TEETH, "Buccal", true);
+
+    // ── Live PD colour + delegated pocket-depth colouring ──────────────────
+    $(document).on("input", '.pe-cell-input[data-field="pocket_depth"]', function () {
+        const v = parseInt($(this).val()) || 0;
+        $(this).removeClass("pd-h pd-w pd-d");
+        const band = pdBand(v);
+        if (band) $(this).addClass(band);
+    });
+
+    // ── Tooth diagrams (Buccal-upper controls upper missing set,
+    //     Buccal-lower controls lower missing set) ──────────────────────────
+    function toothCellSVG(tn, x, y, w, h) {
+        const isMissing = missingTeeth.has(tn);
+        const cls = "pe-tooth-shape" + (isMissing ? " missing" : "");
+        let s = `<g class="pe-tooth-click" data-tooth="${tn}" style="cursor:pointer;">`;
+        s += `<rect class="${cls}" x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${isMissing ? "#e9ecef" : "#fff"
+            }"></rect>`;
+        s += `<text class="pe-tooth-num" x="${x + w / 2}" y="${y - 3}">${tn}</text>`;
+        if (isMissing) {
+            s += `<text class="pe-tooth-x" x="${x + w / 2}" y="${y + h / 2 + 4}">✕</text>`;
+        }
+        s += `</g>`;
+        return s;
+    }
+    function renderArchDiagram(elId, teeth) {
+        const toothW = 28,
+            toothH = 30,
+            gap = 3,
+            padX = 8,
+            padY = 12;
+        const rowW = teeth.length * toothW + (teeth.length - 1) * gap;
+        const svgW = rowW + padX * 2;
+        const svgH = padY + toothH + 4;
+        let svg = `<svg viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">`;
+        let x = padX;
+        teeth.forEach((tn) => {
+            svg += toothCellSVG(tn, x, padY, toothW, toothH);
+            x += toothW + gap;
+        });
+        svg += `</svg>`;
+        $(`#${elId}`).html(svg);
+    }
+    function renderDiagrams() {
+        renderArchDiagram("pe-diagram-upper", UPPER_TEETH);
+        renderArchDiagram("pe-diagram-lower", LOWER_TEETH);
+        applyMissingStateToGrids();
+        refreshTeethCounts();
+    }
+    $(document).on("click", ".pe-tooth-click", function () {
+        const tn = parseInt($(this).data("tooth"));
+        if (missingTeeth.has(tn)) missingTeeth.delete(tn);
+        else missingTeeth.add(tn);
+        renderDiagrams();
+    });
+
+    // ── Disable inputs for missing teeth across all grids, update counts ──
+    function applyMissingStateToGrids() {
+        $(".pe-cell-input").each(function () {
+            const tn = parseInt($(this).data("tooth"));
+            const disabled = missingTeeth.has(tn);
+            $(this).prop("disabled", disabled);
+            if (disabled) $(this).val("").removeClass("pd-h pd-w pd-d");
+        });
+    }
+    function refreshTeethCounts() {
+        const lost = missingTeeth.size;
+        const present = 32 - lost;
+        $("#pe-teeth-present").val(present);
+        $("#pe-teeth-lost").val(lost);
+    }
+    renderDiagrams();
+
+    // ── Load existing exams for the patient picker ──────────────────────────
+    function fetchExamPicker(patient) {
+        $("#pe-exam-picker").html('<option value="">Loading...</option>').prop("disabled", true);
         frappe.call({
             method: "frappe.client.get_list",
             args: {
                 doctype: "Dental Perio Exam",
                 filters: [["patient", "=", patient]],
-                fields: [
-                    "name",
-                    "exam_date",
-                    "bop_percentage",
-                    "gingival_status",
-                    "provider",
-                ],
-                order_by: "exam_date asc",
-                limit: 100,
+                fields: ["name", "exam_date", "assessed_by"],
+                order_by: "exam_date desc",
+                limit: 50,
             },
             callback: function (r) {
-                populateDropdowns(r.message || []);
+                const exams = r.message || [];
+                $("#pe-exam-picker")
+                    .empty()
+                    .append('<option value="">— New exam —</option>')
+                    .prop("disabled", false);
+                exams.forEach((e) => {
+                    const label = `${frappe.datetime.str_to_user(e.exam_date)}${e.assessed_by ? " · " + e.assessed_by : ""
+                        }`;
+                    $("#pe-exam-picker").append(`<option value="${e.name}">${label}</option>`);
+                });
+                if (existingExamName && exams.find((e) => e.name === existingExamName)) {
+                    $("#pe-exam-picker").val(existingExamName);
+                    loadExam(existingExamName);
+                }
             },
             error: function () {
+                $("#pe-exam-picker")
+                    .empty()
+                    .append('<option value="">— New exam —</option>')
+                    .prop("disabled", false);
                 frappe.msgprint({
                     title: "DocType Not Found",
                     message:
-                        "Could not query 'Perio Exam'. Ensure the Custom DocType exists and permissions are set.",
+                        "Could not query 'Dental Perio Exam'. Ensure the Custom DocType exists and permissions are set.",
+                    indicator: "red",
+                });
+            },
+        });
+    }
+    $(document).on("change", "#pe-exam-picker", function () {
+        const name = $(this).val();
+        existingExamName = name || null;
+        if (name) loadExam(name);
+        else resetFormFields();
+    });
+
+    // ── Reset form to a blank new exam (keeps selected patient) ────────────
+    function resetFormFields() {
+        existingExamName = null;
+        missingTeeth = new Set();
+        $("#pe-exam-date").val(frappe.datetime.get_today());
+        $("#pe-assessed-by").val("");
+        $('input[name="pe-periodontitis"][value="Absent"]').prop("checked", true);
+        $('input[name="pe-severity"]').prop("checked", false);
+        refreshSeverityState();
+        $("#pe-other-findings").val("");
+        $("#pe-recommendation").val("");
+        $(".pe-cell-input").val("").prop("disabled", false).removeClass("pd-h pd-w pd-d");
+        renderDiagrams();
+        $("#pe-save-msg").text("");
+    }
+    $("#pe-clear-btn").on("click", function () {
+        frappe.confirm(
+            "Clear all entered data on this form? This does not delete a saved record.",
+            resetFormFields,
+        );
+    });
+
+    // ── Load an existing exam's data into the form ──────────────────────────
+    function loadExam(name) {
+        frappe.call({
+            method: "frappe.client.get",
+            args: { doctype: "Dental Perio Exam", name: name },
+            callback: function (r) {
+                const doc = r.message;
+                if (!doc) return;
+                existingExamName = doc.name;
+                $("#pe-exam-date").val(doc.exam_date || frappe.datetime.get_today());
+                $("#pe-assessed-by").val(doc.assessed_by || "");
+                $(`input[name="pe-periodontitis"][value="${doc.periodontitis || "Absent"}"]`).prop(
+                    "checked",
+                    true,
+                );
+                refreshSeverityState();
+                if (doc.severity) {
+                    $(`input[name="pe-severity"][value="${doc.severity}"]`).prop("checked", true);
+                }
+                $("#pe-other-findings").val(doc.other_findings || "");
+                $("#pe-recommendation").val(doc.recommendation || "");
+
+                missingTeeth = new Set(
+                    (doc.missing_teeth || "")
+                        .split(",")
+                        .map((s) => parseInt(s.trim()))
+                        .filter((n) => n),
+                );
+
+                $(".pe-cell-input").val("").removeClass("pd-h pd-w pd-d");
+                (doc.perio_measurements || []).forEach((row) => {
+                    ["recession", "pocket_depth", "mobility"].forEach((field) => {
+                        if (row[field] === undefined || row[field] === null) return;
+                        const $input = $(
+                            `.pe-cell-input[data-field="${field}"][data-surface="${row.surface}"][data-tooth="${row.tooth_number}"]`,
+                        );
+                        if ($input.length) {
+                            $input.val(row[field]);
+                            if (field === "pocket_depth") {
+                                const band = pdBand(parseInt(row[field]));
+                                if (band) $input.addClass(band);
+                            }
+                        }
+                    });
+                });
+                renderDiagrams(); // also re-applies missing-state disabling
+                $("#pe-save-msg").text(`Loaded exam ${doc.name}`);
+            },
+            error: function () {
+                frappe.msgprint({
+                    title: "Load Error",
+                    message: "Could not load the selected exam. Check permissions.",
                     indicator: "red",
                 });
             },
         });
     }
 
-    // ── Populate exam dropdowns
-    //────────────────────────────────────────────
-    function populateDropdowns(exams) {
-        ["#pc-exam-left", "#pc-exam-right"].forEach((id) => {
-            $(id)
-                .empty()
-                .append('<option value="">— Select exam —</option>')
-                .prop("disabled", false);
-        });
+    // ── Collect form data into a Dental Perio Exam doc payload ─────────────
+    function collectPayload() {
+        const measurements = [];
 
-        if (!exams.length) {
-            frappe.msgprint({
-                title: "No Exams Found",
-                message: "This patient has no Perio Exam records.",
-                indicator: "orange",
-            });
-            return;
-        }
-        exams.forEach((e) => {
-            const dateStr = frappe.datetime.str_to_user(e.exam_date);
-            const bopStr =
-                e.bop_percentage != null
-                    ? ` | BOP ${e.bop_percentage.toFixed(1)}%`
+        function collectSurface(surface, teeth, includeMobility) {
+            teeth.forEach((tn) => {
+                if (missingTeeth.has(tn)) return; // skip missing teeth entirely
+                const rec = $(
+                    `.pe-cell-input[data-field="recession"][data-surface="${surface}"][data-tooth="${tn}"]`,
+                ).val();
+                const pd = $(
+                    `.pe-cell-input[data-field="pocket_depth"][data-surface="${surface}"][data-tooth="${tn}"]`,
+                ).val();
+                const mob = includeMobility
+                    ? $(
+                        `.pe-cell-input[data-field="mobility"][data-surface="${surface}"][data-tooth="${tn}"]`,
+                    ).val()
                     : "";
-            const label = `${dateStr}${bopStr}`;
-            ["#pc-exam-left", "#pc-exam-right"].forEach((id) => {
-                $(id).append(`<option value="${e.name}">${label}</option>`);
+                if (rec === "" && pd === "" && mob === "") return; // nothing entered
+                measurements.push({
+                    tooth_number: tn,
+                    surface: surface,
+                    recession: rec === "" ? null : parseInt(rec),
+                    pocket_depth: pd === "" ? null : parseInt(pd),
+                    mobility: mob === "" ? null : parseInt(mob),
+                });
             });
-        });
-        // Default: oldest left, newest right
-        if (exams.length >= 2) {
-            $("#pc-exam-left").val(exams[0].name);
-            $("#pc-exam-right").val(exams[exams.length - 1].name);
         }
+        collectSurface("Buccal", UPPER_TEETH, true);
+        collectSurface("Palatal", UPPER_TEETH, false);
+        collectSurface("Lingual", LOWER_TEETH, false);
+        collectSurface("Buccal", LOWER_TEETH, true);
+
+        const doc = {
+            doctype: "Dental Perio Exam",
+            patient: selectedPatient,
+            exam_date: $("#pe-exam-date").val(),
+            assessed_by: $("#pe-assessed-by").val(),
+            total_teeth_present: parseInt($("#pe-teeth-present").val()) || 0,
+            total_teeth_lost: parseInt($("#pe-teeth-lost").val()) || 0,
+            periodontitis: $('input[name="pe-periodontitis"]:checked').val() || "Absent",
+            severity: $('input[name="pe-severity"]:checked').val() || "",
+            other_findings: $("#pe-other-findings").val(),
+            recommendation: $("#pe-recommendation").val(),
+            missing_teeth: Array.from(missingTeeth).sort((a, b) => a - b).join(","),
+            perio_measurements: measurements,
+        };
+        if (existingExamName) doc.name = existingExamName;
+        return doc;
     }
 
-    // ── Compare button ─────────────────────────────────────────────────────
-    $("#pc-compare-btn").on("click", function () {
-        const leftName = $("#pc-exam-left").val();
-        const rightName = $("#pc-exam-right").val();
+    // ── Save (insert or update) ──────────────────────────────────────────
+    $("#pe-save-btn").on("click", function () {
         if (!selectedPatient) {
             frappe.msgprint({
                 title: "No Patient",
-                message: "Please select a patient first.",
+                message: "Please select a patient before saving.",
                 indicator: "orange",
             });
             return;
         }
-        if (!leftName || !rightName) {
+        if (!$("#pe-exam-date").val()) {
             frappe.msgprint({
-                title: "Select Both Exams",
-                message: "Please select a Baseline and a Current exam.",
+                title: "No Exam Date",
+                message: "Please set the exam date.",
                 indicator: "orange",
             });
             return;
         }
-        if (leftName === rightName) {
-            frappe.msgprint({
-                title: "Same Exam",
-                message: "Please select two different exam dates.",
-                indicator: "orange",
-            });
-            return;
-        }
-        runComparison(leftName, rightName);
-    });
+        const payload = collectPayload();
+        $("#pe-save-btn").prop("disabled", true).text("Saving...");
+        $("#pe-save-msg").text("");
 
-    // ── Fetch and render both docs ──────────────────────────────────────────
-    function runComparison(leftName, rightName) {
-        $("#pc-empty").hide();
-        $("#pc-split").hide();
-        $("#pc-legend").hide();
-        $("#pc-loading").show();
-        $("#pc-compare-btn").prop("disabled", true).text("Loading...");
-        Promise.all([
-            frappe.call({
-                method: "frappe.client.get",
-                args: { doctype: "Dental Perio Exam", name: leftName },
-            }),
-            frappe.call({
-                method: "frappe.client.get",
-                args: { doctype: "Dental Perio Exam", name: rightName },
-            }),
-        ])
-            .then(([lRes, rRes]) => {
-                $("#pc-loading").hide();
-                $("#pc-compare-btn").prop("disabled", false).text("Compare Exams");
-                const leftDoc = lRes.message;
-                const rightDoc = rRes.message;
-                if (!leftDoc || !rightDoc) {
+        const method = existingExamName ? "frappe.client.save" : "frappe.client.insert";
+        const args = existingExamName ? { doc: payload } : { doc: payload };
+
+        frappe
+            .call({ method, args })
+            .then((r) => {
+                $("#pe-save-btn").prop("disabled", false).text("Save Exam");
+                const doc = r.message;
+                if (!doc) {
                     frappe.msgprint({
-                        title: "Load Error",
-                        message:
-                            "Could not load one or both Perio Exam records. Check permissions.",
+                        title: "Save Error",
+                        message: "The exam could not be saved. Check DocType permissions and fields.",
                         indicator: "red",
                     });
                     return;
                 }
-                renderPane("left", leftDoc);
-                renderPane("right", rightDoc);
-                renderDelta(leftDoc, rightDoc);
-                $("#pc-split").show();
-                $("#pc-legend").show();
+                existingExamName = doc.name;
+                $("#pe-save-msg").text(`Saved · ${doc.name}`);
+                frappe.show_alert({ message: `Perio exam saved (${doc.name})`, indicator: "green" });
+                fetchExamPicker(selectedPatient);
             })
             .catch(() => {
-                $("#pc-loading").hide();
-                $("#pc-compare-btn").prop("disabled", false).text("Compare Exams");
+                $("#pe-save-btn").prop("disabled", false).text("Save Exam");
                 frappe.msgprint({
                     title: "Error",
-                    message: "An unexpected error occurred.",
+                    message: "An unexpected error occurred while saving.",
                     indicator: "red",
                 });
             });
-    }
+    });
 
-    // ── Render one pane (diagram + table)
-    //───────────────────────────────────
-    function renderPane(side, doc) {
-        $(`#pc-date-${side}`).text(frappe.datetime.str_to_user(doc.exam_date));
-        $(`#pc-meta-${side}`).html(`
-<div class="pc-meta-cell">
-<label>Practitioner</label>
-<span>${doc.provider || "—"}</span>
-</div>
-<div class="pc-meta-cell">
-<label>BOP %</label>
-<span>${doc.bop_percentage != null ? doc.bop_percentage.toFixed(1) + "%" : "—"
-            }</span>
-</div>
-<div class="pc-meta-cell">
-<label>Gingival Status</label>
-<span>${doc.gingival_status || "—"}</span>
-</div>
-`);
-
-        const rows = (doc.perio_measurements || [])
-            .slice()
-            .sort(
-                (a, b) =>
-                    (parseInt(a.tooth_number) || 0) - (parseInt(b.tooth_number) || 0),
-            );
-
-        // ── Tooth diagram ────────────────────────────────────────────────
-        $(`#pc-diagram-${side}`).html(buildToothDiagramSVG(rows));
-
-        // ── Data table ───────────────────────────────────────────────────
-        let html = `
-<table class="pc-tbl">
-<thead>
-<tr>
-<th>Tooth</th>
-<th>MB/ML</th>
-<th>B/L</th>
-<th>DB/DL</th>
-</tr>
-</thead>
-<tbody>
-`;
-        rows.forEach((row) => {
-            const seq = row.sequence || "Facial";
-            const tooth_label = `${row.tooth_number}${seq ? ` <small style="color:#aaa">${seq[0]}</small>` : ""
-                }`;
-            html += `
-<tr>
-<td>${tooth_label}</td>
-${pdCell(row.pd_1, row.bop_1)}
-${pdCell(row.pd_2, row.bop_2)}
-${pdCell(row.pd_3, row.bop_3)}
-</tr>
-`;
-        });
-        if (!rows.length) {
-            html += `<tr><td colspan="4" style="text-align:center;color:#aaa;padding:18px;">
-No measurements recorded.</td></tr>`;
-        }
-        html += `</tbody></table>`;
-        $(`#pc-table-${side}`).html(html);
-    }
-
-    // ── Build the SVG tooth arch diagram for one exam
-    //──────────────────────
-    // Lays out Universal-numbered teeth 1–32 in two anatomically aligned
-    // rows (upper 1→16 left-to-right, lower 32→17 left-to-right so each
-    // tooth sits above/below its numbering partner). Each tooth is filled
-    // by its worst (max) probing depth across the three recorded sites,
-    // and gets a red dot if any site bled on probing.
-    function buildToothDiagramSVG(rows) {
-        const byTooth = {};
-        rows.forEach((row) => {
-            const tn = parseInt(row.tooth_number);
-            if (!tn || tn < 1 || tn > 32) return;
-            const sites = [row.pd_1, row.pd_2, row.pd_3].map((v) => parseInt(v) || 0);
-            const valid = sites.filter((v) => v > 0);
-            const max = valid.length ? Math.max(...valid) : 0;
-            const bop = !!(row.bop_1 || row.bop_2 || row.bop_3);
-            // If a tooth has multiple rows (e.g. facial + lingual sequence),
-            // keep whichever is worse so the diagram shows the worst finding.
-            if (!byTooth[tn] || max > byTooth[tn].max) {
-                byTooth[tn] = { max, bop };
-            } else if (bop) {
-                byTooth[tn].bop = true;
-            }
-        });
-
-        const upper = []; // 1..16
-        for (let t = 1; t <= 16; t++) upper.push(t);
-        const lower = []; // 32..17 (mirrors upper for anatomical alignment)
-        for (let t = 32; t >= 17; t--) lower.push(t);
-
-        const toothW = 28,
-            toothH = 34,
-            gap = 3,
-            rowGap = 14,
-            padX = 10,
-            padY = 8,
-            labelH = 11;
-        const rowW = upper.length * toothW + (upper.length - 1) * gap;
-        const svgW = rowW + padX * 2;
-        const svgH = padY * 2 + labelH * 2 + toothH * 2 + rowGap;
-
-        function toothCell(tn, x, y) {
-            const data = byTooth[tn];
-            const present = !!data;
-            const band = present ? pdBand(data.max) : "e";
-            const fill = present ? PD_COLORS[band] : "#f0f2f5";
-            const textFill = present && band !== "h" ? "#fff" : (present ? "#fff" : "#bbb");
-            const cls = present ? "pc-tooth-shape" : "pc-tooth-shape pc-tooth-missing";
-            const title = present
-                ? `Tooth ${tn} — max PD ${data.max}mm${data.bop ? " · BOP+" : ""}`
-                : `Tooth ${tn} — no data`;
-            let s = `<g>`;
-            s += `<rect class="${cls}" x="${x}" y="${y}" width="${toothW}" height="${toothH}" rx="7" fill="${fill}"><title>${title}</title></rect>`;
-            s += `<text class="pc-tooth-num" x="${x + toothW / 2}" y="${y - 3}">${tn}</text>`;
-            if (present && data.max > 0) {
-                s += `<text class="pc-tooth-pd-label" x="${x + toothW / 2}" y="${y + toothH / 2 + 3
-                    }" fill="${textFill}">${data.max}</text>`;
-            }
-            if (present && data.bop) {
-                s += `<circle class="pc-tooth-bop" cx="${x + toothW - 5}" cy="${y + 6}" r="3"><title>Bleeding on probing</title></circle>`;
-            }
-            s += `</g>`;
-            return s;
-        }
-
-        let svg = `<svg viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">`;
-
-        // Upper arch
-        let x = padX;
-        const upperY = padY + labelH;
-        upper.forEach((tn) => {
-            svg += toothCell(tn, x, upperY);
-            x += toothW + gap;
-        });
-
-        // Lower arch
-        x = padX;
-        const lowerY = upperY + toothH + rowGap + labelH;
-        lower.forEach((tn) => {
-            svg += toothCell(tn, x, lowerY);
-            x += toothW + gap;
-        });
-
-        // Midline divider between upper/lower arches
-        svg += `<line x1="${padX}" y1="${upperY + toothH + rowGap / 2
-            }" x2="${svgW - padX}" y2="${upperY + toothH + rowGap / 2
-            }" stroke="#e0e8f0" stroke-width="1" stroke-dasharray="3,3" />`;
-
-        svg += `</svg>`;
-        return svg;
-    }
-
-    // ── Render delta column
-    //────────────────────────────────────────────────
-    // Uses MAX pocket depth per row — not average.
-    function renderDelta(leftDoc, rightDoc) {
-        function buildMap(doc) {
-            const map = {};
-            (doc.perio_measurements || []).forEach((row) => {
-                const key = `${row.tooth_number}:${(row.sequence || "Facial")[0]}`;
-                const sites = [row.pd_1, row.pd_2, row.pd_3].map(
-                    (v) => parseInt(v) || 0,
-                );
-                const valid = sites.filter((v) => v > 0);
-                map[key] = {
-                    max: valid.length ? Math.max(...valid) : null,
-                    sites: sites,
-                };
-            });
-            return map;
-        }
-        const leftMap = buildMap(leftDoc);
-        const rightMap = buildMap(rightDoc);
-        const allKeys = [
-            ...new Set([...Object.keys(leftMap), ...Object.keys(rightMap)]),
-        ].sort((a, b) => {
-            const [tn] = a.split(":");
-            const [tn2] = b.split(":");
-            return parseInt(tn) - parseInt(tn2);
-        });
-        // Spacers to align with pane header, meta, diagram, and table header
-        let html = "";
-        html += `<div class="pc-delta-cell d-neutral"
-style="min-height:38px;background:#f5f7f9;border-bottom:1px solid
-#e0e8f0;"></div>`;
-        html += `<div class="pc-delta-cell d-neutral"
-style="min-height:52px;background:#f9fbfd;border-bottom:1px solid
-#e0e8f0;"></div>`;
-        // Diagram row height must roughly match buildToothDiagramSVG's svgH
-        html += `<div class="pc-delta-cell d-neutral"
-style="min-height:130px;background:#fcfdfe;border-bottom:1px solid
-#e0e8f0;"></div>`;
-        html += `<div class="pc-delta-cell d-neutral"
-style="min-height:26px;background:#eef2f7;font-size:9px;color:#888;
-border-bottom:1px solid #dde5ef;">Δ max</div>`;
-        allKeys.forEach((key) => {
-            const l = leftMap[key];
-            const r = rightMap[key];
-            if (!l && r) {
-                html += `<div class="pc-delta-cell d-new" title="New tooth in current
-exam">NEW</div>`;
-                return;
-            }
-            if (l && !r) {
-                html += `<div class="pc-delta-cell d-gone" title="Not recorded in current
-exam">N/R</div>`;
-                return;
-            }
-            if (l.max == null || r.max == null) {
-                html += `<div class="pc-delta-cell d-neutral">—</div>`;
-                return;
-            }
-            const diff = r.max - l.max;
-            // Per-site tooltip for forensic review on hover
-            const siteLabels = ["MB/ML", "B/L", "DB/DL"];
-            const tooltip = siteLabels
-                .map((lbl, i) => {
-                    const sL = l.sites[i] || 0;
-                    const sR = r.sites[i] || 0;
-                    const d = sR - sL;
-                    return `${lbl}: ${sL}→${sR} ${d < 0 ? "↓" : d > 0 ? "↑" : "="}`;
-                })
-                .join(" | ");
-            let cls, label;
-            if (diff < 0) {
-                cls = "d-better";
-                label = `↓${Math.abs(diff)}`;
-            } else if (diff > 0) {
-                cls = "d-worse";
-                label = `↑${diff}`;
-            } else {
-                cls = "d-neutral";
-                label = "=";
-            }
-            html += `<div class="pc-delta-cell ${cls}" title="${tooltip}">${label}</div>`;
-        });
-        $("#pc-delta-col").html(html);
-    }
-
-    // ── Helper: single PD cell
-    //─────────────────────────────────────────────
-    function pdCell(val, bop) {
-        const v = parseInt(val) || 0;
-        const cls = v === 0 ? "pd-e" : v <= 3 ? "pd-h" : v <= 5 ? "pd-w" : "pd-d";
-        const dot = bop ? `<span class="bop-dot"></span>` : "";
-        return `<td class="${cls}" title="${v ? v + "mm" : "no reading"}">${v || "—"}${dot}</td>`;
-    }
+    // ── Initial load ─────────────────────────────────────────────────────
+    if (selectedPatient) fetchExamPicker(selectedPatient);
 };
