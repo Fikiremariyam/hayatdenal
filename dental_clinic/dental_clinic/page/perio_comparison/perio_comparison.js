@@ -157,7 +157,28 @@ font-size: 9px;
 font-weight: 700;
 padding: 4px 2px;
 }
-.pe-grid thead th:first-child { min-width: 84px; text-align: left; padding-left: 6px; }
+.pe-grid thead th:first-child { min-width: 0; text-align: left; padding-left: 6px; }
+.pe-row-group {
+background: #eef2f7;
+color: #1B4F8A;
+font-size: 10px;
+font-weight: 700;
+text-align: left;
+padding: 4px 6px;
+white-space: nowrap;
+vertical-align: middle;
+min-width: 78px;
+}
+.pe-row-unit { display: block; font-size: 8.5px; font-weight: 500; color: #888; text-transform: none; letter-spacing: 0; }
+.pe-row-site {
+background: #f5f7fa;
+color: #999;
+font-size: 9px;
+font-weight: 600;
+text-align: center;
+padding: 4px 2px;
+width: 18px;
+}
 .pe-grid tbody th {
 background: #f5f7fa;
 color: #555;
@@ -310,7 +331,7 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
 <span class="pe-section-name">Buccal</span>
 <span class="pe-section-rl">(upper arch — click a tooth to mark it missing)</span>
 </div>
-<div id="pe-diagram-upper" class="pe-diagram-wrap"></div>
+<div id="pe-diagram-buccal-upper" class="pe-diagram-wrap"></div>
 <div class="pe-grid-wrap">
 <table class="pe-grid" id="pe-grid-buccal-upper"></table>
 </div>
@@ -319,8 +340,9 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
 <div class="pe-section" id="pe-section-palatal">
 <div class="pe-section-head">
 <span class="pe-section-name">Palatal</span>
-<span class="pe-section-rl">(upper arch)</span>
+<span class="pe-section-rl">(upper arch — click a tooth to mark it missing)</span>
 </div>
+<div id="pe-diagram-palatal" class="pe-diagram-wrap"></div>
 <div class="pe-grid-wrap">
 <table class="pe-grid" id="pe-grid-palatal"></table>
 </div>
@@ -331,7 +353,7 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
 <span class="pe-section-name">Lingual</span>
 <span class="pe-section-rl">(lower arch — click a tooth to mark it missing)</span>
 </div>
-<div id="pe-diagram-lower" class="pe-diagram-wrap"></div>
+<div id="pe-diagram-lingual" class="pe-diagram-wrap"></div>
 <div class="pe-grid-wrap">
 <table class="pe-grid" id="pe-grid-lingual"></table>
 </div>
@@ -340,8 +362,9 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
 <div class="pe-section" id="pe-section-buccal-lower">
 <div class="pe-section-head">
 <span class="pe-section-name">Buccal</span>
-<span class="pe-section-rl">(lower arch)</span>
+<span class="pe-section-rl">(lower arch — click a tooth to mark it missing)</span>
 </div>
+<div id="pe-diagram-buccal-lower" class="pe-diagram-wrap"></div>
 <div class="pe-grid-wrap">
 <table class="pe-grid" id="pe-grid-buccal-lower"></table>
 </div>
@@ -409,44 +432,31 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
     const MOBILITY_ROWS = 2;
 
     function buildGrid(elId, teeth, surface, includeMobility) {
-        const rowsDef = [];
-        for (let i = 1; i <= RECESSION_ROWS; i++) {
-            rowsDef.push({
-                field: `recession-${i}`,
-                label: `Recession ${i} (mm)`,
-                max: 20,
-                colour: false,
-            });
-        }
-        for (let i = 1; i <= POCKET_DEPTH_ROWS; i++) {
-            rowsDef.push({
-                field: `pocket_depth-${i}`,
-                label: `Pocket Depth ${i} (mm)`,
-                max: 20,
-                colour: true,
-            });
-        }
+        const groups = [
+            { field: "recession", type: "Recession", unit: "mm", rows: RECESSION_ROWS, max: 20, colour: false },
+            { field: "pocket_depth", type: "Pocket Depth", unit: "mm", rows: POCKET_DEPTH_ROWS, max: 20, colour: true },
+        ];
         if (includeMobility) {
-            for (let i = 1; i <= MOBILITY_ROWS; i++) {
-                rowsDef.push({
-                    field: `mobility-${i}`,
-                    label: `Mobility ${i} (0–3)`,
-                    max: 3,
-                    colour: false,
-                });
-            }
+            groups.push({ field: "mobility", type: "Mobility", unit: "0–3", rows: MOBILITY_ROWS, max: 3, colour: false });
         }
 
-        let html = `<thead><tr><th>Tooth #</th>`;
+        let html = `<thead><tr><th colspan="2">Tooth #</th>`;
         teeth.forEach((tn) => (html += `<th>${tn}</th>`));
         html += `</tr></thead><tbody>`;
-        rowsDef.forEach((r) => {
-            html += `<tr><th>${r.label}</th>`;
-            teeth.forEach((tn) => {
-                html += `<td><input type="number" min="0" max="${r.max}" step="1"
-class="pe-cell-input" data-field="${r.field}" data-surface="${surface}" data-tooth="${tn}" /></td>`;
-            });
-            html += `</tr>`;
+
+        groups.forEach((g) => {
+            for (let i = 1; i <= g.rows; i++) {
+                html += `<tr>`;
+                if (i === 1) {
+                    html += `<th class="pe-row-group" rowspan="${g.rows}">${g.type}<span class="pe-row-unit">(${g.unit})</span></th>`;
+                }
+                html += `<th class="pe-row-site">${i}</th>`;
+                teeth.forEach((tn) => {
+                    html += `<td><input type="number" min="0" max="${g.max}" step="1"
+class="pe-cell-input" data-field="${g.field}-${i}" data-surface="${surface}" data-tooth="${tn}" /></td>`;
+                });
+                html += `</tr>`;
+            }
         });
         html += `</tbody>`;
         $(`#${elId}`).html(html);
@@ -511,8 +521,10 @@ Z`;
         $(`#${elId}`).html(svg);
     }
     function renderDiagrams() {
-        renderArchDiagram("pe-diagram-upper", UPPER_TEETH);
-        renderArchDiagram("pe-diagram-lower", LOWER_TEETH);
+        renderArchDiagram("pe-diagram-buccal-upper", UPPER_TEETH);
+        renderArchDiagram("pe-diagram-palatal", UPPER_TEETH);
+        renderArchDiagram("pe-diagram-lingual", LOWER_TEETH);
+        renderArchDiagram("pe-diagram-buccal-lower", LOWER_TEETH);
         applyMissingStateToGrids();
         refreshTeethCounts();
     }
