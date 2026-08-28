@@ -3,16 +3,21 @@
  * (Single-exam entry tool — modeled on "Appendix D. Dental sheet")
  *
  * ── HOW TO USE ────────────────────────────────────────────────────────────
- * 1. Desk → Search "Page" → New Page (or reuse an existing one)
- *      Page Name : perio_exam
- *      Title     : Periodontal Examination
+ * 1. Desk → Search "Page" → open your existing "perio_comparison" Page
+ *    (this script's `frappe.pages["perio_comparison"]` key MUST exactly
+ *    match the Page record's own name, or on_page_load will be set on
+ *    `undefined` and crash — that was the cause of the error you hit)
  * 2. Click the "Script" tab
  * 3. SELECT ALL existing code and DELETE it
  * 4. PASTE the entire contents of this file
  * 5. Click Save
- * 6. Navigate to /app/perio-exam            → blank new exam
- *    or /app/perio-exam?patient=PT-00001    → new exam pre-loaded for a patient
- *    or /app/perio-exam?name=DPE-00007      → open an existing exam for editing
+ * 6. Navigate to /app/perio-comparison            → blank new exam
+ *    or /app/perio-comparison?patient=PT-00001    → new exam pre-loaded for a patient
+ *    or /app/perio-comparison?name=DPE-00007      → open an existing exam for editing
+ *
+ *    If you'd rather the URL say /app/perio-exam, rename the Page record
+ *    itself first (Page List → open it → Rename), then change the string
+ *    in `frappe.pages["perio_comparison"]` below to match the new name.
  *
  * ── DocType required: "Dental Perio Exam" ───────────────────────────────
  *   Parent fields:
@@ -36,7 +41,7 @@
  *   reference sheet, where each surface view lines up over the same tooth.
  */
 
-frappe.pages["perio_exam"].on_page_load = function (wrapper) {
+frappe.pages["perio_comparison"].on_page_load = function (wrapper) {
     const page = frappe.ui.make_app_page({
         parent: wrapper,
         title: "Periodontal Examination",
