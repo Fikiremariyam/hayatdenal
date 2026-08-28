@@ -29,7 +29,9 @@
  *     missing_teeth (Data — comma separated tooth numbers)
  *   Child table "perio_measurements" (doctype "Dental Perio Exam Measurement"):
  *     tooth_number (Int), surface (Select: Buccal\nPalatal\nLingual),
- *     recession (Int), pocket_depth (Int), mobility (Int)
+ *     recession_1 (Int), recession_2 (Int),
+ *     pocket_depth_1 (Int), pocket_depth_2 (Int), pocket_depth_3 (Int), pocket_depth_4 (Int),
+ *     mobility_1 (Int), mobility_2 (Int)   — mobility fields only populated on Buccal rows
  *
  * ── Tooth numbering ──────────────────────────────────────────────────────
  *   Universal Numbering System (1–32), read left→right exactly as the
@@ -400,13 +402,40 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
     $(document).on("change", 'input[name="pe-periodontitis"]', refreshSeverityState);
     refreshSeverityState();
 
-    // ── Build one grid (Recession / Pocket Depth [/ Mobility]) ──────────────
+    // ── Build one grid (Recession ×2 / Pocket Depth ×4 [/ Mobility ×2]) ──────
+    // Row counts are configurable here if your charting convention differs.
+    const RECESSION_ROWS = 2;
+    const POCKET_DEPTH_ROWS = 4;
+    const MOBILITY_ROWS = 2;
+
     function buildGrid(elId, teeth, surface, includeMobility) {
-        const rowsDef = [
-            { key: "recession", label: "Recession (mm)" },
-            { key: "pocket_depth", label: "Pocket Depth (mm)" },
-        ];
-        if (includeMobility) rowsDef.push({ key: "mobility", label: "Mobility (0–3)" });
+        const rowsDef = [];
+        for (let i = 1; i <= RECESSION_ROWS; i++) {
+            rowsDef.push({
+                field: `recession-${i}`,
+                label: `Recession ${i} (mm)`,
+                max: 20,
+                colour: false,
+            });
+        }
+        for (let i = 1; i <= POCKET_DEPTH_ROWS; i++) {
+            rowsDef.push({
+                field: `pocket_depth-${i}`,
+                label: `Pocket Depth ${i} (mm)`,
+                max: 20,
+                colour: true,
+            });
+        }
+        if (includeMobility) {
+            for (let i = 1; i <= MOBILITY_ROWS; i++) {
+                rowsDef.push({
+                    field: `mobility-${i}`,
+                    label: `Mobility ${i} (0–3)`,
+                    max: 3,
+                    colour: false,
+                });
+            }
+        }
 
         let html = `<thead><tr><th>Tooth #</th>`;
         teeth.forEach((tn) => (html += `<th>${tn}</th>`));
@@ -414,9 +443,8 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
         rowsDef.forEach((r) => {
             html += `<tr><th>${r.label}</th>`;
             teeth.forEach((tn) => {
-                const max = r.key === "mobility" ? 3 : 20;
-                html += `<td><input type="number" min="0" max="${max}" step="1"
-class="pe-cell-input" data-field="${r.key}" data-surface="${surface}" data-tooth="${tn}" /></td>`;
+                html += `<td><input type="number" min="0" max="${r.max}" step="1"
+class="pe-cell-input" data-field="${r.field}" data-surface="${surface}" data-tooth="${tn}" /></td>`;
             });
             html += `</tr>`;
         });
@@ -429,7 +457,7 @@ class="pe-cell-input" data-field="${r.key}" data-surface="${surface}" data-tooth
     buildGrid("pe-grid-buccal-lower", LOWER_TEETH, "Buccal", true);
 
     // ── Live PD colour + delegated pocket-depth colouring ──────────────────
-    $(document).on("input", '.pe-cell-input[data-field="pocket_depth"]', function () {
+    $(document).on("input", '.pe-cell-input[data-field^="pocket_depth-"]', function () {
         const v = parseInt($(this).val()) || 0;
         $(this).removeClass("pd-h pd-w pd-d");
         const band = pdBand(v);
@@ -438,12 +466,25 @@ class="pe-cell-input" data-field="${r.key}" data-surface="${surface}" data-tooth
 
     // ── Tooth diagrams (Buccal-upper controls upper missing set,
     //     Buccal-lower controls lower missing set) ──────────────────────────
+    // A simple, recognisable tooth silhouette — rounded crown tapering to a
+    // root — instead of a plain rectangle. (x,y) is the top-left corner of
+    // the bounding box, (w,h) its width/height.
+    function toothShapePath(x, y, w, h) {
+        const cx = x + w / 2;
+        return `M ${x} ${y + h * 0.32}
+C ${x} ${y} ${x + w} ${y} ${x + w} ${y + h * 0.32}
+C ${x + w} ${y + h * 0.58} ${cx + w * 0.3} ${y + h * 0.68} ${cx + w * 0.22} ${y + h * 0.8}
+C ${cx + w * 0.16} ${y + h * 0.92} ${cx + w * 0.08} ${y + h} ${cx} ${y + h}
+C ${cx - w * 0.08} ${y + h} ${cx - w * 0.16} ${y + h * 0.92} ${cx - w * 0.22} ${y + h * 0.8}
+C ${cx - w * 0.3} ${y + h * 0.68} ${x} ${y + h * 0.58} ${x} ${y + h * 0.32}
+Z`;
+    }
     function toothCellSVG(tn, x, y, w, h) {
         const isMissing = missingTeeth.has(tn);
         const cls = "pe-tooth-shape" + (isMissing ? " missing" : "");
         let s = `<g class="pe-tooth-click" data-tooth="${tn}" style="cursor:pointer;">`;
-        s += `<rect class="${cls}" x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${isMissing ? "#e9ecef" : "#fff"
-            }"></rect>`;
+        s += `<path class="${cls}" d="${toothShapePath(x, y, w, h)}" fill="${isMissing ? "#e9ecef" : "#fff"
+            }"></path>`;
         s += `<text class="pe-tooth-num" x="${x + w / 2}" y="${y - 3}">${tn}</text>`;
         if (isMissing) {
             s += `<text class="pe-tooth-x" x="${x + w / 2}" y="${y + h / 2 + 4}">✕</text>`;
@@ -601,15 +642,25 @@ class="pe-cell-input" data-field="${r.key}" data-surface="${surface}" data-tooth
 
                 $(".pe-cell-input").val("").removeClass("pd-h pd-w pd-d");
                 (doc.perio_measurements || []).forEach((row) => {
-                    ["recession", "pocket_depth", "mobility"].forEach((field) => {
-                        if (row[field] === undefined || row[field] === null) return;
+                    const fieldMap = [];
+                    for (let i = 1; i <= RECESSION_ROWS; i++) {
+                        fieldMap.push([`recession_${i}`, `recession-${i}`, false]);
+                    }
+                    for (let i = 1; i <= POCKET_DEPTH_ROWS; i++) {
+                        fieldMap.push([`pocket_depth_${i}`, `pocket_depth-${i}`, true]);
+                    }
+                    for (let i = 1; i <= MOBILITY_ROWS; i++) {
+                        fieldMap.push([`mobility_${i}`, `mobility-${i}`, false]);
+                    }
+                    fieldMap.forEach(([docField, uiField, colour]) => {
+                        if (row[docField] === undefined || row[docField] === null) return;
                         const $input = $(
-                            `.pe-cell-input[data-field="${field}"][data-surface="${row.surface}"][data-tooth="${row.tooth_number}"]`,
+                            `.pe-cell-input[data-field="${uiField}"][data-surface="${row.surface}"][data-tooth="${row.tooth_number}"]`,
                         );
                         if ($input.length) {
-                            $input.val(row[field]);
-                            if (field === "pocket_depth") {
-                                const band = pdBand(parseInt(row[field]));
+                            $input.val(row[docField]);
+                            if (colour) {
+                                const band = pdBand(parseInt(row[docField]));
                                 if (band) $input.addClass(band);
                             }
                         }
@@ -635,25 +686,29 @@ class="pe-cell-input" data-field="${r.key}" data-surface="${surface}" data-tooth
         function collectSurface(surface, teeth, includeMobility) {
             teeth.forEach((tn) => {
                 if (missingTeeth.has(tn)) return; // skip missing teeth entirely
-                const rec = $(
-                    `.pe-cell-input[data-field="recession"][data-surface="${surface}"][data-tooth="${tn}"]`,
-                ).val();
-                const pd = $(
-                    `.pe-cell-input[data-field="pocket_depth"][data-surface="${surface}"][data-tooth="${tn}"]`,
-                ).val();
-                const mob = includeMobility
-                    ? $(
-                        `.pe-cell-input[data-field="mobility"][data-surface="${surface}"][data-tooth="${tn}"]`,
-                    ).val()
-                    : "";
-                if (rec === "" && pd === "" && mob === "") return; // nothing entered
-                measurements.push({
-                    tooth_number: tn,
-                    surface: surface,
-                    recession: rec === "" ? null : parseInt(rec),
-                    pocket_depth: pd === "" ? null : parseInt(pd),
-                    mobility: mob === "" ? null : parseInt(mob),
-                });
+                const getVal = (field) => {
+                    const v = $(
+                        `.pe-cell-input[data-field="${field}"][data-surface="${surface}"][data-tooth="${tn}"]`,
+                    ).val();
+                    return v === "" || v === undefined ? null : parseInt(v);
+                };
+                const row = { tooth_number: tn, surface: surface };
+                for (let i = 1; i <= RECESSION_ROWS; i++) {
+                    row[`recession_${i}`] = getVal(`recession-${i}`);
+                }
+                for (let i = 1; i <= POCKET_DEPTH_ROWS; i++) {
+                    row[`pocket_depth_${i}`] = getVal(`pocket_depth-${i}`);
+                }
+                if (includeMobility) {
+                    for (let i = 1; i <= MOBILITY_ROWS; i++) {
+                        row[`mobility_${i}`] = getVal(`mobility-${i}`);
+                    }
+                }
+                const hasAny = Object.keys(row).some(
+                    (k) => k !== "tooth_number" && k !== "surface" && row[k] !== null,
+                );
+                if (!hasAny) return; // nothing entered for this tooth
+                measurements.push(row);
             });
         }
         collectSurface("Buccal", UPPER_TEETH, true);
