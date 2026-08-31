@@ -188,20 +188,9 @@ white-space: nowrap;
 }
 .pe-grid { table-layout: fixed; width: max-content; }
 .pe-grid td { padding: 0; overflow: hidden; }
-.pe-triple {
-display: flex;
-width: 100%;
-height: 100%;
-justify-content: stretch;
-align-items: stretch;
-box-sizing: border-box;
-}
-.pe-triple .pe-cell-input { border-right: 1px solid #eef2f7; }
-.pe-triple .pe-cell-input:last-child { border-right: none; }
 .pe-cell-input {
-flex: 1 1 0;
-width: 0; /* let flex-basis/flex-grow control actual width, avoids right-edge squeeze */
-min-width: 0;
+display: block;
+width: 100%;
 height: 38px;
 box-sizing: border-box;
 border: none;
@@ -499,12 +488,10 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
                 }
                 html += `<th class="pe-row-site">${i}</th>`;
                 teeth.forEach((tn) => {
-                    html += `<td><div class="pe-triple">`;
                     SITES.forEach((s) => {
-                        html += `<input type="number" min="0" max="${g.max}" step="1"
-class="pe-cell-input" data-field="${g.field}-${i}" data-site="${s}" data-surface="${surface}" data-tooth="${tn}" />`;
+                        html += `<td><input type="number" min="0" max="${g.max}" step="1"
+class="pe-cell-input" data-field="${g.field}-${i}" data-site="${s}" data-surface="${surface}" data-tooth="${tn}" /></td>`;
                     });
-                    html += `</div></td>`;
                 });
                 html += `</tr>`;
             }
