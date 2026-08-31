@@ -202,6 +202,11 @@ color: #222;
 }
 .pe-cell-input:focus { outline: 2px solid #1B4F8A; outline-offset: -2px; background: #eef4fb; }
 .pe-cell-input:disabled { background: #f0f2f5; color: #ccc; }
+/* Bold divider + shading between each tooth's group of 3 (M/B/D) columns */
+.pe-tooth-start { border-left: 2px solid #9fb3c8 !important; }
+.pe-cell-td.pe-tooth-alt { background: #f6f9fc; }
+.pe-cell-td.pe-tooth-alt .pe-cell-input { background: transparent; }
+th.pe-tooth-alt { background: #e3eaf2 !important; }
 /* Remove the native up/down spinner arrows so doctors type values by keyboard */
 .pe-cell-input::-webkit-outer-spin-button,
 .pe-cell-input::-webkit-inner-spin-button {
@@ -471,12 +476,19 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
 
         // header row 1: tooth numbers, each spanning its 3 sub-columns
         let html = `${colgroup}<thead><tr><th colspan="2" rowspan="2">Tooth #</th>`;
-        teeth.forEach((tn) => (html += `<th colspan="3">${tn}</th>`));
+        teeth.forEach((tn, idx) => {
+            const altClass = idx % 2 === 1 ? " pe-tooth-alt" : "";
+            html += `<th class="pe-tooth-start${altClass}" colspan="3">${tn}</th>`;
+        });
         html += `</tr>`;
         // header row 2: M / B / D sub-column labels under every tooth
         html += `<tr>`;
-        teeth.forEach(() => {
-            SITES.forEach((s) => (html += `<th class="pe-site-label">${SITE_LABELS[s]}</th>`));
+        teeth.forEach((tn, idx) => {
+            const altClass = idx % 2 === 1 ? " pe-tooth-alt" : "";
+            SITES.forEach((s, sIdx) => {
+                const startClass = sIdx === 0 ? " pe-tooth-start" : "";
+                html += `<th class="pe-site-label${startClass}${altClass}">${SITE_LABELS[s]}</th>`;
+            });
         });
         html += `</tr></thead><tbody>`;
 
@@ -487,9 +499,11 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
                     html += `<th class="pe-row-group" rowspan="${g.rows}">${g.type}<span class="pe-row-unit">(${g.unit})</span></th>`;
                 }
                 html += `<th class="pe-row-site">${i}</th>`;
-                teeth.forEach((tn) => {
-                    SITES.forEach((s) => {
-                        html += `<td><input type="number" min="0" max="${g.max}" step="1"
+                teeth.forEach((tn, idx) => {
+                    const altClass = idx % 2 === 1 ? " pe-tooth-alt" : "";
+                    SITES.forEach((s, sIdx) => {
+                        const startClass = sIdx === 0 ? " pe-tooth-start" : "";
+                        html += `<td class="pe-cell-td${startClass}${altClass}"><input type="number" min="0" max="${g.max}" step="1"
 class="pe-cell-input" data-field="${g.field}-${i}" data-site="${s}" data-surface="${surface}" data-tooth="${tn}" /></td>`;
                     });
                 });
