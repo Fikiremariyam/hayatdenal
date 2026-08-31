@@ -186,26 +186,43 @@ text-align: left;
 padding: 4px 6px;
 white-space: nowrap;
 }
-.pe-grid td { width: 66px; }
+.pe-grid { table-layout: fixed; width: max-content; }
+.pe-grid td { padding: 0; overflow: hidden; }
 .pe-triple {
 display: flex;
-justify-content: center;
+width: 100%;
+height: 100%;
+justify-content: stretch;
 align-items: stretch;
+box-sizing: border-box;
 }
 .pe-triple .pe-cell-input { border-right: 1px solid #eef2f7; }
 .pe-triple .pe-cell-input:last-child { border-right: none; }
 .pe-cell-input {
-width: 21px;
-height: 24px;
+flex: 1 1 0;
+width: 0; /* let flex-basis/flex-grow control actual width, avoids right-edge squeeze */
+min-width: 0;
+height: 38px;
+box-sizing: border-box;
 border: none;
 text-align: center;
-font-size: 10px;
+font-size: 13px;
 font-weight: 700;
 background: transparent;
 color: #222;
 }
 .pe-cell-input:focus { outline: 2px solid #1B4F8A; outline-offset: -2px; background: #eef4fb; }
 .pe-cell-input:disabled { background: #f0f2f5; color: #ccc; }
+/* Remove the native up/down spinner arrows so doctors type values by keyboard */
+.pe-cell-input::-webkit-outer-spin-button,
+.pe-cell-input::-webkit-inner-spin-button {
+-webkit-appearance: none;
+margin: 0;
+}
+.pe-cell-input[type="number"] {
+-moz-appearance: textfield;
+appearance: textfield;
+}
 .pe-cell-input.pd-h { color: #1a7a1a; }
 .pe-cell-input.pd-w { color: #b8860b; }
 .pe-cell-input.pd-d { color: #cc0000; }
@@ -450,8 +467,21 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
             groups.push({ field: "mobility", type: "Mobility", unit: "0–3", rows: MOBILITY_ROWS, max: 3, colour: false });
         }
 
+        // Explicit colgroup: table-layout:fixed only respects the *first*
+        // width it sees per column, so without this the browser guesses
+        // column widths from content and the right-most columns end up
+        // squeezed / clipped. Every input column gets the same fixed width.
+        const ROW_LABEL_COL_W = 80; // "Recession / Pocket Depth / Mobility" column
+        const SITE_NUM_COL_W = 22; // "1 / 2 / 3 / 4" row-site column
+        const SITE_COL_W = 34; // each M / B / D input column
+        let colgroup = `<colgroup><col style="width:${ROW_LABEL_COL_W}px"><col style="width:${SITE_NUM_COL_W}px">`;
+        teeth.forEach(() => {
+            SITES.forEach(() => (colgroup += `<col style="width:${SITE_COL_W}px">`));
+        });
+        colgroup += `</colgroup>`;
+
         // header row 1: tooth numbers, each spanning its 3 sub-columns
-        let html = `<thead><tr><th colspan="2" rowspan="2">Tooth #</th>`;
+        let html = `${colgroup}<thead><tr><th colspan="2" rowspan="2">Tooth #</th>`;
         teeth.forEach((tn) => (html += `<th colspan="3">${tn}</th>`));
         html += `</tr>`;
         // header row 2: M / B / D sub-column labels under every tooth
