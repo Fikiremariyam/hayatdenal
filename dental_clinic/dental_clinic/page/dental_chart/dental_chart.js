@@ -138,8 +138,8 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .dc-perio-grid  { display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:1px;background:var(--border); }
 #dc-root .dc-perio-cell  { background:var(--panel);padding:9px 6px;display:flex;flex-direction:column;align-items:center;gap:5px; }
 #dc-root .dc-perio-cell-lbl { font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted2);text-align:center; }
-#dc-root .dc-perio-select   { border:1.5px solid var(--border);border-radius:6px;padding:3px 4px;font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--text);background:var(--panel2);outline:none;cursor:pointer;width:52px;text-align:center;appearance:none;-webkit-appearance:none; }
-#dc-root .dc-perio-select:focus{ border-color:var(--accent); }
+#dc-root .dc-perio-input    { border:1.5px solid var(--border);border-radius:6px;padding:3px 4px;font-family:'DM Mono',monospace;font-size:14px;font-weight:700;color:var(--text);background:var(--panel2);outline:none;cursor:text;width:36px;height:26px;text-align:center; }
+#dc-root .dc-perio-input:focus{ border-color:var(--accent);background:#fff; }
 /* notes row */
 #dc-root .notes-row {   display: flex;    gap: 12px;}
 
@@ -1381,31 +1381,40 @@ class DentalChart {
      * @param {string} containerId  – id of the grid element to fill
      * @param {Object} dataObj      – this.bpe or this.bewe, keyed 1..6
      * @param {number} maxScore     – highest numeric score (inclusive)
-     * @param {?string} extraOption – optional extra option appended after the numbers (e.g. '*')
+     * @param {?string} extraOption – optional extra allowed character (e.g. '*')
      */
     _buildPerioGrid(containerId, dataObj, maxScore, extraOption) {
         const grid = document.getElementById(containerId);
         if (!grid) return;
 
-        const nums = Array.from({ length: maxScore + 1 }, (_, k) => String(k));
-        const opts = extraOption ? [...nums, extraOption] : nums;
+        /* Characters the user is allowed to type into a sextant cell */
+        const allowed = Array.from({ length: maxScore + 1 }, (_, k) => String(k));
+        if (extraOption) allowed.push(extraOption);
 
         grid.innerHTML = DentalChart.SEXTANT_LABELS.map((lbl, i) => {
             const n   = i + 1;
             const val = dataObj[n] || '';
-            const optionsHtml = ['<option value="">—</option>']
-                .concat(opts.map(o => `<option value="${o}" ${o === val ? 'selected' : ''}>${o}</option>`))
-                .join('');
             return `<div class="dc-perio-cell">
                         <span class="dc-perio-cell-lbl">${lbl}</span>
-                        <select class="dc-perio-select" data-n="${n}">${optionsHtml}</select>
+                        <input type="text" inputmode="text" maxlength="1" autocomplete="off"
+                               class="dc-perio-input" data-n="${n}" value="${val}">
                     </div>`;
         }).join('');
 
-        grid.querySelectorAll('.dc-perio-select').forEach(sel => {
-            sel.addEventListener('change', (e) => {
-                dataObj[sel.dataset.n] = e.target.value;
+        grid.querySelectorAll('.dc-perio-input').forEach(input => {
+            const n = input.dataset.n;
+
+            /* Live-validate as the user types: keep only allowed characters,
+               anything else (including a 2nd keystroke) is rejected. */
+            input.addEventListener('input', (e) => {
+                let v = (e.target.value || '').trim().toUpperCase();
+                if (v && !allowed.includes(v)) v = dataObj[n] || '';
+                e.target.value = v;
+                dataObj[n] = v;
             });
+
+            /* Select-all-on-focus so a fresh keystroke just overwrites the value */
+            input.addEventListener('focus', (e) => e.target.select());
         });
     }
 
