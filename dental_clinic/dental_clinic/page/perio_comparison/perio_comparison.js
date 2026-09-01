@@ -29,9 +29,12 @@
  *     missing_teeth (Data — comma separated tooth numbers)
  *   Child table "perio_measurements" (doctype "Dental Perio Exam Measurement"):
  *     tooth_number (Int), surface (Select: Buccal\nPalatal\nLingual),
- *     recession_1 (Int), recession_2 (Int),
- *     pocket_depth_1 (Int), pocket_depth_2 (Int), pocket_depth_3 (Int), pocket_depth_4 (Int),
- *     mobility_1 (Int), mobility_2 (Int)   — mobility fields only populated on Buccal rows
+ *     recession_1_s1..s3 (Int) × 2 rows,
+ *     pocket_depth_1_s1..s3 (Int) × 4 rows,
+ *     mobility_1_s1..s3 (Int) × 2 rows   — mobility fields only populated on Buccal rows
+ *     furcation (Check), plaque (Check), bleeding (Check), pus (Check)
+ *       — single 0/1 Yes-No value per tooth, only populated on Buccal rows,
+ *       default 0 (No)
  */
 
 frappe.pages["perio_comparison"].on_page_load = function (wrapper) {
@@ -220,6 +223,22 @@ appearance: textfield;
 .pe-cell-input.pd-h { color: #1a7a1a; }
 .pe-cell-input.pd-w { color: #b8860b; }
 .pe-cell-input.pd-d { color: #cc0000; }
+/* Yes/No toggle rows (Furcation / Plaque / Bleeding / Pus) */
+.pe-bool-toggle {
+display: flex;
+align-items: center;
+justify-content: center;
+gap: 5px;
+height: 38px;
+cursor: pointer;
+font-size: 10px;
+font-weight: 700;
+color: #99a3ad;
+user-select: none;
+}
+.pe-bool-toggle.is-yes { color: #cc0000; }
+.pe-bool-input { cursor: pointer; width: 13px; height: 13px; accent-color: #1B4F8A; }
+.pe-bool-input:disabled { cursor: not-allowed; }
 /* Actions */
 .pe-actions {
 display: flex;
@@ -258,6 +277,16 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
     const LOWER_TEETH = Array.from({ length: 16 }, (_, i) => 32 - i); // 32..17
     const SITES = [1, 2, 3]; // 3 hand-filled sub-columns per tooth per row: Mesial / Buccal-Mid / Distal
     const SITE_LABELS = { 1: "M", 2: "B", 3: "D" };
+    // Universal numbering (1-32) → quadrant/tooth-position label
+    // UR = Upper Right, UL = Upper Left, LR = Lower Right, LL = Lower Left; 1 = central incisor, 8 = third molar
+    // Order produced across each arch: UR8..UR1 | UL1..UL8  and  LR8..LR1 | LL1..LL8
+    function quadrantLabel(tn) {
+        if (tn >= 1 && tn <= 8) return "UR" + (9 - tn); // 1→UR8 ... 8→UR1
+        if (tn >= 9 && tn <= 16) return "UL" + (tn - 8); // 9→UL1 ... 16→UL8
+        if (tn >= 17 && tn <= 24) return "LL" + (25 - tn); // 17→LL8 ... 24→LL1
+        if (tn >= 25 && tn <= 32) return "LR" + (tn - 24); // 25→LR1 ... 32→LR8
+        return String(tn);
+    }
     function pdBand(v) {
         if (!v || v <= 0) return "";
         if (v <= 3) return "pd-h";
@@ -394,6 +423,7 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
 <div class="pe-legend-item"><span class="pe-swatch" style="background:#cc0000;"></span>PD ≥ 6mm — Disease</div>
 <div class="pe-legend-item"><span class="pe-swatch" style="background:#e9ecef;border:1px dashed #cbd3db;"></span>Missing tooth</div>
 <div class="pe-legend-item"><span class="pe-swatch" style="background:#ccc;"></span>M / B / D = Mesial / Buccal-Mid / Distal site</div>
+<div class="pe-legend-item"><span class="pe-swatch" style="background:#ccc;"></span>Furcation / Plaque / Bleeding / Pus = Yes-No per tooth (Buccal only, default No)</div>
 </div>
 
 </div>
@@ -444,13 +474,21 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
     $(document).on("change", 'input[name="pe-periodontitis"]', refreshSeverityState);
     refreshSeverityState();
 
-    // ── Build one grid (Recession ×2 / Pocket Depth ×4 [/ Mobility ×2]) ──────
+    // ── Build one grid (Recession ×2 / Pocket Depth ×4 [/ Mobility ×2 / Furcation / Plaque / Bleeding / Pus]) ──
     // Each box (tooth × row) now holds 3 hand-filled sub-columns: M / B / D
     // (Mesial / Buccal-Mid / Distal). Row counts are configurable here if
-    // your charting convention differs.
+    // your charting convention differs. The Furcation / Plaque / Bleeding /
+    // Pus rows are single Yes/No values per tooth (not per M/B/D site) and
+    // only appear on the two Buccal grids, defaulting to No.
     const RECESSION_ROWS = 2;
     const POCKET_DEPTH_ROWS = 4;
     const MOBILITY_ROWS = 2;
+    const BOOL_ROWS = [
+        { field: "furcation", label: "Furcation" },
+        { field: "plaque", label: "Plaque" },
+        { field: "bleeding", label: "Bleeding" },
+        { field: "pus", label: "Pus" },
+    ];
 
     function buildGrid(elId, teeth, surface, includeMobility) {
         const groups = [
@@ -460,6 +498,7 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
         if (includeMobility) {
             groups.push({ field: "mobility", type: "Mobility", unit: "0–3", rows: MOBILITY_ROWS, max: 3, colour: false });
         }
+        const boolGroups = includeMobility ? BOOL_ROWS : []; // Buccal grids only
 
         // Explicit colgroup: table-layout:fixed only respects the *first*
         // width it sees per column, so without this the browser guesses
@@ -474,11 +513,11 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
         });
         colgroup += `</colgroup>`;
 
-        // header row 1: tooth numbers, each spanning its 3 sub-columns
-        let html = `${colgroup}<thead><tr><th colspan="2" rowspan="2">Tooth #</th>`;
+        // header row 1: tooth position labels, each spanning its 3 sub-columns
+        let html = `${colgroup}<thead><tr><th colspan="2" rowspan="2">Tooth</th>`;
         teeth.forEach((tn, idx) => {
             const altClass = idx % 2 === 1 ? " pe-tooth-alt" : "";
-            html += `<th class="pe-tooth-start${altClass}" colspan="3">${tn}</th>`;
+            html += `<th class="pe-tooth-start${altClass}" colspan="3">${quadrantLabel(tn)}</th>`;
         });
         html += `</tr>`;
         // header row 2: M / B / D sub-column labels under every tooth
@@ -510,6 +549,24 @@ class="pe-cell-input" data-field="${g.field}-${i}" data-site="${s}" data-surface
                 html += `</tr>`;
             }
         });
+
+        // Furcation / Plaque / Bleeding / Pus — one Yes/No value per tooth
+        boolGroups.forEach((g) => {
+            html += `<tr>`;
+            html += `<th class="pe-row-group" rowspan="1">${g.label}</th>`;
+            html += `<th class="pe-row-site"></th>`;
+            teeth.forEach((tn, idx) => {
+                const altClass = idx % 2 === 1 ? " pe-tooth-alt" : "";
+                html += `<td class="pe-cell-td pe-tooth-start${altClass}" colspan="3">
+<label class="pe-bool-toggle">
+<input type="checkbox" class="pe-bool-input" data-field="${g.field}" data-surface="${surface}" data-tooth="${tn}" />
+<span class="pe-bool-text">No</span>
+</label>
+</td>`;
+            });
+            html += `</tr>`;
+        });
+
         html += `</tbody>`;
         $(`#${elId}`).html(html);
     }
@@ -524,6 +581,13 @@ class="pe-cell-input" data-field="${g.field}-${i}" data-site="${s}" data-surface
         $(this).removeClass("pd-h pd-w pd-d");
         const band = pdBand(v);
         if (band) $(this).addClass(band);
+    });
+
+    // ── Furcation / Plaque / Bleeding / Pus toggle text + colour ───────────
+    $(document).on("change", ".pe-bool-input", function () {
+        const checked = $(this).prop("checked");
+        $(this).siblings(".pe-bool-text").text(checked ? "Yes" : "No");
+        $(this).closest(".pe-bool-toggle").toggleClass("is-yes", checked);
     });
 
     // ── Tooth diagrams (Buccal-upper controls upper missing set,
@@ -547,7 +611,7 @@ Z`;
         let s = `<g class="pe-tooth-click" data-tooth="${tn}" style="cursor:pointer;">`;
         s += `<path class="${cls}" d="${toothShapePath(x, y, w, h)}" fill="${isMissing ? "#e9ecef" : "#fff"
             }"></path>`;
-        s += `<text class="pe-tooth-num" x="${x + w / 2}" y="${y - 3}">${tn}</text>`;
+        s += `<text class="pe-tooth-num" x="${x + w / 2}" y="${y - 3}">${quadrantLabel(tn)}</text>`;
         if (isMissing) {
             s += `<text class="pe-tooth-x" x="${x + w / 2}" y="${y + h / 2 + 4}">✕</text>`;
         }
@@ -555,7 +619,7 @@ Z`;
         return s;
     }
     function renderArchDiagram(elId, teeth) {
-        const toothW = 28,
+        const toothW = 30,
             toothH = 30,
             gap = 3,
             padX = 8,
@@ -594,6 +658,16 @@ Z`;
             const disabled = missingTeeth.has(tn);
             $(this).prop("disabled", disabled);
             if (disabled) $(this).val("").removeClass("pd-h pd-w pd-d");
+        });
+        $(".pe-bool-input").each(function () {
+            const tn = parseInt($(this).data("tooth"));
+            const disabled = missingTeeth.has(tn);
+            $(this).prop("disabled", disabled);
+            if (disabled) {
+                $(this).prop("checked", false);
+                $(this).siblings(".pe-bool-text").text("No");
+                $(this).closest(".pe-bool-toggle").removeClass("is-yes");
+            }
         });
     }
     function refreshTeethCounts() {
@@ -665,6 +739,9 @@ Z`;
         $("#pe-other-findings").val("");
         $("#pe-recommendation").val("");
         $(".pe-cell-input").val("").prop("disabled", false).removeClass("pd-h pd-w pd-d");
+        $(".pe-bool-input").prop("checked", false).prop("disabled", false);
+        $(".pe-bool-text").text("No");
+        $(".pe-bool-toggle").removeClass("is-yes");
         renderDiagrams();
         $("#pe-save-msg").text("");
     }
@@ -705,6 +782,9 @@ Z`;
                 );
 
                 $(".pe-cell-input").val("").removeClass("pd-h pd-w pd-d");
+                $(".pe-bool-input").prop("checked", false);
+                $(".pe-bool-text").text("No");
+                $(".pe-bool-toggle").removeClass("is-yes");
                 (doc.perio_measurements || []).forEach((row) => {
                     const fieldMap = [];
                     for (let i = 1; i <= RECESSION_ROWS; i++) {
@@ -729,6 +809,15 @@ Z`;
                             }
                         }
                     });
+                    BOOL_ROWS.forEach(({ field }) => {
+                        if (row[field] === undefined || row[field] === null) return;
+                        const $cb = $(
+                            `.pe-bool-input[data-field="${field}"][data-surface="${row.surface}"][data-tooth="${row.tooth_number}"]`,
+                        );
+                        if ($cb.length) {
+                            $cb.prop("checked", !!parseInt(row[field])).trigger("change");
+                        }
+                    });
                 });
                 renderDiagrams(); // also re-applies missing-state disabling
                 $("#pe-save-msg").text(`Loaded exam ${doc.name}`);
@@ -744,11 +833,13 @@ Z`;
     }
 
     // ── Collect form data into a Dental Perio Exam doc payload ─────────────
-    // Every recession / pocket_depth / mobility field is now split into 3
+    // Every recession / pocket_depth / mobility field is split into 3
     // hand-filled sub-values per tooth (site 1=M, 2=B, 3=D), stored as
     // "<field>_<row>_s<site>", e.g. pocket_depth_1_s1, pocket_depth_1_s2,
     // pocket_depth_1_s3. Add these ×3 fields to the "Dental Perio Exam
     // Measurement" child doctype in place of the old single-value fields.
+    // furcation / plaque / bleeding / pus are single 0/1 (Check) values per
+    // tooth, only collected on Buccal rows, defaulting to 0 (No).
     function collectPayload() {
         const measurements = [];
 
@@ -772,10 +863,20 @@ Z`;
                     for (let i = 1; i <= MOBILITY_ROWS; i++) {
                         SITES.forEach((s) => (row[`mobility_${i}_s${s}`] = getVal(`mobility-${i}`, s)));
                     }
+                    BOOL_ROWS.forEach(({ field }) => {
+                        row[field] = $(
+                            `.pe-bool-input[data-field="${field}"][data-surface="${surface}"][data-tooth="${tn}"]`,
+                        ).prop("checked")
+                            ? 1
+                            : 0;
+                    });
                 }
-                const hasAny = Object.keys(row).some(
-                    (k) => k !== "tooth_number" && k !== "surface" && row[k] !== null,
-                );
+                const boolFieldNames = BOOL_ROWS.map((b) => b.field);
+                const hasAny = Object.keys(row).some((k) => {
+                    if (k === "tooth_number" || k === "surface") return false;
+                    if (boolFieldNames.includes(k)) return row[k] === 1; // only "Yes" counts as entered data
+                    return row[k] !== null;
+                });
                 if (!hasAny) return; // nothing entered for this tooth
                 measurements.push(row);
             });

@@ -132,6 +132,14 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .stat-box      { background:var(--panel2);border:1px solid var(--border);border-radius:7px;padding:7px;text-align:center; }
 #dc-root .stat-val      { font-size:18px;font-weight:700;font-family:'DM Mono',monospace;line-height:1; }
 #dc-root .stat-lbl      { font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted2); }
+/* BPE / BEWE sextant grids */
+#dc-root .dc-perio-row   { display:flex;gap:12px;flex-wrap:wrap; }
+#dc-root .dc-perio-block { flex:1;min-width:260px;background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:var(--shadow); }
+#dc-root .dc-perio-grid  { display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:1px;background:var(--border); }
+#dc-root .dc-perio-cell  { background:var(--panel);padding:9px 6px;display:flex;flex-direction:column;align-items:center;gap:5px; }
+#dc-root .dc-perio-cell-lbl { font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted2);text-align:center; }
+#dc-root .dc-perio-select   { border:1.5px solid var(--border);border-radius:6px;padding:3px 4px;font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--text);background:var(--panel2);outline:none;cursor:pointer;width:52px;text-align:center;appearance:none;-webkit-appearance:none; }
+#dc-root .dc-perio-select:focus{ border-color:var(--accent); }
 /* notes row */
 #dc-root .notes-row {   display: flex;    gap: 12px;}
 
@@ -259,6 +267,24 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
           <div style="font-size:10px;color:var(--muted2)">Right → Left · FDI 85–75</div>
         </div>
         <div class="teeth-row lower-row" id="dc-lower-row-child"></div>
+      </div>
+
+      <!-- BPE / BEWE -->
+      <div class="dc-perio-row">
+        <div class="dc-perio-block">
+          <div class="arch-bar">
+            <div class="arch-title">BPE — Basic Periodontal Exam</div>
+            <div style="font-size:10px;color:var(--muted2);margin-left:auto">0–4, or *</div>
+          </div>
+          <div class="dc-perio-grid" id="dc-bpe-grid"></div>
+        </div>
+        <div class="dc-perio-block">
+          <div class="arch-bar">
+            <div class="arch-title">BEWE — Basic Erosive Wear Exam</div>
+            <div style="font-size:10px;color:var(--muted2);margin-left:auto">0–3 per sextant</div>
+          </div>
+          <div class="dc-perio-grid" id="dc-bewe-grid"></div>
+        </div>
       </div>
 
       <!-- SUMMARY TABLE -->
@@ -820,6 +846,14 @@ class DentalChart {
         fracture:'Fracture',mobility:'Mobility',abscess:'Abscess',
     };
 
+    /* Sextant labels for the BPE / BEWE 2-row × 3-column grids.
+       Index 0-2 = upper row (sextants 1-3), index 3-5 = lower row (sextants 4-6),
+       mapped to bpe1..bpe6 / bewe1..bewe6 on "Dental charting_". */
+    static SEXTANT_LABELS = [
+        'Upper Right', 'Upper Anterior', 'Upper Left',
+        'Lower Right', 'Lower Anterior', 'Lower Left',
+    ];
+
     /* ── constructor ────────────────────────────────────────────────────── */
     constructor() {
         /* Condition (uid) currently checked in the Condition Summary grid */
@@ -851,6 +885,10 @@ class DentalChart {
 
         /* Overall chart status shown in the top bar */
         this.chartStatus = 'Planned';
+
+        /* BPE / BEWE sextant scores, keyed 1–6, mapped to bpe1..bpe6 / bewe1..bewe6 */
+        this.bpe  = {1:'',2:'',3:'',4:'',5:'',6:''};
+        this.bewe = {1:'',2:'',3:'',4:'',5:'',6:''};
 
         /* Tooltip element (already in HTML) */
         this._tip = document.getElementById('dc-tip');
@@ -919,7 +957,7 @@ class DentalChart {
         });
         try {
             /* Get list of charts for this patient, newest first */
-            const list = await frappe.db.get_list('Dental charting', {
+            const list = await frappe.db.get_list('Dental charting_', {
                 filters : { patient: patientId },
                 fields  : ['name', 'chart_date', 'provider', 'clinical_notes'],
                 order_by: 'chart_date desc',
@@ -947,7 +985,7 @@ class DentalChart {
      */
     async _loadChartByName(chartName) {
         try {
-            const doc = await frappe.db.get_doc('Dental charting', chartName);
+            const doc = await frappe.db.get_doc('Dental charting_', chartName);
 
             /* Reset first so stale data is cleared (both dentitions) */
             this._resetAllTeeth();
@@ -979,6 +1017,12 @@ class DentalChart {
                 if (state) state.loadFromDocRow(row, this.toothStatusCatalog);
             });
 
+            /* Restore BPE / BEWE sextant scores */
+            for (let n = 1; n <= 6; n++) {
+                this.bpe[n]  = doc['bpe' + n]  || '';
+                this.bewe[n] = doc['bewe' + n] || '';
+            }
+
             /* Track the loaded chart name and status */
             this.savedChartName = doc.name;
             this.chartStatus    = doc.status && DentalChart.STATUS_COLORS[doc.status] ? doc.status : 'Planned';
@@ -1006,7 +1050,7 @@ class DentalChart {
         }
 
         try {
-            const list = await frappe.db.get_list('Dental charting', {
+            const list = await frappe.db.get_list('Dental charting_', {
                 filters : { patient: patientId },
                 fields  : ['name', 'chart_date', 'provider'],
                 order_by: 'chart_date desc',
@@ -1111,6 +1155,13 @@ class DentalChart {
         const clinicalNotes  = (document.getElementById('dc-notes-clinical')   || {}).value || '';
         const disclaimerText = (document.getElementById('dc-notes-disclaimer') || {}).value || '';
 
+        /* BPE / BEWE sextant scores → bpe1..bpe6 / bewe1..bewe6 */
+        const perioFields = {};
+        for (let n = 1; n <= 6; n++) {
+            perioFields['bpe'  + n] = this.bpe[n]  || '';
+            perioFields['bewe' + n] = this.bewe[n] || '';
+        }
+
         try {
             if (this.savedChartName) {
                 /* ── UPDATE existing chart ──────────────────────────────────────
@@ -1119,7 +1170,7 @@ class DentalChart {
                    we do, on some Frappe versions) would get wiped out instead of
                    updated. Fetch the real doc first, mutate it, then save it whole.
                 ────────────────────────────────────────────────────────────────*/
-                const existing = await frappe.db.get_doc('Dental charting', this.savedChartName);
+                const existing = await frappe.db.get_doc('Dental charting_', this.savedChartName);
                 existing.patient           = patientId;
                 existing.chart_date        = frappe.datetime.get_today();
                 existing.provider          = providerVal;
@@ -1127,6 +1178,7 @@ class DentalChart {
                 existing.clinical_notes    = clinicalNotes;
                 existing.disclaimer        = disclaimerText;   // ← adjust fieldname here if your doctype differs
                 existing.condition_summary = conditionRows;
+                Object.assign(existing, perioFields);
 
                 frappe.call({
                     method  : 'frappe.client.save',
@@ -1143,13 +1195,13 @@ class DentalChart {
                 });
             } else {
                 /* ── CREATE new chart ───────────────────────────────────────────
-                   Insert a fresh Dental charting document.
+                   Insert a fresh Dental charting_ document.
                 ────────────────────────────────────────────────────────────────*/
                 frappe.call({
                     method  : 'frappe.client.insert',
                     args    : {
                         doc: {
-                            doctype          : 'Dental charting',
+                            doctype          : 'Dental charting_',
                             patient          : patientId,
                             chart_date       : frappe.datetime.get_today(),
                             provider         : providerVal,
@@ -1157,6 +1209,7 @@ class DentalChart {
                             clinical_notes   : clinicalNotes,
                             disclaimer       : disclaimerText,   // ← adjust fieldname here if your doctype differs
                             condition_summary: conditionRows,
+                            ...perioFields,
                         },
                     },
                     callback: (r) => {
@@ -1187,6 +1240,8 @@ class DentalChart {
         this.savedChartName     = null;
         this.summarySelectedIds = new Set();
         this.chartStatus        = 'Planned';
+        this.bpe  = {1:'',2:'',3:'',4:'',5:'',6:''};
+        this.bewe = {1:'',2:'',3:'',4:'',5:'',6:''};
         _set('dc-pt-badge', 'New Chart');
         this._renderChartStatus();
         this.render();
@@ -1198,6 +1253,8 @@ class DentalChart {
             patient : this.patient.value,
             exported: new Date().toISOString(),
             state   : {},
+            bpe     : { ...this.bpe },
+            bewe    : { ...this.bewe },
         };
         this.allMeta.forEach(m => {
             const s = this.teeth[m.fdi];
@@ -1228,6 +1285,7 @@ class DentalChart {
         this._renderArch(DentalChart.UPPER_META_CHILD, 'dc-upper-row-child', true,  'primary');
         this._renderArch(DentalChart.LOWER_META_CHILD, 'dc-lower-row-child', false, 'primary');
         this._renderStats();
+        this._renderPerioGrids();
         this._renderSummary();
     }
 
@@ -1306,6 +1364,49 @@ class DentalChart {
         });
         _set('dc-st-h',  healthy);
         _set('dc-st-fl', flagged);
+    }
+
+    /**
+     * Render the BPE and BEWE sextant score grids (2 rows × 3 columns each),
+     * shown above the Condition Summary table. Values live in this.bpe /
+     * this.bewe, keyed 1–6, and map straight onto the bpe1..bpe6 /
+     * bewe1..bewe6 fields on the "Dental charting_" doctype.
+     */
+    _renderPerioGrids() {
+        this._buildPerioGrid('dc-bpe-grid',  this.bpe,  4, '*');
+        this._buildPerioGrid('dc-bewe-grid', this.bewe, 3, null);
+    }
+
+    /**
+     * @param {string} containerId  – id of the grid element to fill
+     * @param {Object} dataObj      – this.bpe or this.bewe, keyed 1..6
+     * @param {number} maxScore     – highest numeric score (inclusive)
+     * @param {?string} extraOption – optional extra option appended after the numbers (e.g. '*')
+     */
+    _buildPerioGrid(containerId, dataObj, maxScore, extraOption) {
+        const grid = document.getElementById(containerId);
+        if (!grid) return;
+
+        const nums = Array.from({ length: maxScore + 1 }, (_, k) => String(k));
+        const opts = extraOption ? [...nums, extraOption] : nums;
+
+        grid.innerHTML = DentalChart.SEXTANT_LABELS.map((lbl, i) => {
+            const n   = i + 1;
+            const val = dataObj[n] || '';
+            const optionsHtml = ['<option value="">—</option>']
+                .concat(opts.map(o => `<option value="${o}" ${o === val ? 'selected' : ''}>${o}</option>`))
+                .join('');
+            return `<div class="dc-perio-cell">
+                        <span class="dc-perio-cell-lbl">${lbl}</span>
+                        <select class="dc-perio-select" data-n="${n}">${optionsHtml}</select>
+                    </div>`;
+        }).join('');
+
+        grid.querySelectorAll('.dc-perio-select').forEach(sel => {
+            sel.addEventListener('change', (e) => {
+                dataObj[sel.dataset.n] = e.target.value;
+            });
+        });
     }
 
     _renderSummary() {
