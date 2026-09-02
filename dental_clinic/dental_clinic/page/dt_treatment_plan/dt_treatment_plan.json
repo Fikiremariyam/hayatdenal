@@ -7,9 +7,9 @@
  "modified": "2026-06-02 10:49:29.246604",
  "modified_by": "Administrator",
  "module": "Dental Clinic",
- "name": "dt-treatment-plan",
+ "name": "dt_treatment_plan",
  "owner": "Administrator",
- "page_name": "dt-treatment-plan",
+ "page_name": "dt_treatment_plan",
  "roles": [
   {
    "role": "System Manager"
