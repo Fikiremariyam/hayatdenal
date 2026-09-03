@@ -630,7 +630,7 @@ class DentalTreatmentPlanChart {
 			const items = await frappe.db.get_list('Item', {
 				filters          : { disabled: 0 /*, item_group: 'Dental Procedures' */ },
 				fields           : ['name', 'item_name', 'standard_rate'],
-				limit_page_length: 0,
+				limit_page_length: 100000,   // explicit high number — 0 isn't reliably "no limit" through this API
 				order_by         : 'item_name asc',
 			});
 			this.itemCatalog = items.map(item => {
@@ -855,12 +855,7 @@ class DentalTreatmentPlanChart {
                         ${toothOptions.map(fdi => `<option value="${fdi}" ${fdi === r.fdi ? 'selected' : ''}>${fdi}</option>`).join('')}
                     </select>
                 </td>
-                <td>
-                    <select class="tp-cell-input dtp-item-edit" data-uid="${r.row.uid}">
-                        <option value="">— Select —</option>
-                        ${this.itemCatalog.map(s => `<option value="${s.name}" ${s.name === r.row.type ? 'selected' : ''}>${s.status_name || s.name}</option>`).join('')}
-                    </select>
-                </td>
+                <td><div class="dtp-item-cell" data-uid="${r.row.uid}"></div></td>
                 <td><input type="text" class="tp-cell-input dtp-priority-edit" data-uid="${r.row.uid}" value="${(r.row.priority || '').replace(/"/g, '&quot;')}" placeholder="1"></td>
                 <td>
                     <select class="tp-cell-input dtp-status-edit" data-uid="${r.row.uid}">
@@ -963,8 +958,28 @@ class DentalTreatmentPlanChart {
 			el.addEventListener('change', (e) => this._moveRowTooth(el.dataset.uid, e.target.value));
 		});
 
-		wrap.querySelectorAll('.dtp-item-edit').forEach(el => {
-			el.addEventListener('change', (e) => this._setRowItem(el.dataset.uid, e.target.value));
+		// Real Link controls for the Procedure cell — gives search-as-you-type
+		// against Item plus Frappe's built-in "Create a new Item" option when
+		// nothing matches, which a plain <select> can't offer.
+		wrap.querySelectorAll('.dtp-item-cell').forEach(cell => {
+			const uid = cell.dataset.uid;
+			const found = this._findRowByUid(uid);
+			const ctrl = frappe.ui.form.make_control({
+				parent: $(cell),
+				df: {
+					fieldtype: 'Link',
+					options: 'Item',
+					fieldname: 'procedure',
+					placeholder: __('Select or create an item…'),
+				},
+				only_input: true,
+				render_input: true,
+			});
+			if (found && found.row.type) ctrl.set_value(found.row.type);
+			ctrl.$input.on('change', () => {
+				const val = ctrl.get_value();
+				this._setRowItem(uid, val);
+			});
 		});
 
 		wrap.querySelectorAll('.dtp-priority-edit').forEach(el => {
@@ -1050,7 +1065,7 @@ class DentalTreatmentPlanChart {
 		this.render();
 	}
 
-	_setRowItem(uid, itemCode) {
+	async _setRowItem(uid, itemCode) {
 		const found = this._findRowByUid(uid);
 		if (!found) return;
 
@@ -1063,8 +1078,32 @@ class DentalTreatmentPlanChart {
 			return;
 		}
 
-		const doc = this.itemCatalog.find(s => s.name === itemCode);
-		if (!doc) return;
+		let doc = this.itemCatalog.find(s => s.name === itemCode);
+
+		if (!doc) {
+			// Not in the cached catalog yet — most likely just created via
+			// the Link field's "Create a new Item" option. Fetch it and add
+			// it to the cache so the left palette picks it up too.
+			try {
+				const r = await frappe.db.get_value('Item', itemCode, ['item_name', 'standard_rate']);
+				const item_name = (r.message && r.message.item_name) || itemCode;
+				const standard_rate = (r.message && r.message.standard_rate) || 0;
+				const category = dtpClassifyProcedure(item_name);
+				doc = {
+					name: itemCode,
+					status_name: item_name,
+					category: category,
+					color: (DTP_TREATMENT_COLORS[category] && DTP_TREATMENT_COLORS[category].s) || dtpHashColor(itemCode),
+					rate: flt(standard_rate),
+				};
+				this.itemCatalog.push(doc);
+				this.itemCatalog.sort((a, b) => (a.status_name || a.name).localeCompare(b.status_name || b.name));
+				this._renderItemList();
+			} catch (err) {
+				console.error('[DentalTreatmentPlan] Could not fetch new item:', err);
+				return;
+			}
+		}
 
 		found.row.type = doc.name;
 		found.row.label = doc.status_name || doc.name;
