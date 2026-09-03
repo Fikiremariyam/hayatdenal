@@ -13,15 +13,13 @@
  "page_name": "dt_treatment_plan",
  "roles": [
   {
-
    "role": "healthcare user"
-  
   },
   {
    "role": "System Manager"
   }
  ],
- "standard": "No",
+ "standard": "Yes",
  "system_page": 0,
  "title": "Dental Treatment Plan"
 }
