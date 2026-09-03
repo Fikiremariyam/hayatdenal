@@ -127,6 +127,9 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
     <div class="dtp-palette">
       <div class="pal-section">
         <div class="pal-label">Treatment Items</div>
+        <button class="pal-btn" id="dtp-new-item-btn" style="justify-content:center;color:var(--accent);border-color:var(--accent);margin-bottom:8px;">
+          <span style="font-size:13px">＋</span>New Item
+        </button>
         <input type="text" id="dtp-item-search" class="obs-search" placeholder="Search stock items…">
         <div id="dtp-item-list" class="obs-list"></div>
       </div>
@@ -651,7 +654,34 @@ class DentalTreatmentPlanChart {
 		this._renderItemList();
 	}
 
+	_openNewItemDialog() {
+		frappe.ui.form.make_quick_entry('Item', (doc) => {
+			this._addItemToCatalog(doc);
+			frappe.show_alert({ message: __('Item {0} created', [doc.name]), indicator: 'green' });
+		}, null, null, true);
+	}
+
+	/** Add (or update) one item in the cached catalog, keep it sorted, refresh the palette. */
+	_addItemToCatalog(item) {
+		const item_name = item.item_name || item.name;
+		const category = dtpClassifyProcedure(item_name);
+		const doc = {
+			name: item.name,
+			status_name: item_name,
+			category: category,
+			color: (DTP_TREATMENT_COLORS[category] && DTP_TREATMENT_COLORS[category].s) || dtpHashColor(item.name),
+			rate: flt(item.standard_rate),
+		};
+		this.itemCatalog = this.itemCatalog.filter(s => s.name !== doc.name);
+		this.itemCatalog.push(doc);
+		this.itemCatalog.sort((a, b) => (a.status_name || a.name).localeCompare(b.status_name || b.name));
+		this._renderItemList();
+		return doc;
+	}
+
 	_bindItemSearch() {
+		const newBtn = document.getElementById('dtp-new-item-btn');
+		if (newBtn) newBtn.addEventListener('click', () => this._openNewItemDialog());
 		const input = document.getElementById('dtp-item-search');
 		if (!input) return;
 		input.addEventListener('input', (e) => {
@@ -1086,19 +1116,11 @@ class DentalTreatmentPlanChart {
 			// it to the cache so the left palette picks it up too.
 			try {
 				const r = await frappe.db.get_value('Item', itemCode, ['item_name', 'standard_rate']);
-				const item_name = (r.message && r.message.item_name) || itemCode;
-				const standard_rate = (r.message && r.message.standard_rate) || 0;
-				const category = dtpClassifyProcedure(item_name);
-				doc = {
+				doc = this._addItemToCatalog({
 					name: itemCode,
-					status_name: item_name,
-					category: category,
-					color: (DTP_TREATMENT_COLORS[category] && DTP_TREATMENT_COLORS[category].s) || dtpHashColor(itemCode),
-					rate: flt(standard_rate),
-				};
-				this.itemCatalog.push(doc);
-				this.itemCatalog.sort((a, b) => (a.status_name || a.name).localeCompare(b.status_name || b.name));
-				this._renderItemList();
+					item_name: (r.message && r.message.item_name) || itemCode,
+					standard_rate: (r.message && r.message.standard_rate) || 0,
+				});
 			} catch (err) {
 				console.error('[DentalTreatmentPlan] Could not fetch new item:', err);
 				return;
