@@ -1,25 +1,25 @@
 {
  "content": null,
- "creation": "2026-06-02 10:49:29.246604",
+ "creation": "2026-09-01 00:00:00.000000",
  "docstatus": 0,
  "doctype": "Page",
+ "icon": "fa fa-crosshairs",
  "idx": 0,
- "modified": "2026-06-02 10:49:29.246604",
+ "modified": "2026-09-01 00:00:00.000000",
  "modified_by": "Administrator",
- "module": "Dental Clinic",
+ "module": "Healthcare",
  "name": "dt_treatment_plan",
  "owner": "Administrator",
  "page_name": "dt_treatment_plan",
  "roles": [
   {
-   "role": "System Manager"
+   "role": "Healthcare Practitioner"
   },
   {
-   "role": "healthcare user"
+   "role": "System Manager"
   }
  ],
- "script": null,
  "standard": "Yes",
- "style": null,
- "system_page": 0
+ "system_page": 0,
+ "title": "Dental Treatment Plan"
 }
