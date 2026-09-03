@@ -601,6 +601,7 @@ class DentalTreatmentPlanChart {
 				options: 'Item',
 				fieldname: 'item_search',
 				placeholder: __('Search or create an item…'),
+				onchange: () => this._onItemSearchSelected(),
 			},
 			only_input: true,
 			render_input: true,
@@ -686,16 +687,14 @@ class DentalTreatmentPlanChart {
 
 	_bindItemSearchLink() {
 		var me = this;
-		// Live-filter the browsable list below as the user types...
+		// Live-filter the browsable list below as the user types. Actual
+		// selection (click a suggestion, or create-new) is handled by
+		// df.onchange on the control itself — the Link field's awesomplete
+		// flow doesn't reliably fire a plain DOM 'change' event on $input,
+		// which is why picking an item here wasn't applying anything.
 		this.item_search_ctrl.$input.on('input', function (e) {
 			me.itemSearchTerm = e.target.value || '';
 			me._renderItemList();
-		});
-		// ...and when they actually pick (or create) an item, treat it
-		// exactly like clicking a palette button: select it, and apply
-		// immediately if a tooth is already selected.
-		this.item_search_ctrl.$input.on('change', function () {
-			me._onItemSearchSelected();
 		});
 	}
 
@@ -1192,7 +1191,7 @@ class DentalTreatmentPlanChart {
 	/* ══════════════════════════════════════════════════════════════════
 	   SAVE — first point Dental Treatment Plan Procedure is referenced.
 	══════════════════════════════════════════════════════════════════*/
-	save() {
+	async save() {
 		const patientId = this.patient_ctrl.get_value();
 		if (!patientId) {
 			frappe.msgprint({ title: 'No Patient Selected', message: 'Search for and select a patient before saving.', indicator: 'orange' });
@@ -1205,8 +1204,7 @@ class DentalTreatmentPlanChart {
 			if (state.rows.length) procedureRows.push(...state.toDocRows());
 		});
 
-		const doc = {
-			doctype: this.frm_doctype,
+		const fieldValues = {
 			patient: patientId,
 			provider: this.provider_ctrl.get_value(),
 			plan_type: document.getElementById('dtp-plan-type').value,
@@ -1220,26 +1218,38 @@ class DentalTreatmentPlanChart {
 
 		frappe.dom.freeze('Saving...');
 
-		if (this.docname) {
-			doc.name = this.docname;
-			// Required so the server's optimistic-lock check has something
-			// to compare against — without this it always looks like a
-			// conflict ("Document has been modified...") even when nothing
-			// else touched the record.
-			doc.modified = this.docModified;
-			frappe.call({
-				method: 'frappe.client.save',
-				args: { doc: doc },
-				callback: (r) => { frappe.dom.unfreeze(); if (r.message) this._afterSave(r.message); },
-				error: () => frappe.dom.unfreeze(),
-			});
-		} else {
-			frappe.call({
-				method: 'frappe.client.insert',
-				args: { doc: doc },
-				callback: (r) => { frappe.dom.unfreeze(); if (r.message) this._afterSave(r.message); },
-				error: () => frappe.dom.unfreeze(),
-			});
+		try {
+			if (this.docname) {
+				// UPDATE — fetch the full existing document first and mutate
+				// only the fields we manage, then send the whole thing back.
+				// Building a bare doc from scratch (as before) silently drops
+				// or blanks out every other field on the record — owner,
+				// creation, docstatus, idx, anything else — which is exactly
+				// what caused "Value cannot be changed for Created On" and
+				// the earlier false-positive "Document has been modified"
+				// conflict. Round-tripping the full doc avoids both.
+				const existing = await frappe.db.get_doc(this.frm_doctype, this.docname);
+				Object.assign(existing, fieldValues);
+
+				frappe.call({
+					method: 'frappe.client.save',
+					args: { doc: existing },
+					callback: (r) => { frappe.dom.unfreeze(); if (r.message) this._afterSave(r.message); },
+					error: () => frappe.dom.unfreeze(),
+				});
+			} else {
+				// INSERT — nothing pre-existing to preserve, a fresh doc is fine.
+				frappe.call({
+					method: 'frappe.client.insert',
+					args: { doc: Object.assign({ doctype: this.frm_doctype }, fieldValues) },
+					callback: (r) => { frappe.dom.unfreeze(); if (r.message) this._afterSave(r.message); },
+					error: () => frappe.dom.unfreeze(),
+				});
+			}
+		} catch (err) {
+			frappe.dom.unfreeze();
+			console.error('[DentalTreatmentPlan] save failed:', err);
+			frappe.msgprint({ title: 'Save Error', message: String(err), indicator: 'red' });
 		}
 	}
 
@@ -1249,7 +1259,6 @@ class DentalTreatmentPlanChart {
 
 	_afterSave(doc) {
 		this.docname = doc.name;
-		this.docModified = doc.modified;   // keep this current for the next save
 		_dtpSet('dtp-badge', doc.name);
 		frappe.show_alert({ message: `Saved: ${doc.name}`, indicator: 'green' });
 	}
@@ -1261,7 +1270,6 @@ class DentalTreatmentPlanChart {
 	══════════════════════════════════════════════════════════════════*/
 	reset() {
 		this.docname = null;
-		this.docModified = null;
 		this.selFDI = null;
 		this.selectedRowIds = new Set();
 		this._resetAllTeeth();
@@ -1338,7 +1346,6 @@ class DentalTreatmentPlanChart {
 					this.selectedRowIds = new Set();
 
 					this.docname = doc.name;
-					this.docModified = doc.modified;   // needed so a later Save doesn't false-positive as a conflict
 					this.patient_ctrl.set_value(doc.patient || '');
 					this.provider_ctrl.set_value(doc.provider || '');
 					document.getElementById('dtp-plan-type').value = doc.plan_type || 'Active';
