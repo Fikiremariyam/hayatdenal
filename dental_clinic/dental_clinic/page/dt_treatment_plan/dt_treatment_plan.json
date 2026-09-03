@@ -7,19 +7,21 @@
  "idx": 0,
  "modified": "2026-09-01 00:00:00.000000",
  "modified_by": "Administrator",
- "module": "Healthcare",
+ "module": "Dental Clinic",
  "name": "dt_treatment_plan",
  "owner": "Administrator",
  "page_name": "dt_treatment_plan",
  "roles": [
   {
-   "role": "Healthcare Practitioner"
+
+   "role": "healthcare user"
+  
   },
   {
    "role": "System Manager"
   }
  ],
- "standard": "Yes",
+ "standard": "No",
  "system_page": 0,
  "title": "Dental Treatment Plan"
 }
