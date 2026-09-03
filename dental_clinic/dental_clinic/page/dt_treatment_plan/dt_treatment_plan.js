@@ -198,24 +198,18 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
         <textarea class="dp-textarea" id="dtp-plan-note" rows="3" placeholder="Notes about this treatment plan…"></textarea>
       </div>
 
-      <div class="totals-sig-row">
-        <div class="totals-stack">
-          <div class="total-card">
-            <div class="total-card-lbl">Total Insurance Estimate</div>
-            <div class="total-card-val" id="dtp-total-ins">0</div>
-          </div>
-          <div class="total-card">
-            <div class="total-card-lbl">Total Fee</div>
-            <div class="total-card-val" id="dtp-total-fee">0</div>
-          </div>
-          <div class="total-card">
-            <div class="total-card-lbl">Total Patient Portion</div>
-            <div class="total-card-val" id="dtp-total-portion">0</div>
-          </div>
+      <div class="totals-stack">
+        <div class="total-card">
+          <div class="total-card-lbl">Total Insurance Estimate</div>
+          <div class="total-card-val" id="dtp-total-ins">0</div>
         </div>
-        <div>
-          <span class="dtp-field-lbl">Signed Date</span>
-          <div id="dtp-signed-date"></div>
+        <div class="total-card">
+          <div class="total-card-lbl">Total Fee</div>
+          <div class="total-card-val" id="dtp-total-fee">0</div>
+        </div>
+        <div class="total-card">
+          <div class="total-card-lbl">Total Patient Portion</div>
+          <div class="total-card-val" id="dtp-total-portion">0</div>
         </div>
       </div>
 
@@ -600,12 +594,6 @@ class DentalTreatmentPlanChart {
 		});
 		this.plan_date_ctrl.set_value(frappe.datetime.get_today());
 
-		this.signed_date_ctrl = frappe.ui.form.make_control({
-			parent: $('#dtp-signed-date'),
-			df: { fieldtype: 'Date', fieldname: 'signed_date' },
-			render_input: true,
-		});
-
 		this.item_search_ctrl = frappe.ui.form.make_control({
 			parent: $('#dtp-item-search-link'),
 			df: {
@@ -631,29 +619,51 @@ class DentalTreatmentPlanChart {
 		const wrap = document.getElementById('dtp-item-list');
 		if (wrap) wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">Loading items…</div>`;
 
+		this.itemCatalog = [];
+		const PAGE_SIZE = 500;
+		let start = 0;
+
 		try {
-			const items = await frappe.db.get_list('Item', {
-				filters          : { disabled: 0 /*, item_group: 'Dental Procedures' */ },
-				fields           : ['name', 'item_name', 'standard_rate'],
-				limit_page_length: 100000,   // explicit high number — 0 isn't reliably "no limit" through this API
-				order_by         : 'item_name asc',
-			});
-			this.itemCatalog = items.map(item => {
-				const category = dtpClassifyProcedure(item.item_name || item.name);
-				return {
-					name       : item.name,
-					status_name: item.item_name || item.name,
-					category   : category,
-					color      : (DTP_TREATMENT_COLORS[category] && DTP_TREATMENT_COLORS[category].s) || dtpHashColor(item.name),
-					rate       : flt(item.standard_rate),
-				};
-			});
+			// Fetch in pages rather than trusting a single huge
+			// limit_page_length — some setups cap that server-side
+			// regardless of what's requested. Keep asking for more pages
+			// until a page comes back short (or empty), which is the only
+			// reliable way to know we've got everything.
+			// eslint-disable-next-line no-constant-condition
+			while (true) {
+				const items = await frappe.db.get_list('Item', {
+					filters          : { disabled: 0 /*, item_group: 'Dental Procedures' */ },
+					fields           : ['name', 'item_name', 'standard_rate'],
+					limit_start      : start,
+					limit_page_length: PAGE_SIZE,
+					order_by         : 'item_name asc',
+				});
+
+				items.forEach(item => {
+					const category = dtpClassifyProcedure(item.item_name || item.name);
+					this.itemCatalog.push({
+						name       : item.name,
+						status_name: item.item_name || item.name,
+						category   : category,
+						color      : (DTP_TREATMENT_COLORS[category] && DTP_TREATMENT_COLORS[category].s) || dtpHashColor(item.name),
+						rate       : flt(item.standard_rate),
+					});
+				});
+
+				// Render progressively so a large catalog doesn't sit on a
+				// blank "Loading…" screen for several seconds.
+				this._renderItemList();
+
+				if (items.length < PAGE_SIZE) break;   // short page = last page
+				start += PAGE_SIZE;
+			}
 		} catch (err) {
 			console.error('[DentalTreatmentPlan] Failed to load Item list:', err);
-			this.itemCatalog = [];
 		}
+
 		this.itemCatalog.sort((a, b) => (a.status_name || a.name).localeCompare(b.status_name || b.name));
 		this._renderItemList();
+		console.log(`[DentalTreatmentPlan] Loaded ${this.itemCatalog.length} items into the palette.`);
 	}
 
 	/** Add (or update) one item in the cached catalog, keep it sorted, refresh the palette. */
@@ -1206,13 +1216,17 @@ class DentalTreatmentPlanChart {
 			total_insurance_estimate: this._parseCurrency(document.getElementById('dtp-total-ins').textContent),
 			total_fee: this._parseCurrency(document.getElementById('dtp-total-fee').textContent),
 			total_patient_portion: this._parseCurrency(document.getElementById('dtp-total-portion').textContent),
-			signed_date: this.signed_date_ctrl.get_value(),
 		};
 
 		frappe.dom.freeze('Saving...');
 
 		if (this.docname) {
 			doc.name = this.docname;
+			// Required so the server's optimistic-lock check has something
+			// to compare against — without this it always looks like a
+			// conflict ("Document has been modified...") even when nothing
+			// else touched the record.
+			doc.modified = this.docModified;
 			frappe.call({
 				method: 'frappe.client.save',
 				args: { doc: doc },
@@ -1235,6 +1249,7 @@ class DentalTreatmentPlanChart {
 
 	_afterSave(doc) {
 		this.docname = doc.name;
+		this.docModified = doc.modified;   // keep this current for the next save
 		_dtpSet('dtp-badge', doc.name);
 		frappe.show_alert({ message: `Saved: ${doc.name}`, indicator: 'green' });
 	}
@@ -1246,6 +1261,7 @@ class DentalTreatmentPlanChart {
 	══════════════════════════════════════════════════════════════════*/
 	reset() {
 		this.docname = null;
+		this.docModified = null;
 		this.selFDI = null;
 		this.selectedRowIds = new Set();
 		this._resetAllTeeth();
@@ -1254,7 +1270,6 @@ class DentalTreatmentPlanChart {
 		document.getElementById('dtp-plan-type').value = 'Active';
 		this.plan_date_ctrl.set_value(frappe.datetime.get_today());
 		document.getElementById('dtp-plan-note').value = '';
-		this.signed_date_ctrl.set_value('');
 		_dtpSet('dtp-badge', 'New Plan');
 		this.render();
 	}
@@ -1323,12 +1338,12 @@ class DentalTreatmentPlanChart {
 					this.selectedRowIds = new Set();
 
 					this.docname = doc.name;
+					this.docModified = doc.modified;   // needed so a later Save doesn't false-positive as a conflict
 					this.patient_ctrl.set_value(doc.patient || '');
 					this.provider_ctrl.set_value(doc.provider || '');
 					document.getElementById('dtp-plan-type').value = doc.plan_type || 'Active';
 					this.plan_date_ctrl.set_value(doc.plan_date || '');
 					document.getElementById('dtp-plan-note').value = doc.plan_note || '';
-					this.signed_date_ctrl.set_value(doc.signed_date || '');
 
 					(doc.dental_treatment_plan_procedure || []).forEach(row => {
 						const state = this.teethSets.permanent[row.fdi] || this.teethSets.primary[row.fdi];
