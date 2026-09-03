@@ -19,9 +19,19 @@ class DentalTreatmentPlanPage {
 
 	make() {
 		this.setup_actions();
-		this.render_field_group();
-		this.bind_child_table_events();
-		this.set_defaults();
+
+		// A standalone frappe.ui.FieldGroup does not auto-fetch child-table
+		// metadata the way a real form does. Load both doctypes' docfields
+		// into locals.DocType first, otherwise grid.setup_fields() throws
+		// "Cannot read properties of undefined (reading 'forEach')".
+		var me = this;
+		frappe.model.with_doctype(this.frm_doctype, function () {
+			frappe.model.with_doctype(me.child_doctype, function () {
+				me.render_field_group();
+				me.bind_child_table_events();
+				me.set_defaults();
+			});
+		});
 	}
 
 	// ---------------------------------------------------------------
@@ -38,8 +48,8 @@ class DentalTreatmentPlanPage {
 			me.reset();
 		});
 
-		this.page.add_menu_item(__('Open Existing Plan'), function () {
-			me.load_existing();
+		this.page.add_menu_item(__('Load History'), function () {
+			me.load_plan_history();
 		});
 
 		this.page.add_menu_item(__('Recalculate Totals'), function () {
@@ -293,31 +303,83 @@ class DentalTreatmentPlanPage {
 		this.page.clear_indicator();
 	}
 
-	load_existing() {
+	// Lists past treatment plans and lets the user click one to load it.
+	// Nothing is fetched automatically anywhere else on this page — this
+	// menu item is the only way an existing plan gets loaded.
+	load_plan_history() {
 		var me = this;
-		frappe.prompt(
-			[{
-				fieldtype: 'Link',
-				fieldname: 'plan',
-				label: __('Dental Treatment Plan'),
-				options: this.frm_doctype,
-				reqd: 1
-			}],
-			function (values) {
-				frappe.call({
-					method: 'frappe.client.get',
-					args: { doctype: me.frm_doctype, name: values.plan },
-					callback: function (r) {
-						if (!r.message) return;
-						me.docname = r.message.name;
-						me.field_group.set_values(r.message);
-						me.recalculate_totals();
-						me.page.set_indicator(me.docname, 'blue');
-					}
-				});
+		var patientId = this.fields_dict.patient.get_value();
+
+		var filters = patientId ? { patient: patientId } : {};
+
+		frappe.call({
+			method: 'frappe.client.get_list',
+			args: {
+				doctype: this.frm_doctype,
+				filters: filters,
+				fields: ['name', 'patient', 'plan_date', 'plan_type', 'provider'],
+				order_by: 'plan_date desc',
+				limit_page_length: 20
 			},
-			__('Open Treatment Plan'),
-			__('Open')
-		);
+			callback: function (r) {
+				var list = r.message || [];
+				if (!list.length) {
+					frappe.msgprint({
+						title: __('No Plans Found'),
+						message: patientId
+							? __('No saved treatment plans for this patient.')
+							: __('No saved treatment plans yet.'),
+						indicator: 'orange'
+					});
+					return;
+				}
+
+				var d = new frappe.ui.Dialog({
+					title: __('Select a Treatment Plan to Load'),
+					fields: [{ fieldtype: 'HTML', fieldname: 'plan_list_html' }]
+				});
+
+				var rows = list.map(function (p) {
+					return (
+						'<div class="dtp-hist-item" data-name="' + p.name + '" style="display:flex;align-items:center;gap:12px;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;margin-bottom:5px;cursor:pointer;font-size:12px;">' +
+							'<span style="font-family:monospace;font-weight:600">' + p.name + '</span>' +
+							'<span>' + (p.patient || '') + '</span>' +
+							'<span style="color:var(--text-muted)">' + frappe.datetime.str_to_user(p.plan_date) + '</span>' +
+							'<span style="color:var(--text-muted);font-size:11px">' + (p.plan_type || '') + '</span>' +
+						'</div>'
+					);
+				}).join('');
+
+				d.fields_dict.plan_list_html.$wrapper.html(
+					'<div style="max-height:340px;overflow-y:auto">' + rows + '</div>'
+				);
+
+				d.fields_dict.plan_list_html.$wrapper.on('click', '.dtp-hist-item', function (e) {
+					var name = $(e.currentTarget).data('name');
+					d.hide();
+					me._load_plan_by_name(name);
+				});
+
+				d.show();
+			}
+		});
+	}
+
+	// Fetches one plan by name and populates the field group. Only ever
+	// called from load_plan_history() above — never automatically.
+	_load_plan_by_name(name) {
+		var me = this;
+		frappe.call({
+			method: 'frappe.client.get',
+			args: { doctype: this.frm_doctype, name: name },
+			callback: function (r) {
+				if (!r.message) return;
+				me.docname = r.message.name;
+				me.field_group.set_values(r.message);
+				me.recalculate_totals();
+				me.page.set_indicator(me.docname, 'blue');
+				frappe.show_alert({ message: __('Loaded {0}', [me.docname]), indicator: 'green' });
+			}
+		});
 	}
 }
