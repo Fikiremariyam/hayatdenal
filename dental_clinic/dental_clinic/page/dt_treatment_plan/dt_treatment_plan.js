@@ -127,10 +127,7 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
     <div class="dtp-palette">
       <div class="pal-section">
         <div class="pal-label">Treatment Items</div>
-        <button class="pal-btn" id="dtp-new-item-btn" style="justify-content:center;color:var(--accent);border-color:var(--accent);margin-bottom:8px;">
-          <span style="font-size:13px">＋</span>New Item
-        </button>
-        <input type="text" id="dtp-item-search" class="obs-search" placeholder="Search stock items…">
+        <div id="dtp-item-search-link" style="margin-bottom:7px;"></div>
         <div id="dtp-item-list" class="obs-list"></div>
       </div>
       <div class="pal-sep"></div>
@@ -217,8 +214,6 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
           </div>
         </div>
         <div>
-          <span class="dtp-field-lbl">Patient Signature</span>
-          <div id="dtp-signature" style="margin-bottom:10px;"></div>
           <span class="dtp-field-lbl">Signed Date</span>
           <div id="dtp-signed-date"></div>
         </div>
@@ -605,19 +600,26 @@ class DentalTreatmentPlanChart {
 		});
 		this.plan_date_ctrl.set_value(frappe.datetime.get_today());
 
-		this.signature_ctrl = frappe.ui.form.make_control({
-			parent: $('#dtp-signature'),
-			df: { fieldtype: 'Signature', fieldname: 'patient_signature' },
-			render_input: true,
-		});
 		this.signed_date_ctrl = frappe.ui.form.make_control({
 			parent: $('#dtp-signed-date'),
 			df: { fieldtype: 'Date', fieldname: 'signed_date' },
 			render_input: true,
 		});
 
+		this.item_search_ctrl = frappe.ui.form.make_control({
+			parent: $('#dtp-item-search-link'),
+			df: {
+				fieldtype: 'Link',
+				options: 'Item',
+				fieldname: 'item_search',
+				placeholder: __('Search or create an item…'),
+			},
+			only_input: true,
+			render_input: true,
+		});
+
 		this._loadItemCatalog();
-		this._bindItemSearch();
+		this._bindItemSearchLink();
 		this._bindNumberingToggle();
 		this._bindTooltip();
 
@@ -654,13 +656,6 @@ class DentalTreatmentPlanChart {
 		this._renderItemList();
 	}
 
-	_openNewItemDialog() {
-		frappe.ui.form.make_quick_entry('Item', (doc) => {
-			this._addItemToCatalog(doc);
-			frappe.show_alert({ message: __('Item {0} created', [doc.name]), indicator: 'green' });
-		}, null, null, true);
-	}
-
 	/** Add (or update) one item in the cached catalog, keep it sorted, refresh the palette. */
 	_addItemToCatalog(item) {
 		const item_name = item.item_name || item.name;
@@ -679,15 +674,49 @@ class DentalTreatmentPlanChart {
 		return doc;
 	}
 
-	_bindItemSearch() {
-		const newBtn = document.getElementById('dtp-new-item-btn');
-		if (newBtn) newBtn.addEventListener('click', () => this._openNewItemDialog());
-		const input = document.getElementById('dtp-item-search');
-		if (!input) return;
-		input.addEventListener('input', (e) => {
-			this.itemSearchTerm = e.target.value || '';
-			this._renderItemList();
+	_bindItemSearchLink() {
+		var me = this;
+		// Live-filter the browsable list below as the user types...
+		this.item_search_ctrl.$input.on('input', function (e) {
+			me.itemSearchTerm = e.target.value || '';
+			me._renderItemList();
 		});
+		// ...and when they actually pick (or create) an item, treat it
+		// exactly like clicking a palette button: select it, and apply
+		// immediately if a tooth is already selected.
+		this.item_search_ctrl.$input.on('change', function () {
+			me._onItemSearchSelected();
+		});
+	}
+
+	async _onItemSearchSelected() {
+		const val = this.item_search_ctrl.get_value();
+		if (!val) return;
+
+		let doc = this.itemCatalog.find(s => s.name === val);
+		if (!doc) {
+			// Not cached yet — just created via the Link field's "Create a
+			// new Item" option, or otherwise not in the preloaded catalog.
+			try {
+				const r = await frappe.db.get_value('Item', val, ['item_name', 'standard_rate']);
+				doc = this._addItemToCatalog({
+					name: val,
+					item_name: (r.message && r.message.item_name) || val,
+					standard_rate: (r.message && r.message.standard_rate) || 0,
+				});
+			} catch (err) {
+				console.error('[DentalTreatmentPlan] Could not fetch item:', err);
+				return;
+			}
+		}
+
+		this.selItem = { id: doc.name, label: doc.status_name || doc.name, color: doc.color, category: doc.category, rate: flt(doc.rate) };
+		this._renderItemList();
+		if (this.selFDI) this._applySelectedItem();
+
+		// Clear the field so it's ready for the next search/pick.
+		this.item_search_ctrl.set_value('');
+		this.itemSearchTerm = '';
 	}
 
 	_renderItemList() {
@@ -1177,7 +1206,6 @@ class DentalTreatmentPlanChart {
 			total_insurance_estimate: this._parseCurrency(document.getElementById('dtp-total-ins').textContent),
 			total_fee: this._parseCurrency(document.getElementById('dtp-total-fee').textContent),
 			total_patient_portion: this._parseCurrency(document.getElementById('dtp-total-portion').textContent),
-			patient_signature: this.signature_ctrl.get_value(),
 			signed_date: this.signed_date_ctrl.get_value(),
 		};
 
@@ -1226,7 +1254,6 @@ class DentalTreatmentPlanChart {
 		document.getElementById('dtp-plan-type').value = 'Active';
 		this.plan_date_ctrl.set_value(frappe.datetime.get_today());
 		document.getElementById('dtp-plan-note').value = '';
-		this.signature_ctrl.set_value('');
 		this.signed_date_ctrl.set_value('');
 		_dtpSet('dtp-badge', 'New Plan');
 		this.render();
@@ -1291,26 +1318,30 @@ class DentalTreatmentPlanChart {
 				if (!r.message) return;
 				const doc = r.message;
 
-				this._resetAllTeeth();
-				this.selectedRowIds = new Set();
+				try {
+					this._resetAllTeeth();
+					this.selectedRowIds = new Set();
 
-				this.docname = doc.name;
-				this.patient_ctrl.set_value(doc.patient || '');
-				this.provider_ctrl.set_value(doc.provider || '');
-				document.getElementById('dtp-plan-type').value = doc.plan_type || 'Active';
-				this.plan_date_ctrl.set_value(doc.plan_date || '');
-				document.getElementById('dtp-plan-note').value = doc.plan_note || '';
-				this.signature_ctrl.set_value(doc.patient_signature || '');
-				this.signed_date_ctrl.set_value(doc.signed_date || '');
+					this.docname = doc.name;
+					this.patient_ctrl.set_value(doc.patient || '');
+					this.provider_ctrl.set_value(doc.provider || '');
+					document.getElementById('dtp-plan-type').value = doc.plan_type || 'Active';
+					this.plan_date_ctrl.set_value(doc.plan_date || '');
+					document.getElementById('dtp-plan-note').value = doc.plan_note || '';
+					this.signed_date_ctrl.set_value(doc.signed_date || '');
 
-				(doc.dental_treatment_plan_procedure || []).forEach(row => {
-					const state = this.teethSets.permanent[row.fdi] || this.teethSets.primary[row.fdi];
-					if (state) state.loadFromDocRow(row, this.itemCatalog);
-				});
+					(doc.dental_treatment_plan_procedure || []).forEach(row => {
+						const state = this.teethSets.permanent[row.fdi] || this.teethSets.primary[row.fdi];
+						if (state) state.loadFromDocRow(row, this.itemCatalog);
+					});
 
-				_dtpSet('dtp-badge', doc.name);
-				this.render();
-				frappe.show_alert({ message: `Loaded ${doc.name}`, indicator: 'green' });
+					_dtpSet('dtp-badge', doc.name);
+					this.render();
+					frappe.show_alert({ message: `Loaded ${doc.name}`, indicator: 'green' });
+				} catch (err) {
+					console.error('[DentalTreatmentPlan] _loadPlanByName failed partway through:', err);
+					frappe.msgprint({ title: 'Load Error', message: String(err), indicator: 'red' });
+				}
 			},
 		});
 	}
