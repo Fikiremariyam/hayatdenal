@@ -355,54 +355,80 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         return is_day_working(date);
     }
 
-    // Pull the practitioner's actual free slots for a date, at whatever
-    // appointment duration this booking needs — durations aren't fixed at
-    // 30 min and differ from doctor to doctor (can be shorter), so the slot
-    // spacing itself is driven by `duration`, not a hardcoded constant.
-    // Bounds still come from the 8:00–17:30 working window; drops the whole
-    // day if it's not a working day per Duty Assignment; then removes any
-    // candidate slot that would overlap an existing non-cancelled
-    // appointment (which may itself have a different duration). Returns:
-    //   null        -> couldn't verify against the server (network/API error) —
-    //                  fail CLOSED, caller should not offer any slot as bookable.
-    //   []          -> day not working, or working but fully booked at this duration.
-    //   [minutes,…] -> free slot start times (minutes from midnight), ascending.
-    function fetch_available_slots(practitioner, date, duration, callback) {
-        duration = parseInt(duration, 10);
-        if (!duration || duration <= 0) duration = 15;
-        if (!is_day_working(date)) { callback([]); return; }
-
-        var day_start = TIME_SLOT_MINUTES[0];
-        var day_end   = TIME_SLOT_MINUTES[TIME_SLOT_MINUTES.length - 1] + SLOT_MINUTES; // 17:30
+    // Pull the practitioner's actual available slots for a date straight from
+    // Healthcare's own scheduling engine — the same whitelisted method the
+    // stock Patient Appointment "Check Availability" button calls. This reads
+    // the practitioner's real Practitioner Schedule (their configured slot
+    // duration and working hours, which differ from doctor to doctor and can
+    // be under 30 min), and already excludes approved leave days and
+    // already-booked times on the server side, so we don't re-derive any of
+    // that ourselves.
+    //
+    // NOTE ON RESPONSE SHAPE: different Healthcare/Marley versions have shipped
+    // slightly different keys here (e.g. `slot_details` vs a bare list, or
+    // `avail_slot` vs `available_slots`). parse_availability_response() below
+    // tries the common shapes and logs the raw response to the console so it's
+    // easy to confirm/adjust against your installed version on first use.
+    //
+    // Returns:
+    //   null        -> couldn't verify against the server (network/API error,
+    //                   or the server reported no schedule / not working that
+    //                   day) — fail CLOSED, caller should not offer any slot.
+    //   []          -> schedule loaded but every slot is already booked.
+    //   [{mins, time_str, duration, service_unit}, …] -> free slots, ascending.
+    function fetch_available_slots(practitioner, date, callback) {
+        if (!is_day_working(date)) { callback(null); return; }
 
         frappe.call({
-            method: 'frappe.client.get_list',
-            args: {
-                doctype: 'Patient Appointment',
-                fields: ['name', 'appointment_time', 'duration'],
-                filters: [
-                    ['practitioner', '=', practitioner],
-                    ['appointment_date', '=', date],
-                    ['status', '!=', 'Cancelled']
-                ],
-                limit_page_length: 200
-            },
+            method: 'healthcare.healthcare.doctype.patient_appointment.patient_appointment.get_availability_data',
+            args: { practitioner: practitioner, date: date },
             callback: function(r) {
-                var existing = r.message || [];
-                var busy = existing.map(function(a) {
-                    var s = time_str_to_minutes(a.appointment_time);
-                    return { start: s, end: s + (a.duration || 15) };
-                });
-                var free = [];
-                for (var mins = day_start; mins + duration <= day_end; mins += duration) {
-                    var slot_end = mins + duration;
-                    var clash = busy.some(function(b) { return mins < b.end && b.start < slot_end; });
-                    if (!clash) free.push(mins);
-                }
-                callback(free);
+                console.log('get_availability_data response for', practitioner, date, r.message);
+                var slots = parse_availability_response(r.message);
+                callback(slots); // may be [] if the parse found the response but no open slots
             },
-            error: function() { callback(null); } // couldn't verify — fail closed, never guess "free"
+            error: function() {
+                // Includes the case where Healthcare itself throws (e.g. "does not
+                // have a Healthcare Practitioner Schedule" / "not available on
+                // <weekday>") — frappe.call already shows that server message to
+                // the user, we just fail closed here.
+                callback(null);
+            }
         });
+    }
+
+    // Best-effort normalizer for get_availability_data's response across
+    // Healthcare/Marley versions. Looks for a `slot_details` array (or a bare
+    // array), each entry optionally scoped to a service unit with a list of
+    // available slots under `avail_slot` / `available_slots` / `slots`, each
+    // slot carrying `from_time`/`to_time` (or `time`). Falls back to a 15-min
+    // duration if the schedule doesn't state one. Returns [] if the shape is
+    // completely unrecognized (rather than guessing).
+    function parse_availability_response(msg) {
+        if (!msg) return [];
+        var groups = Array.isArray(msg) ? msg : (msg.slot_details || msg.slots || []);
+        if (!Array.isArray(groups)) return [];
+
+        var out = [];
+        groups.forEach(function(g) {
+            var service_unit = g.service_unit || g.slot_name || '';
+            var group_duration = g.duration || null;
+            var avail = g.avail_slot || g.available_slots || g.slots || [];
+            if (!Array.isArray(avail)) return;
+
+            avail.forEach(function(s) {
+                var from = (typeof s === 'string') ? s : (s.from_time || s.time || s.from);
+                if (!from) return;
+                var to = (typeof s === 'object') ? (s.to_time || s.to) : null;
+                var mins = time_str_to_minutes(from);
+                var dur = group_duration || (s.duration) || (to ? (time_str_to_minutes(to) - mins) : 15);
+                var time_str = from.length === 5 ? (from + ':00') : from;
+                out.push({ mins: mins, time_str: time_str, duration: dur, service_unit: service_unit });
+            });
+        });
+
+        out.sort(function(a, b) { return a.mins - b.mins; });
+        return out;
     }
 
     // ── Practitioner selection gate ───────────────────────────────
@@ -725,65 +751,70 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         var picker = new frappe.ui.Dialog({
             title: 'Select an Available Time — ' + frappe.datetime.str_to_user(date),
             fields: [
-                {
-                    fieldtype: 'Int', fieldname: 'duration', label: 'Duration (mins)',
-                    default: 15,
-                    description: 'How long this appointment needs — slots below are spaced to match.'
-                },
                 { fieldtype: 'HTML', fieldname: 'slot_list' }
             ]
         });
+        picker.fields_dict.slot_list.$wrapper.html('<div class="cal-avail-checking">Loading available slots…</div>');
         picker.show();
 
-        function render_slots() {
-            var duration = picker.get_value('duration') || 15;
-            picker.fields_dict.slot_list.$wrapper.html('<div class="cal-avail-checking">Loading available slots…</div>');
+        fetch_available_slots(practitioner, date, function(slots) {
+            if (slots === null) {
+                picker.fields_dict.slot_list.$wrapper.html(
+                    '<div class="cal-avail-box cal-avail-bad">Couldn\'t load this practitioner\'s schedule for this date. Please close this and try again.</div>'
+                );
+                return;
+            }
+            if (!slots.length) {
+                picker.fields_dict.slot_list.$wrapper.html(
+                    '<div class="cal-avail-box cal-avail-bad">No open slots left for ' + practitioner + ' on ' + frappe.datetime.str_to_user(date) + '.</div>'
+                );
+                return;
+            }
 
-            fetch_available_slots(practitioner, date, duration, function(slots) {
-                // Bail if the duration was changed again while this call was in flight.
-                if (duration !== (picker.get_value('duration') || 15)) return;
+            // Group by service unit when the schedule spans more than one,
+            // so it's clear which branch/room each block of times belongs to.
+            var by_unit = {};
+            var unit_order = [];
+            slots.forEach(function(s) {
+                var key = s.service_unit || '';
+                if (!by_unit[key]) { by_unit[key] = []; unit_order.push(key); }
+                by_unit[key].push(s);
+            });
 
-                if (slots === null) {
-                    picker.fields_dict.slot_list.$wrapper.html(
-                        '<div class="cal-avail-box cal-avail-bad">Couldn\'t load availability for this date. Please close this and try again.</div>'
-                    );
-                    return;
+            var html = '';
+            unit_order.forEach(function(unit) {
+                if (unit_order.length > 1) {
+                    html += '<div style="font-size:12px;font-weight:600;margin:10px 0 6px;color:var(--text-muted);">'
+                        + (unit || 'Unassigned') + '</div>';
                 }
-                if (!slots.length) {
-                    picker.fields_dict.slot_list.$wrapper.html(
-                        '<div class="cal-avail-box cal-avail-bad">No open ' + duration + '-min slots left for ' + practitioner + ' on ' + frappe.datetime.str_to_user(date) + '.</div>'
-                    );
-                    return;
-                }
-
-                var html = '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
-                slots.forEach(function(mins) {
-                    html += '<button type="button" class="cal-nav-btn cal-slot-pick" data-mins="' + mins + '">'
-                        + format_time_label(mins) + '</button>';
+                html += '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
+                by_unit[unit].forEach(function(s) {
+                    html += '<button type="button" class="cal-nav-btn cal-slot-pick"'
+                        + ' data-time="' + s.time_str + '" data-duration="' + s.duration + '" data-unit="' + (s.service_unit || '') + '">'
+                        + format_time_label(s.mins) + '</button>';
                 });
                 html += '</div>';
-                picker.fields_dict.slot_list.$wrapper.html(html);
+            });
+            picker.fields_dict.slot_list.$wrapper.html(html);
 
-                picker.fields_dict.slot_list.$wrapper.find('.cal-slot-pick').on('click', function() {
-                    var mins = parseInt($(this).data('mins'), 10);
-                    var time_str = format_time_label(mins) + ':00';
-                    var duty = get_duty_for_date(date);
-                    picker.hide();
-                    open_booking_dialog({
-                        appointment_date: date,
-                        appointment_time: time_str,
-                        practitioner: practitioner,
-                        duration: duration,
-                        service_unit: duty ? duty.branch : ''
-                    });
+            picker.fields_dict.slot_list.$wrapper.find('.cal-slot-pick').on('click', function() {
+                var time_str = $(this).data('time');
+                var duration = parseInt($(this).data('duration'), 10) || 15;
+                var service_unit = $(this).data('unit');
+                var duty = get_duty_for_date(date);
+                picker.hide();
+                open_booking_dialog({
+                    appointment_date: date,
+                    appointment_time: time_str,
+                    practitioner: practitioner,
+                    duration: duration,
+                    // Prefer the service unit the schedule slot belongs to; fall
+                    // back to the Duty Assignment branch for this date if the
+                    // schedule didn't specify one.
+                    service_unit: service_unit || (duty ? duty.branch : '')
                 });
             });
-        }
-
-        var dur_field = picker.fields_dict.duration;
-        if (dur_field && dur_field.$input) dur_field.$input.on('change', render_slots);
-
-        render_slots();
+        });
     }
 
     // ── Availability check (mirrors the standard Patient Appointment booking flow) ──
