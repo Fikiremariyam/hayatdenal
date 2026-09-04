@@ -41,6 +41,11 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
 #dtp-root .pal-btn.active{ border-color:currentColor; }
 #dtp-root .pal-dot       { width:11px;height:11px;border-radius:3px;flex-shrink:0; }
 #dtp-root .pal-rate      { margin-left:auto;font-size:10px;color:var(--muted2);font-family:'DM Mono',monospace; }
+#dtp-root .pal-selected  { display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;background:var(--accent-light);border:1.5px solid var(--accent);font-size:12px;font-weight:600; }
+#dtp-root .pal-selected .pal-rate { color:var(--accent); }
+#dtp-root .pal-selected-clear { margin-left:auto;cursor:pointer;color:var(--muted);font-size:14px;line-height:1;padding:0 2px; }
+#dtp-root .pal-selected-clear:hover { color:#e74c3c; }
+#dtp-root .pal-empty-hint { font-size:11px;color:var(--muted2);padding:4px 2px;line-height:1.4; }
 #dtp-root .obs-search    { width:100%;box-sizing:border-box;border:1.5px solid var(--border);border-radius:7px;padding:6px 9px;font-size:12px;font-family:inherit;color:var(--text);background:var(--panel2);outline:none;margin-bottom:7px; }
 #dtp-root .obs-search:focus{ border-color:var(--accent); }
 #dtp-root .obs-list      { max-height:220px;overflow-y:auto;padding-right:2px; }
@@ -128,7 +133,7 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
       <div class="pal-section">
         <div class="pal-label">Treatment Items</div>
         <div id="dtp-item-search-link" style="margin-bottom:7px;"></div>
-        <div id="dtp-item-list" class="obs-list"></div>
+        <div id="dtp-item-selected"></div>
       </div>
       <div class="pal-sep"></div>
       <div class="pal-section">
@@ -556,10 +561,12 @@ class DentalTreatmentPlanChart {
 		[...DentalTreatmentPlanChart.UPPER_META_CHILD, ...DentalTreatmentPlanChart.LOWER_META_CHILD]
 			.forEach(m => { this.teethSets.primary[m.fdi] = new DtpToothState(m); });
 
-		// Item catalog — the ONLY thing fetched at page load.
+		// Small lazily-built cache of Items already looked up (via search or
+		// loaded from a saved plan) — NOT a full catalog. We no longer
+		// preload every Item at page load; the left palette only ever shows
+		// the single item currently picked from the search field.
 		this.itemCatalog = [];
 		this.selItem = null;
-		this.itemSearchTerm = '';
 
 		this.selFDI = null;
 		this.useFDI = true;
@@ -594,6 +601,9 @@ class DentalTreatmentPlanChart {
 		});
 		this.plan_date_ctrl.set_value(frappe.datetime.get_today());
 
+		// The ONLY way to pick a treatment item now — a Link field that
+		// searches Item server-side (so it scales fine no matter how many
+		// items exist; nothing is preloaded or rendered as a big list).
 		this.item_search_ctrl = frappe.ui.form.make_control({
 			parent: $('#dtp-item-search-link'),
 			df: {
@@ -607,108 +617,26 @@ class DentalTreatmentPlanChart {
 			render_input: true,
 		});
 
-		this._loadItemCatalog();
-		this._bindItemSearchLink();
 		this._bindNumberingToggle();
 		this._bindTooltip();
+		this._renderSelectedItem();
 
 		this.render();
 	}
 
-	/* ── ITEM CATALOG (left palette) — only network call at page load ───── */
-	async _loadItemCatalog() {
-		const wrap = document.getElementById('dtp-item-list');
-		if (wrap) wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">Loading items…</div>`;
-
-		this.itemCatalog = [];
-		const PAGE_SIZE = 500;
-		let start = 0;
-
-		try {
-			// Fetch in pages rather than trusting a single huge
-			// limit_page_length — some setups cap that server-side
-			// regardless of what's requested. Keep asking for more pages
-			// until a page comes back short (or empty), which is the only
-			// reliable way to know we've got everything.
-			// eslint-disable-next-line no-constant-condition
-			while (true) {
-				const items = await frappe.db.get_list('Item', {
-					filters          : { disabled: 0 /*, item_group: 'Dental Procedures' */ },
-					fields           : ['name', 'item_name', 'standard_rate'],
-					limit_start      : start,
-					limit_page_length: PAGE_SIZE,
-					order_by         : 'item_name asc',
-				});
-
-				items.forEach(item => {
-					const category = dtpClassifyProcedure(item.item_name || item.name);
-					this.itemCatalog.push({
-						name       : item.name,
-						status_name: item.item_name || item.name,
-						category   : category,
-						color      : (DTP_TREATMENT_COLORS[category] && DTP_TREATMENT_COLORS[category].s) || dtpHashColor(item.name),
-						rate       : flt(item.standard_rate),
-					});
-				});
-
-				// Render progressively so a large catalog doesn't sit on a
-				// blank "Loading…" screen for several seconds.
-				this._renderItemList();
-
-				if (items.length < PAGE_SIZE) break;   // short page = last page
-				start += PAGE_SIZE;
-			}
-		} catch (err) {
-			console.error('[DentalTreatmentPlan] Failed to load Item list:', err);
-		}
-
-		this.itemCatalog.sort((a, b) => (a.status_name || a.name).localeCompare(b.status_name || b.name));
-		this._renderItemList();
-		console.log(`[DentalTreatmentPlan] Loaded ${this.itemCatalog.length} items into the palette.`);
-	}
-
-	/** Add (or update) one item in the cached catalog, keep it sorted, refresh the palette. */
-	_addItemToCatalog(item) {
-		const item_name = item.item_name || item.name;
-		const category = dtpClassifyProcedure(item_name);
-		const doc = {
-			name: item.name,
-			status_name: item_name,
-			category: category,
-			color: (DTP_TREATMENT_COLORS[category] && DTP_TREATMENT_COLORS[category].s) || dtpHashColor(item.name),
-			rate: flt(item.standard_rate),
-		};
-		this.itemCatalog = this.itemCatalog.filter(s => s.name !== doc.name);
-		this.itemCatalog.push(doc);
-		this.itemCatalog.sort((a, b) => (a.status_name || a.name).localeCompare(b.status_name || b.name));
-		this._renderItemList();
-		return doc;
-	}
-
-	_bindItemSearchLink() {
-		var me = this;
-		// Live-filter the browsable list below as the user types. Actual
-		// selection (click a suggestion, or create-new) is handled by
-		// df.onchange on the control itself — the Link field's awesomplete
-		// flow doesn't reliably fire a plain DOM 'change' event on $input,
-		// which is why picking an item here wasn't applying anything.
-		this.item_search_ctrl.$input.on('input', function (e) {
-			me.itemSearchTerm = e.target.value || '';
-			me._renderItemList();
-		});
-	}
-
+	/* ── SELECTED ITEM (left palette) ─────────────────────────────────────
+	   No preloaded list anymore. Searching + picking an Item builds one
+	   "currently clicked service" object (id/label/color/category/rate).
+	   That object is what gets applied to whichever tooth is clicked. ── */
 	async _onItemSearchSelected() {
 		const val = this.item_search_ctrl.get_value();
 		if (!val) return;
 
 		let doc = this.itemCatalog.find(s => s.name === val);
 		if (!doc) {
-			// Not cached yet — just created via the Link field's "Create a
-			// new Item" option, or otherwise not in the preloaded catalog.
 			try {
 				const r = await frappe.db.get_value('Item', val, ['item_name', 'standard_rate']);
-				doc = this._addItemToCatalog({
+				doc = this._cacheItem({
 					name: val,
 					item_name: (r.message && r.message.item_name) || val,
 					standard_rate: (r.message && r.message.standard_rate) || 0,
@@ -720,47 +648,52 @@ class DentalTreatmentPlanChart {
 		}
 
 		this.selItem = { id: doc.name, label: doc.status_name || doc.name, color: doc.color, category: doc.category, rate: flt(doc.rate) };
-		this._renderItemList();
+		this._renderSelectedItem();
 		if (this.selFDI) this._applySelectedItem();
 
 		// Clear the field so it's ready for the next search/pick.
 		this.item_search_ctrl.set_value('');
-		this.itemSearchTerm = '';
 	}
 
-	_renderItemList() {
-		const wrap = document.getElementById('dtp-item-list');
+	/** Cache a looked-up Item so re-selecting it (or loading a saved plan
+	 *  that references it) doesn't need another round trip. Does NOT render
+	 *  a list — only _renderSelectedItem shows anything in the UI. */
+	_cacheItem(item) {
+		const item_name = item.item_name || item.name;
+		const category = dtpClassifyProcedure(item_name);
+		const doc = {
+			name: item.name,
+			status_name: item_name,
+			category: category,
+			color: (DTP_TREATMENT_COLORS[category] && DTP_TREATMENT_COLORS[category].s) || dtpHashColor(item.name),
+			rate: flt(item.standard_rate),
+		};
+		this.itemCatalog = this.itemCatalog.filter(s => s.name !== doc.name);
+		this.itemCatalog.push(doc);
+		return doc;
+	}
+
+	_renderSelectedItem() {
+		const wrap = document.getElementById('dtp-item-selected');
 		if (!wrap) return;
-		const term = (this.itemSearchTerm || '').trim().toLowerCase();
-		const filtered = term
-			? this.itemCatalog.filter(s => (s.status_name || s.name).toLowerCase().includes(term))
-			: this.itemCatalog;
 
-		if (!this.itemCatalog.length) {
-			wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">No items found</div>`;
-			return;
-		}
-		if (!filtered.length) {
-			wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">No matches</div>`;
+		if (!this.selItem) {
+			wrap.innerHTML = `<div class="pal-empty-hint">Search above and pick an item, then click a tooth to apply it.</div>`;
 			return;
 		}
 
-		wrap.innerHTML = filtered.map(s => {
-			const active = this.selItem && this.selItem.id === s.name;
-			return `<button class="pal-btn${active ? ' active' : ''}" data-id="${s.name}" style="color:${s.color}">
-                        <span class="pal-dot" style="background:${s.color}"></span>${s.status_name || s.name}
-                        <span class="pal-rate">${s.rate ? format_currency(s.rate) : ''}</span>
-                    </button>`;
-		}).join('');
+		wrap.innerHTML = `
+            <div class="pal-selected" style="color:${this.selItem.color}">
+                <span class="pal-dot" style="background:${this.selItem.color}"></span>
+                <span>${this.selItem.label}</span>
+                ${this.selItem.rate ? `<span class="pal-rate">${format_currency(this.selItem.rate)}</span>` : ''}
+                <span class="pal-selected-clear" id="dtp-clear-selected-item" title="Clear selection">✕</span>
+            </div>`;
 
-		wrap.querySelectorAll('.pal-btn').forEach(btn => {
-			btn.addEventListener('click', () => {
-				const doc = this.itemCatalog.find(s => s.name === btn.dataset.id);
-				if (!doc) return;
-				this.selItem = { id: doc.name, label: doc.status_name || doc.name, color: doc.color, category: doc.category, rate: flt(doc.rate) };
-				this._renderItemList();
-				if (this.selFDI) this._applySelectedItem();
-			});
+		const clearBtn = document.getElementById('dtp-clear-selected-item');
+		if (clearBtn) clearBtn.addEventListener('click', () => {
+			this.selItem = null;
+			this._renderSelectedItem();
 		});
 	}
 
@@ -777,7 +710,7 @@ class DentalTreatmentPlanChart {
 			return;
 		}
 		if (!this.selItem) {
-			frappe.msgprint({ title: 'No Item Selected', message: 'Pick a treatment item from the left panel first.', indicator: 'orange' });
+			frappe.msgprint({ title: 'No Item Selected', message: 'Search and pick a treatment item on the left first.', indicator: 'orange' });
 			return;
 		}
 		const state = this.teeth[this.selFDI];
@@ -1149,12 +1082,12 @@ class DentalTreatmentPlanChart {
 		let doc = this.itemCatalog.find(s => s.name === itemCode);
 
 		if (!doc) {
-			// Not in the cached catalog yet — most likely just created via
-			// the Link field's "Create a new Item" option. Fetch it and add
-			// it to the cache so the left palette picks it up too.
+			// Not in the cache yet — most likely just created via the Link
+			// field's "Create a new Item" option. Fetch it and cache it so
+			// the "currently selected" chip and other rows can reuse it.
 			try {
 				const r = await frappe.db.get_value('Item', itemCode, ['item_name', 'standard_rate']);
-				doc = this._addItemToCatalog({
+				doc = this._cacheItem({
 					name: itemCode,
 					item_name: (r.message && r.message.item_name) || itemCode,
 					standard_rate: (r.message && r.message.standard_rate) || 0,
@@ -1271,6 +1204,7 @@ class DentalTreatmentPlanChart {
 	reset() {
 		this.docname = null;
 		this.selFDI = null;
+		this.selItem = null;
 		this.selectedRowIds = new Set();
 		this._resetAllTeeth();
 		this.patient_ctrl.set_value('');
@@ -1279,6 +1213,7 @@ class DentalTreatmentPlanChart {
 		this.plan_date_ctrl.set_value(frappe.datetime.get_today());
 		document.getElementById('dtp-plan-note').value = '';
 		_dtpSet('dtp-badge', 'New Plan');
+		this._renderSelectedItem();
 		this.render();
 	}
 
@@ -1344,6 +1279,7 @@ class DentalTreatmentPlanChart {
 				try {
 					this._resetAllTeeth();
 					this.selectedRowIds = new Set();
+					this.selItem = null;
 
 					this.docname = doc.name;
 					this.patient_ctrl.set_value(doc.patient || '');
@@ -1358,6 +1294,7 @@ class DentalTreatmentPlanChart {
 					});
 
 					_dtpSet('dtp-badge', doc.name);
+					this._renderSelectedItem();
 					this.render();
 					frappe.show_alert({ message: `Loaded ${doc.name}`, indicator: 'green' });
 				} catch (err) {
