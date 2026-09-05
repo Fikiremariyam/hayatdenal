@@ -366,13 +366,15 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     // gate (see open_slot_picker) — this function doesn't assume the date is
     // within the calendar's currently-loaded range.
     //
-    // IMPORTANT — actual signature (confirmed from the server traceback on
-    // this instance, healthcare 15.1.20): get_availability_data(date, appointment).
-    // It is NOT (practitioner, date) — `appointment` is a JSON-serialized,
-    // not-yet-saved Patient Appointment doc (the same shape the standard
-    // Patient Appointment form's `frm.doc` is in when you click "Check
-    // Availability" on it). So we build a minimal doc with the fields that
-    // form would already have — practitioner and department — and send that.
+    // IMPORTANT — actual signature (confirmed from two rounds of server
+    // tracebacks on this instance, healthcare 15.1.20):
+    //     get_availability_data(date, practitioner, appointment)
+    // All three are separate required arguments — practitioner is NOT just
+    // read out of the `appointment` blob, it must also be passed on its own.
+    // `appointment` is a JSON-serialized, not-yet-saved Patient Appointment
+    // doc (the same shape the standard Patient Appointment form's `frm.doc`
+    // is in when you click "Check Availability" on it) — we build a minimal
+    // one with the fields that form would already have.
     //
     // NOTE ON RESPONSE SHAPE: different Healthcare/Marley versions have shipped
     // slightly different keys for the result (e.g. `slot_details` vs a bare
@@ -397,7 +399,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 appointment_date: date
             };
 
-            var call_args = { date: date, appointment: JSON.stringify(appointment_doc) };
+            // Traceback-confirmed signature for healthcare 15.1.20:
+            // get_availability_data(date, practitioner, appointment) — all
+            // three are separate required args. `practitioner` here even
+            // though it's also inside the `appointment` JSON blob.
+            var call_args = { date: date, practitioner: practitioner, appointment: JSON.stringify(appointment_doc) };
             console.log('get_availability_data call args', call_args);
 
             frappe.call({
