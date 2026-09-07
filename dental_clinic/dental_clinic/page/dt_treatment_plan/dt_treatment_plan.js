@@ -276,8 +276,6 @@ const DTP_TREATMENT_PRIORITY = [
 	'missing', 'implant', 'rct', 'crown', 'bridge', 'veneer', 'filling', 'fracture', 'procedure',
 ];
 
-const DTP_STATUS_OPTIONS = ['Active', 'Inactive', 'Saved / Signed', 'Pre-Authorisation'];
-
 
 /* ───────────────────────────────────────────────────────────────────────────
    ToothState — holds every planned procedure row for one tooth.
@@ -288,14 +286,14 @@ class DtpToothState {
 		this.uni  = meta.uni;
 		this.name = meta.name;
 		this.type = meta.type;
-		this.rows = [];   // [{ uid, type(item code), label, color, category, priority, status, fee, insurance_estimate, patient_portion }]
+		this.rows = [];   // [{ uid, type(item code), label, color, category, priority, note, fee, insurance_estimate, patient_portion }]
 	}
 
 	addRow(row) {
 		this.rows = this.rows.filter(r => r.type !== row.type);
 		if (!row.uid) row.uid = 'row_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
 		if (row.priority === undefined)           row.priority = '';
-		if (row.status === undefined)             row.status = 'Active';
+		if (row.note === undefined)               row.note = '';
 		if (row.fee === undefined)                row.fee = 0;
 		if (row.insurance_estimate === undefined) row.insurance_estimate = '';
 		if (row.patient_portion === undefined)    row.patient_portion = 0;
@@ -314,7 +312,7 @@ class DtpToothState {
 			color             : match ? match.color : dtpHashColor(code),
 			category          : match ? match.category : dtpClassifyProcedure(code),
 			priority          : row.priority || '',
-			status            : row.status || 'Active',
+			note              : row.note || '',
 			fee               : flt(row.fee),
 			insurance_estimate: row.insurance_estimate || '',
 			patient_portion   : flt(row.patient_portion),
@@ -328,7 +326,7 @@ class DtpToothState {
 			name1             : this.name,
 			procedure         : r.type,
 			priority          : r.priority || '',
-			status            : r.status || 'Active',
+			note              : r.note || '',
 			fee               : flt(r.fee),
 			insurance_estimate: r.insurance_estimate || '',
 			patient_portion   : flt(r.patient_portion),
@@ -858,11 +856,7 @@ class DentalTreatmentPlanChart {
                 </td>
                 <td><div class="dtp-item-cell" data-uid="${r.row.uid}"></div></td>
                 <td><input type="text" class="tp-cell-input dtp-priority-edit" data-uid="${r.row.uid}" value="${(r.row.priority || '').replace(/"/g, '&quot;')}" placeholder="1"></td>
-                <td>
-                    <select class="tp-cell-input dtp-status-edit" data-uid="${r.row.uid}">
-                        ${DTP_STATUS_OPTIONS.map(o => `<option ${o === r.row.status ? 'selected' : ''}>${o}</option>`).join('')}
-                    </select>
-                </td>
+                <td><input type="text" class="tp-cell-input dtp-note-edit" data-uid="${r.row.uid}" value="${(r.row.note || '').replace(/"/g, '&quot;')}" placeholder="Note…"></td>
                 <td><input type="number" step="0.01" class="tp-cell-input dtp-fee-edit" data-uid="${r.row.uid}" value="${flt(r.row.fee)}" style="text-align:right"></td>
                 <td><input type="text" class="tp-cell-input dtp-ins-edit" data-uid="${r.row.uid}" value="${(r.row.insurance_estimate || '').replace(/"/g, '&quot;')}" placeholder="—" style="text-align:right"></td>
                 <td><input type="number" step="0.01" class="tp-cell-input dtp-portion-edit" data-uid="${r.row.uid}" value="${flt(r.row.patient_portion)}" style="text-align:right"></td>
@@ -888,7 +882,7 @@ class DentalTreatmentPlanChart {
                         <th style="width:64px">Tooth</th>
                         <th>Procedure</th>
                         <th style="width:60px">Priority</th>
-                        <th style="width:140px">Status</th>
+                        <th style="width:180px">Note</th>
                         <th style="width:80px">Fee</th>
                         <th style="width:90px">Ins. Est.</th>
                         <th style="width:100px">Patient Portion</th>
@@ -990,10 +984,13 @@ class DentalTreatmentPlanChart {
 			});
 		});
 
-		wrap.querySelectorAll('.dtp-status-edit').forEach(el => {
-			el.addEventListener('change', (e) => {
+		// Note is free text and affects neither the tooth graphics nor the
+		// totals, so it's stored on every keystroke WITHOUT a re-render —
+		// re-rendering here would rebuild the table and steal focus mid-word.
+		wrap.querySelectorAll('.dtp-note-edit').forEach(el => {
+			el.addEventListener('input', (e) => {
 				const found = this._findRowByUid(el.dataset.uid);
-				if (found) { found.row.status = e.target.value; this.render(); }
+				if (found) found.row.note = e.target.value;
 			});
 		});
 
