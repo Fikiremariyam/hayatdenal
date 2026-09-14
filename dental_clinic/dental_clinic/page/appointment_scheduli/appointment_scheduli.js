@@ -70,7 +70,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-body-row { display: grid; }
             .cal-time-col { background: var(--card-bg); border-right: 1px solid var(--border-color); }
             .cal-time-slot { height: 52px; padding: 4px 8px; font-size: 10px; color: var(--text-muted); text-align: right; border-bottom: 1px solid var(--border-color); }
-            .cal-day-col { border-right: 1px solid var(--border-color); background: var(--card-bg); }
+            /* position:relative makes this the anchor for .cal-appt-layer below */
+            .cal-day-col { border-right: 1px solid var(--border-color); background: var(--card-bg); position: relative; }
             .cal-day-col:last-child { border-right: none; }
             .cal-day-col.today { background: #E6F1FB; }
             /* Practitioner is not working this day at all */
@@ -81,7 +82,21 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             /* Non-bookable slot: the whole day is not a working day per Duty Assignment */
             .cal-day-slot.cal-slot-off { cursor: not-allowed; background: rgba(139,94,52,0.10); }
             .cal-day-slot.cal-slot-off:hover { background: rgba(139,94,52,0.10); }
-            .cal-appt { border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-bottom: 2px; }
+            /* Appointments are drawn in an overlay on top of the slot grid so each block
+               can be sized to its real duration. The layer itself ignores clicks so empty
+               space still falls through to the slot underneath (which opens the booker). */
+            .cal-appt-layer { position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; }
+            .cal-appt { position: absolute; box-sizing: border-box; border-radius: 4px; padding: 2px 6px; font-size: 11px; line-height: 14px; cursor: pointer; overflow: hidden; pointer-events: auto; box-shadow: inset 0 0 0 1px rgba(255,255,255,.55); }
+            .cal-appt-time { display: block; font-weight: 600; }
+            .cal-appt-name, .cal-appt-meta { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+            .cal-appt-meta { opacity: .75; }
+            /* Too short to stack two lines — time and patient share one line instead. */
+            .cal-appt.is-short { padding: 1px 6px; white-space: nowrap; }
+            .cal-appt.is-short .cal-appt-time, .cal-appt.is-short .cal-appt-name { display: inline; }
+            .cal-appt.is-short .cal-appt-name { margin-left: 4px; }
+            /* Runs past the top/bottom edge of the displayed 08:00–17:30 window. */
+            .cal-appt.clipped-top { border-top: 2px dotted rgba(0,0,0,.3); border-top-left-radius: 0; border-top-right-radius: 0; }
+            .cal-appt.clipped-bottom { border-bottom: 2px dotted rgba(0,0,0,.3); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
             .cal-appt.Open, .cal-appt.Scheduled { background: #B5D4F4; color: #0C447C; }
             .cal-appt.Closed { background: #9FE1CB; color: #085041; }
             .cal-appt.Cancelled { background: #F7C1C1; color: #791F1F; }
@@ -292,6 +307,10 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     // the whole-day level (see is_day_working), not per time slot on the grid.
     // Actual per-slot availability (accounting for already-booked appointments)
     // is computed on demand by fetch_schedule_slots() when the user goes to book.
+    //
+    // The grid rows are only the background ruling and the click targets —
+    // appointments themselves are positioned freely on top of them, sized to
+    // their own duration (see appt_geometry below).
     var SLOT_MINUTES = 30;
     var TIME_SLOTS = [];         // display labels, e.g. "09:00"
     var TIME_SLOT_MINUTES = [];  // parallel array of minutes-from-midnight for each row
@@ -304,27 +323,100 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
     build_time_slots();
 
-    // Floor bucket, not exact match — practitioners can have different
-    // appointment durations (some under 30 min), so a real appointment time
-    // won't always land exactly on a 30-min tick (e.g. a 15-min-duration
-    // doctor's 09:15 slot). This places it in the row it visually falls
-    // under (09:00) instead of dumping it into the all-day row. Only times
-    // before the grid starts (8:00) fall back to all-day.
-    function time_to_slot(time_str) {
-        if (!time_str) return -1;
-        var mins = time_str_to_minutes(time_str);
-        var idx = -1;
-        for (var i = 0; i < TIME_SLOT_MINUTES.length; i++) {
-            if (TIME_SLOT_MINUTES[i] <= mins) idx = i; else break;
-        }
-        return idx;
+    // ── Appointment block geometry ───────────────────────────────
+    // Appointments are drawn as absolutely-positioned blocks over the slot grid so
+    // each one covers the span it actually occupies (appointment_time → + duration)
+    // instead of sitting inside whichever 30-minute row it happens to start in.
+    //
+    // SLOT_HEIGHT_PX must stay in sync with the `height` on .cal-time-slot /
+    // .cal-day-slot in the stylesheet — that's the only thing tying minutes to
+    // pixels. render_calendar() re-measures a real slot after painting and rescales
+    // if the theme disagrees, so a theme override degrades into a stretch rather
+    // than a drift.
+    var SLOT_HEIGHT_PX   = 52;
+    var PX_PER_MINUTE    = SLOT_HEIGHT_PX / SLOT_MINUTES;
+    var MIN_APPT_PX      = 18;   // keep very short appointments readable and clickable
+    var SHORT_APPT_PX    = 32;   // below this, time + patient go on one line
+    var TALL_APPT_PX     = 48;   // above this, there's room for a third line
+    var DEFAULT_DURATION = 15;   // same fallback check_slot_availability() already uses
+
+    function grid_start_minutes() { return TIME_SLOT_MINUTES[0]; }
+    function grid_end_minutes()   { return TIME_SLOT_MINUTES[TIME_SLOT_MINUTES.length - 1] + SLOT_MINUTES; }
+
+    // Patient Appointment.duration is in minutes. Blank/0 on older rows, so fall
+    // back rather than collapsing the block to nothing.
+    function appt_duration(a) {
+        var d = parseInt(a.duration, 10);
+        return (d && d > 0) ? d : DEFAULT_DURATION;
     }
 
-    function slot_to_time(slot_index) {
-        var total_mins = TIME_SLOT_MINUTES[slot_index];
-        if (total_mins === undefined) total_mins = 0;
-        var h = Math.floor(total_mins / 60), m = total_mins % 60;
-        return (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m) + ':00';
+    function esc(v) {
+        return frappe.utils.escape_html(v === null || v === undefined ? '' : String(v));
+    }
+
+    // Vertical placement for one appointment, in px from the top of the day column.
+    // Returns null when the appointment doesn't overlap the displayed 08:00–17:30
+    // window at all — those keep the old all-day-row treatment.
+    function appt_geometry(a) {
+        if (!a.appointment_time) return null;
+
+        var start = time_str_to_minutes(a.appointment_time);
+        var end   = start + appt_duration(a);
+        var gs    = grid_start_minutes();
+        var ge    = grid_end_minutes();
+        if (end <= gs || start >= ge) return null;
+
+        var total_px  = (ge - gs) * PX_PER_MINUTE;
+        var vis_start = Math.max(start, gs);
+        var vis_end   = Math.min(end, ge);
+        var top       = (vis_start - gs) * PX_PER_MINUTE;
+        var height    = Math.max((vis_end - vis_start) * PX_PER_MINUTE, MIN_APPT_PX);
+        // A 5-minute slot at 17:25 would otherwise poke out the bottom once the
+        // minimum height kicks in — nudge it up instead of overflowing the grid.
+        if (top + height > total_px) top = Math.max(0, total_px - height);
+
+        return {
+            start: start,
+            end: end,
+            top: top,
+            height: height,
+            clipped_top: start < gs,
+            clipped_bottom: end > ge
+        };
+    }
+
+    // Side-by-side layout for appointments whose spans overlap, so a double-booked
+    // time doesn't hide one block completely behind another. Groups them into
+    // clusters of mutually-overlapping blocks and gives each block a column within
+    // its cluster; a cluster of one keeps the full column width.
+    function layout_overlaps(items) {
+        items.sort(function(x, y) { return (x.geo.start - y.geo.start) || (x.geo.end - y.geo.end); });
+
+        var cluster = [], col_ends = [], cluster_end = null;
+
+        function close_cluster() {
+            var cols = col_ends.length || 1;
+            cluster.forEach(function(it) { it.cols = cols; });
+            cluster = []; col_ends = []; cluster_end = null;
+        }
+
+        items.forEach(function(it) {
+            if (cluster_end !== null && it.geo.start >= cluster_end) close_cluster();
+            var col = 0;
+            while (col < col_ends.length && col_ends[col] > it.geo.start) col++;
+            col_ends[col] = it.geo.end;
+            it.col = col;
+            cluster.push(it);
+            cluster_end = (cluster_end === null) ? it.geo.end : Math.max(cluster_end, it.geo.end);
+        });
+        close_cluster();
+
+        return items;
+    }
+
+    // "09:00 – 09:30"
+    function appt_range_label(geo) {
+        return format_time_label(geo.start) + ' \u2013 ' + format_time_label(geo.end);
     }
 
     // The Duty Assignment entry (if any) for this date — carries the Branch
@@ -651,20 +743,24 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         var day_working = {};
         dates.forEach(function(d) { day_working[d] = is_day_bookable(d); });
 
+        // Each appointment becomes a positioned block covering start → start+duration.
+        // Only ones that fall entirely outside the displayed window (before 08:00 or
+        // from 17:30 on) still go in the all-day row — anything overlapping the window
+        // is drawn in the grid and clipped at the edge.
         var by_date = {};
         var allday  = {};
         appts.forEach(function(a) {
-            var d    = a.appointment_date;
-            var slot = time_to_slot(a.appointment_time);
-            if (slot < 0 || slot >= TIME_SLOTS.length) {
+            var d   = a.appointment_date;
+            var geo = appt_geometry(a);
+            if (!geo) {
                 if (!allday[d]) allday[d] = [];
                 allday[d].push(a);
             } else {
-                if (!by_date[d]) by_date[d] = {};
-                if (!by_date[d][slot]) by_date[d][slot] = [];
-                by_date[d][slot].push(a);
+                if (!by_date[d]) by_date[d] = [];
+                by_date[d].push({ a: a, geo: geo });
             }
         });
+        Object.keys(by_date).forEach(function(d) { layout_overlaps(by_date[d]); });
 
         var html = '<div class="cal-grid">';
 
@@ -685,9 +781,15 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             html += '<div class="cal-allday-cell">';
             if (allday[d]) {
                 allday[d].forEach(function(a) {
-                    html += '<div class="cal-allday-block">'
-                        + (a.patient_name || a.patient || '—')
-                        + (a.service_unit ? ' \u2022 ' + a.service_unit : '')
+                    // Show the time here too — these are real timed appointments that
+                    // just sit outside the displayed window, not genuine all-day ones.
+                    var t_lbl = a.appointment_time
+                        ? format_time_label(time_str_to_minutes(a.appointment_time)) + ' \u00b7 '
+                        : '';
+                    html += '<div class="cal-allday-block" title="' + esc(t_lbl + (a.patient_name || a.patient || '')) + '">'
+                        + t_lbl
+                        + esc(a.patient_name || a.patient || '\u2014')
+                        + (a.service_unit ? ' \u2022 ' + esc(a.service_unit) : '')
                         + '</div>';
                 });
             }
@@ -704,25 +806,70 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 
         dates.forEach(function(d) {
             html += '<div class="cal-day-col' + (d === today ? ' today' : '') + (day_working[d] ? '' : ' cal-day-unavailable') + '">';
+
+            // The slot grid stays exactly as it was: empty, clickable, one row per
+            // 30 minutes. It's the click target and the background ruling.
             TIME_SLOTS.forEach(function(ts, si) {
                 var bookable = day_working[d];
-                html += '<div class="cal-day-slot' + (bookable ? '' : ' cal-slot-off') + '" data-date="' + d + '" data-slot="' + si + '">';
-                if (by_date[d] && by_date[d][si]) {
-                    by_date[d][si].forEach(function(a) {
-                        var status_class = (a.status || 'Open').replace(' ', '');
-                        html += '<div class="cal-appt ' + status_class + '" data-name="' + a.name + '">'
-                            + (a.appointment_time ? a.appointment_time.substring(0,5) + ' ' : '')
-                            + (a.patient_name || a.patient || '—')
-                            + '</div>';
-                    });
-                }
-                html += '</div>';
+                html += '<div class="cal-day-slot' + (bookable ? '' : ' cal-slot-off') + '"'
+                    + ' data-date="' + d + '" data-slot="' + si + '"></div>';
             });
+
+            // Appointments sit above it, each sized to its own duration.
+            html += '<div class="cal-appt-layer">';
+            (by_date[d] || []).forEach(function(it) {
+                var a     = it.a;
+                var geo   = it.geo;
+                var cols  = it.cols || 1;
+                var col   = it.col || 0;
+                var w     = 100 / cols;
+                var who   = a.patient_name || a.patient || '\u2014';
+                var range = appt_range_label(geo);
+                var mins  = appt_duration(a);
+                var meta  = a.appointment_type || a.service_unit || '';
+                var status_class = (a.status || 'Open').replace(' ', '');
+
+                html += '<div class="cal-appt ' + status_class
+                    + (geo.height < SHORT_APPT_PX ? ' is-short' : '')
+                    + (geo.clipped_top ? ' clipped-top' : '')
+                    + (geo.clipped_bottom ? ' clipped-bottom' : '')
+                    + '" data-name="' + esc(a.name) + '"'
+                    + ' data-top="' + geo.top.toFixed(2) + '" data-height="' + geo.height.toFixed(2) + '"'
+                    + ' title="' + esc(who + ' \u2022 ' + range + ' (' + mins + ' min)'
+                        + (a.appointment_type ? ' \u2022 ' + a.appointment_type : '')
+                        + (a.status ? ' \u2022 ' + a.status : '')) + '"'
+                    + ' style="top:' + geo.top.toFixed(1) + 'px;'
+                    + 'height:' + geo.height.toFixed(1) + 'px;'
+                    + 'left:calc(' + (col * w).toFixed(4) + '% + 2px);'
+                    + 'width:calc(' + w.toFixed(4) + '% - 4px);">'
+                    + '<span class="cal-appt-time">' + range + '</span>'
+                    + '<span class="cal-appt-name">' + esc(who) + '</span>'
+                    + (geo.height >= TALL_APPT_PX && meta
+                        ? '<span class="cal-appt-meta">' + esc(meta) + '</span>' : '')
+                    + '</div>';
+            });
+            html += '</div>';
+
             html += '</div>';
         });
 
         html += '</div></div>';
         wrap.innerHTML = html;
+
+        // Minutes→pixels above assumes a slot renders at SLOT_HEIGHT_PX. If a theme
+        // or box-sizing override makes the real row a different height, rescale the
+        // blocks to match so they keep lining up with the time ruler.
+        var probe = wrap.querySelector('.cal-day-slot');
+        if (probe) {
+            var real_h = probe.getBoundingClientRect().height;
+            if (real_h && Math.abs(real_h - SLOT_HEIGHT_PX) > 0.5) {
+                var scale = real_h / SLOT_HEIGHT_PX;
+                wrap.querySelectorAll('.cal-appt[data-top]').forEach(function(el) {
+                    el.style.top    = (parseFloat(el.dataset.top) * scale).toFixed(1) + 'px';
+                    el.style.height = (parseFloat(el.dataset.height) * scale).toFixed(1) + 'px';
+                });
+            }
+        }
 
         // Click an existing appointment → view details
         wrap.querySelectorAll('.cal-appt[data-name]').forEach(function(el) {
@@ -1091,7 +1238,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             modal_row('ID',           '<a href="/app/patient-appointment/' + a.name + '" target="_blank">' + a.name + '</a>') +
             modal_row('Status',       a.status || '—') +
             modal_row('Date',         a.appointment_date || '—') +
-            modal_row('Time',         a.appointment_time || '—') +
+            modal_row('Time',         fmt_modal_time(a)) +
             modal_row('Type',         a.appointment_type || '—') +
             modal_row('For',          a.appointment_for  || '—') +
             modal_row('Practitioner', a.practitioner_name || a.practitioner || '—') +
@@ -1108,6 +1255,15 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             bg.remove();
         };
         bg.addEventListener('click', function(e) { if (e.target === bg) bg.remove(); });
+    }
+
+    // "09:00 – 09:30 (30 min)" — same span the calendar block covers.
+    function fmt_modal_time(a) {
+        if (!a.appointment_time) return '\u2014';
+        var start = time_str_to_minutes(a.appointment_time);
+        var mins  = appt_duration(a);
+        return format_time_label(start) + ' \u2013 ' + format_time_label(start + mins)
+            + ' (' + mins + ' min)';
     }
 
     function modal_row(k, v) {
