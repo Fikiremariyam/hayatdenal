@@ -412,86 +412,228 @@ function renderQuestionnaire(app, q) {
 }
 
 // ── SUBMIT — WORKS FOR BOTH GUEST AND LOGGED IN USERS ──────────
+
 function submitResponse(q, answers, app) {
 
-    app.html('<p style="text-align:center;color:var(--text-muted);padding:60px">Submitting...</p>');
+    app.html(
+        '<p style="text-align:center;color:var(--text-muted);padding:60px">' +
+        'Submitting...</p>'
+    );
 
     var answerRows = [];
     var totalScore = 0;
 
     (q.questions || []).forEach(function(question, i) {
-        var key = getStableKey(question, getSection(question), i);
+
+        var key = getStableKey(
+            question,
+            getSection(question),
+            i
+        );
+
         var val = answers[key];
-        if (val === undefined || val === null || val === '') return;
 
-        var answerText   = Array.isArray(val) ? val.join(', ') : String(val);
+        // Skip unanswered questions
+        if (
+            val === undefined ||
+            val === null ||
+            val === ''
+        ) {
+            return;
+        }
+
+        // Convert multi-select array to text
+        var answerText = Array.isArray(val)
+            ? val.join(', ')
+            : String(val);
+
         var scoreAwarded = 0;
-        var qtype        = getQuestionType(question);
-        var correct      = getCorrectAnswer(question);
-        var weight       = getScoreWeight(question);
 
+        var qtype = getQuestionType(question);
+        var correct = getCorrectAnswer(question);
+        var weight = getScoreWeight(question);
+
+        // Calculate rating score
         if (qtype === 'Rating') {
-            scoreAwarded = (parseFloat(val) / getMaxValue(question)) * weight;
-        } else if (correct && answerText === correct) {
+
+            scoreAwarded =
+                (parseFloat(val) / getMaxValue(question)) *
+                weight;
+
+        }
+        // Calculate score for correct answer
+        else if (
+            correct &&
+            answerText === String(correct)
+        ) {
+
             scoreAwarded = weight;
         }
 
         totalScore += scoreAwarded;
 
+        // IMPORTANT:
+        // These fieldnames MUST match the fields
+        // inside your Response Answer child DocType.
         answerRows.push({
-            question:       question.name || key,
-            question_label: getLabel(question),
-            answer_text:    answerText,
-            score_awarded:  scoreAwarded
+
+            custom_question:
+                question.name || key,
+
+            custom_question_label:
+                getLabel(question),
+
+            custom_answer_text:
+                answerText,
+
+            score_awarded:
+                scoreAwarded
         });
     });
 
+
     if (DEBUG_QUESTIONNAIRE) {
-        console.log('[questionnaire-form] Submitting answerRows:', answerRows, '| totalScore:', totalScore);
+
+        console.log(
+            '[questionnaire-form] Child rows:',
+            answerRows
+        );
+
+        console.log(
+            '[questionnaire-form] Total score:',
+            totalScore
+        );
     }
 
-    // ── USE fetch() NOT frappe.call() SO GUEST CAN SUBMIT ──────
+
+    // ── CREATE QUESTIONNAIRE RESPONSE ──────────────────────────
     fetch('/api/method/frappe.client.insert', {
+
         method: 'POST',
+
         headers: {
+
             'Content-Type': 'application/json',
-            'Accept':       'application/json',
-            'X-Frappe-CSRF-Token': frappe.csrf_token || 'fetch'
+
+            'Accept': 'application/json',
+
+            'X-Frappe-CSRF-Token':
+                frappe.csrf_token || 'fetch'
         },
+
         body: JSON.stringify({
+
             doc: {
-                doctype:        'Questionnaire Response',
-                questionnaire:  q.name,
-                respondent_name: frappe.session.user !== 'Guest'
-                                 ? frappe.session.user_fullname
-                                 : 'Guest',
-                status:         'Submitted',
-                submitted_at:   frappe.datetime.now_datetime(),
-                total_score:    Math.round(totalScore * 10) / 10,
-                answers:        answerRows
+
+                doctype: 'Questionnaire Response',
+
+                questionnaire:
+                    q.name,
+
+                respondent_name:
+                    frappe.session.user !== 'Guest'
+                        ? frappe.session.user_fullname
+                        : 'Guest',
+
+                status:
+                    'Submitted',
+
+                submitted_at:
+                    frappe.datetime.now_datetime(),
+
+                total_score:
+                    Math.round(totalScore * 10) / 10,
+
+                // IMPORTANT:
+                // This is the FIELDNAME of your child table.
+                custom_answers:
+                    answerRows
             }
         })
     })
-    .then(function(r) { return r.json(); })
+
+    .then(function(response) {
+
+        return response.json();
+
+    })
+
     .then(function(data) {
-        if (data.message) {
-            app.html(
-                '<div style="text-align:center;padding:60px 20px">'
-                + '<div style="font-size:52px;color:green">\u2713</div>'
-                + '<h2 style="font-weight:500;margin:16px 0 8px">'
-                + escapeHtml(q.thank_you_message || 'Thank you!') + '</h2>'
-                + '<p style="color:var(--text-muted)">Your response has been saved.</p>'
-                + '</div>'
-            );
-        } else {
-            if (DEBUG_QUESTIONNAIRE) console.error('[questionnaire-form] Save failed, server response:', data);
-            app.html(
-                '<p style="color:red;padding:20px">Save failed. '
-                + escapeHtml(JSON.stringify(data)) + '</p>'
+
+        if (DEBUG_QUESTIONNAIRE) {
+
+            console.log(
+                '[questionnaire-form] Server response:',
+                data
             );
         }
+
+
+        if (data.message) {
+
+            app.html(
+
+                '<div style="text-align:center;padding:60px 20px">' +
+
+                '<div style="font-size:52px;color:green">' +
+                '\u2713' +
+                '</div>' +
+
+                '<h2 style="font-weight:500;margin:16px 0 8px">' +
+
+                escapeHtml(
+                    q.thank_you_message ||
+                    'Thank you!'
+                ) +
+
+                '</h2>' +
+
+                '<p style="color:var(--text-muted)">' +
+                'Your response has been saved.' +
+                '</p>' +
+
+                '</div>'
+            );
+
+        } else {
+
+            console.error(
+                '[questionnaire-form] Save failed:',
+                data
+            );
+
+            app.html(
+
+                '<p style="color:red;padding:20px">' +
+
+                'Save failed.<br>' +
+
+                escapeHtml(
+                    JSON.stringify(data)
+                ) +
+
+                '</p>'
+            );
+        }
+
     })
+
     .catch(function(err) {
-        app.html('<p style="color:red;padding:20px">Submit error: ' + escapeHtml(err.message) + '</p>');
+
+        console.error(
+            '[questionnaire-form] Submit error:',
+            err
+        );
+
+        app.html(
+
+            '<p style="color:red;padding:20px">' +
+
+            'Submit error: ' +
+
+            escapeHtml(err.message) +
+
+            '</p>'
+        );
     });
 }
