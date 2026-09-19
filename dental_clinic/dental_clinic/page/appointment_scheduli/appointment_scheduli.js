@@ -10,18 +10,34 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     var from_date = frappe.datetime.get_today();
     var to_date   = frappe.datetime.add_days(from_date, 6); // matches default "week" view
 
-    var current_practitioner = null;
+    // Selected practitioners (multi-select). Each: { id, name }
+    var selected = [];
 
-    // practitioner_duty_by_date shapes:
-    //   null            -> not fetched yet / lookup failed -> fail CLOSED (nothing is bookable
-    //                       until we successfully know the practitioner's duty assignments)
-    //   {}               -> practitioner has no Duty Assignment rows at all in the loaded
-    //                       date range -> fail CLOSED (calendar shows "no duty assignment")
-    //   { "YYYY-MM-DD": { branch, day_name }, ... } -> one entry per date we found in the
-    //                       loaded range. An empty `branch` means Clinical Management has
-    //                       explicitly marked the practitioner not available that date —
-    //                       it still counts as "we have data for this date", just not bookable.
-    var practitioner_duty_by_date = null;
+    // One colour per selected practitioner, so their appointments are told apart.
+    var PALETTE = [
+        { bg: '#B5D4F4', fg: '#0C447C', bd: '#185FA5' }, // blue
+        { bg: '#F9D3B4', fg: '#7A3E0C', bd: '#D9772B' }, // orange
+        { bg: '#C8E6C9', fg: '#1B5E20', bd: '#43A047' }, // green
+        { bg: '#E1BEE7', fg: '#4A148C', bd: '#8E24AA' }, // purple
+        { bg: '#FFF3B0', fg: '#665200', bd: '#D4AC0D' }, // yellow
+        { bg: '#F8BBD0', fg: '#880E4F', bd: '#D81B60' }, // pink
+        { bg: '#B2EBF2', fg: '#006064', bd: '#00ACC1' }, // cyan
+        { bg: '#CFD8DC', fg: '#263238', bd: '#607D8B' }, // grey
+        { bg: '#DCEDC8', fg: '#33691E', bd: '#7CB342' }, // lime
+        { bg: '#FFCDD2', fg: '#B71C1C', bd: '#E53935' }  // red
+    ];
+    var color_idx_by_prac = {};
+
+    // Duty Assignment data per practitioner, filled by fetch_practitioner_duty():
+    //   duty_cache[practitioner] = null  -> lookup failed -> fail CLOSED
+    //   duty_cache[practitioner] = {}    -> no Duty Assignment rows at all -> fail CLOSED
+    //   duty_cache[practitioner] = { "YYYY-MM-DD": { branch, day_name }, ... }
+    //       An empty `branch` means Clinical Management explicitly marked the
+    //       practitioner not available that date (row exists, but not bookable).
+    var duty_cache = {};
+
+    // Used to ignore stale responses when the user changes filters mid-load.
+    var active_load_key = '';
 
     // ── Styles ─────────────────────────────────────────────────
     if (!document.getElementById('cal-sched-styles')) {
@@ -39,6 +55,12 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-filter-link-wrap .control-label { display: none !important; }
             .cal-filter-link-wrap .form-control { font-size: 12px !important; padding: 5px 8px !important; border: 1px solid var(--border-color) !important; border-radius: 6px !important; height: 30px !important; }
             .cal-filter-required-lbl { font-size: 11px; color: #854F0B; }
+            .cal-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+            .cal-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 8px; border-radius: 999px; border: 1px solid; font-size: 12px; font-weight: 500; }
+            .cal-chip-dot { width: 8px; height: 8px; border-radius: 50%; }
+            .cal-chip-x { cursor: pointer; font-size: 15px; line-height: 1; opacity: .7; padding: 0 2px; }
+            .cal-chip-x:hover { opacity: 1; }
+            .cal-notice { padding: 8px 16px; font-size: 12px; background: #FFF8E1; color: #7A5B00; border-bottom: 1px solid var(--border-color); }
             .cal-stat-bar { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; padding: 12px 16px; background: var(--subtle-bg); border-bottom: 1px solid var(--border-color); }
             .cal-stat { background: var(--card-bg); border-radius: 8px; padding: 10px 14px; border: 1px solid var(--border-color); }
             .cal-stat-num { font-size: 24px; font-weight: 600; }
@@ -62,11 +84,13 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-head-cell:last-child { border-right: none; }
             .cal-head-cell.today { color: #185FA5; font-weight: 600; }
             .cal-head-off { display: block; font-size: 10px; font-weight: 600; color: #8B5E34; }
+            .cal-head-dots { display: block; margin-top: 3px; line-height: 1; min-height: 8px; }
+            .cal-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin: 0 1px; }
             .cal-allday-row { display: grid; border-bottom: 1px solid var(--border-color); background: var(--card-bg); }
             .cal-allday-lbl { padding: 4px 8px; font-size: 10px; color: var(--text-muted); text-align: right; border-right: 1px solid var(--border-color); }
             .cal-allday-cell { padding: 3px 4px; border-right: 1px solid var(--border-color); min-height: 26px; }
             .cal-allday-cell:last-child { border-right: none; }
-            .cal-allday-block { background: #B5D4F4; color: #0C447C; border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 500; }
+            .cal-allday-block { border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 500; margin-bottom: 2px; }
             .cal-body-row { display: grid; }
             .cal-time-col { background: var(--card-bg); border-right: 1px solid var(--border-color); }
             .cal-time-slot { height: 52px; padding: 4px 8px; font-size: 10px; color: var(--text-muted); text-align: right; border-bottom: 1px solid var(--border-color); }
@@ -74,12 +98,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-day-col { border-right: 1px solid var(--border-color); background: var(--card-bg); position: relative; }
             .cal-day-col:last-child { border-right: none; }
             .cal-day-col.today { background: #E6F1FB; }
-            /* Practitioner is not working this day at all */
+            /* None of the selected practitioners is working this day */
             .cal-day-col.cal-day-unavailable { background: #F1E4D3; }
             .cal-day-col.cal-day-unavailable.today { background: #ECD9BE; }
             .cal-day-slot { height: 52px; border-bottom: 1px solid var(--border-color); padding: 2px 4px; cursor: pointer; transition: background .1s; }
             .cal-day-slot:hover { background: var(--subtle-bg); }
-            /* Non-bookable slot: the whole day is not a working day per Duty Assignment */
             .cal-day-slot.cal-slot-off { cursor: not-allowed; background: rgba(139,94,52,0.10); }
             .cal-day-slot.cal-slot-off:hover { background: rgba(139,94,52,0.10); }
             /* Appointments are drawn in an overlay on top of the slot grid so each block
@@ -90,16 +113,14 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-appt-time { display: block; font-weight: 600; }
             .cal-appt-name, .cal-appt-meta { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
             .cal-appt-meta { opacity: .75; }
-            /* Too short to stack two lines — time and patient share one line instead. */
             .cal-appt.is-short { padding: 1px 6px; white-space: nowrap; }
             .cal-appt.is-short .cal-appt-time, .cal-appt.is-short .cal-appt-name { display: inline; }
             .cal-appt.is-short .cal-appt-name { margin-left: 4px; }
-            /* Runs past the top/bottom edge of the displayed 08:00–17:30 window. */
             .cal-appt.clipped-top { border-top: 2px dotted rgba(0,0,0,.3); border-top-left-radius: 0; border-top-right-radius: 0; }
             .cal-appt.clipped-bottom { border-bottom: 2px dotted rgba(0,0,0,.3); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-            .cal-appt.Open, .cal-appt.Scheduled { background: #B5D4F4; color: #0C447C; }
-            .cal-appt.Closed { background: #9FE1CB; color: #085041; }
-            .cal-appt.Cancelled { background: #F7C1C1; color: #791F1F; }
+            /* Colour now identifies the doctor; status is shown by these instead. */
+            .cal-appt.Cancelled { opacity: .55; }
+            .cal-appt.Cancelled .cal-appt-name { text-decoration: line-through; }
             .cal-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 13px; }
             .cal-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 9998; display: flex; align-items: center; justify-content: center; }
             .cal-modal { background: var(--card-bg); border-radius: 14px; padding: 28px; width: 440px; max-width: 95vw; z-index: 9999; }
@@ -121,9 +142,6 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Page skeleton ──────────────────────────────────────────
-    // Note: Service Unit filter removed. Practitioner filter is now required.
-    // Note: "Mark Not Available" button removed — availability now comes purely
-    // from Duty Assignment (see fetch_practitioner_duty below).
     $(wrapper).find('.layout-main-section').html(`
         <div class="cal-page">
             <div class="cal-filter-bar">
@@ -137,9 +155,10 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 </div>
                 <div class="cal-filter-sep"></div>
                 <div class="cal-filter-group">
-                    <span class="cal-filter-lbl">Practitioner <span class="cal-filter-required-lbl">(required)</span></span>
+                    <span class="cal-filter-lbl">Practitioners <span class="cal-filter-required-lbl">(pick one or more)</span></span>
                     <div id="wrap-practitioner" class="cal-filter-link-wrap"></div>
                 </div>
+                <div class="cal-chips" id="prac-chips"></div>
                 <button class="cal-nav-btn" id="btn-apply"
                     style="background:#1a2340;color:#fff;border-color:#1a2340;margin-left:4px">
                     Apply
@@ -165,26 +184,112 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             </div>
 
             <div class="cal-wrap" id="cal-wrap">
-                <div class="cal-empty">Select a Healthcare Practitioner above to view their schedule.</div>
+                <div class="cal-empty">Select one or more Healthcare Practitioners above to view their schedules.</div>
             </div>
         </div>
     `);
 
-    // ── Build Frappe Link field for Practitioner (Service Unit filter removed) ──
+    // ── Practitioner picker: a Link field that ADDS to a list of chips ──
     var practitioner_field = frappe.ui.form.make_control({
         df: {
             fieldtype: 'Link',
             fieldname: 'practitioner_filter',
             options:   'Healthcare Practitioner',
-            placeholder: 'Select a practitioner…'
+            placeholder: 'Add a practitioner…'
         },
         parent: document.getElementById('wrap-practitioner'),
         render_input: true
     });
     practitioner_field.refresh();
     practitioner_field.$input.on('change', function() {
-        on_practitioner_changed();
+        var val = practitioner_field.get_value();
+        if (val) add_practitioner(val);
     });
+
+    // Chips: click × to remove a practitioner.
+    document.getElementById('prac-chips').addEventListener('click', function(e) {
+        var x = e.target.closest('.cal-chip-x');
+        if (!x) return;
+        remove_practitioner(x.getAttribute('data-id'));
+    });
+
+    function selected_ids() { return selected.map(function(p) { return p.id; }); }
+
+    function name_of(id) {
+        var p = selected.find(function(x) { return x.id === id; });
+        return (p && p.name) || id;
+    }
+
+    function color_for(id) {
+        var i = color_idx_by_prac[id];
+        return PALETTE[(i === undefined ? 0 : i) % PALETTE.length];
+    }
+
+    function assign_color(id) {
+        var used = {};
+        Object.keys(color_idx_by_prac).forEach(function(k) { used[color_idx_by_prac[k]] = true; });
+        var i = 0;
+        while (used[i] && i < PALETTE.length) i++;
+        color_idx_by_prac[id] = i % PALETTE.length;
+    }
+
+    function clear_practitioner_input() {
+        practitioner_field.set_value('');
+        practitioner_field.$input.val('');
+    }
+
+    function add_practitioner(id) {
+        if (selected.some(function(p) { return p.id === id; })) {
+            clear_practitioner_input();
+            return;
+        }
+        if (selected.length >= PALETTE.length) {
+            clear_practitioner_input();
+            frappe.msgprint({
+                message: 'You can compare up to ' + PALETTE.length + ' practitioners at once.',
+                indicator: 'orange'
+            });
+            return;
+        }
+        // Also validates the value (the Link control can fire change on partial text).
+        frappe.db.get_value('Healthcare Practitioner', id, ['name', 'practitioner_name']).then(function(r) {
+            var m = r && r.message;
+            if (!m || !m.name) { clear_practitioner_input(); return; }
+            if (selected.some(function(p) { return p.id === m.name; })) { clear_practitioner_input(); return; }
+            selected.push({ id: m.name, name: m.practitioner_name || m.name });
+            assign_color(m.name);
+            clear_practitioner_input();
+            on_selection_changed();
+        });
+    }
+
+    function remove_practitioner(id) {
+        selected = selected.filter(function(p) { return p.id !== id; });
+        delete color_idx_by_prac[id];
+        on_selection_changed();
+    }
+
+    function render_chips() {
+        var box = document.getElementById('prac-chips');
+        box.innerHTML = selected.map(function(p) {
+            var c = color_for(p.id);
+            return '<span class="cal-chip" style="background:' + c.bg + ';color:' + c.fg + ';border-color:' + c.bd + '">'
+                + '<span class="cal-chip-dot" style="background:' + c.bd + '"></span>'
+                + esc(p.name)
+                + '<span class="cal-chip-x" data-id="' + esc(p.id) + '" title="Remove">&times;</span>'
+                + '</span>';
+        }).join('');
+    }
+
+    function on_selection_changed() {
+        render_chips();
+        if (!selected.length) {
+            show_gate_message();
+            return;
+        }
+        document.getElementById('btn-new-appt').disabled = true; // re-enabled once duty data is known
+        load_schedule();
+    }
 
     // ── Wire date inputs ───────────────────────────────────────
     document.getElementById('filter-from').addEventListener('change', function() {
@@ -209,8 +314,10 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         to_date   = (view_mode === 'day') ? from_date : frappe.datetime.add_days(from_date, 6);
         document.getElementById('filter-from').value = from_date;
         document.getElementById('filter-to').value   = to_date;
-        practitioner_field.set_value('');
-        on_practitioner_changed();
+        selected = [];
+        color_idx_by_prac = {};
+        clear_practitioner_input();
+        on_selection_changed();
     });
 
     // ── Day / Week view toggle ───────────────────────────────────
@@ -234,16 +341,15 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     });
 
     // ── New Appointment button (no slot context) ────────────────
-    // Instead of assuming from_date/09:00 is free, pull the day's actual
-    // available slots and make the user pick one — this is what feeds the
-    // booking dialog, so nothing gets pre-filled with a time that's already taken.
     document.getElementById('btn-new-appt').addEventListener('click', function() {
-        var prac = practitioner_field.get_value();
-        if (!prac) {
-            frappe.msgprint({ message: 'Please select a Healthcare Practitioner first.', indicator: 'orange' });
+        var ids = selected_ids();
+        if (!ids.length) {
+            frappe.msgprint({ message: 'Please select at least one Healthcare Practitioner first.', indicator: 'orange' });
             return;
         }
-        open_slot_picker(from_date, prac);
+        // Prefer a selected practitioner who is actually working on the start date.
+        var pick = ids.filter(function(id) { return is_day_working(id, from_date); })[0] || ids[0];
+        open_slot_picker(from_date, pick);
     });
 
     // ── Nav buttons (step size depends on day/week view) ─────────
@@ -299,21 +405,17 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         return (h24 < 10 ? '0' + h24 : h24) + ':' + (m < 10 ? '0' + m : m);
     }
 
+    function esc(v) {
+        return frappe.utils.escape_html(v === null || v === undefined ? '' : String(v));
+    }
+
     // ── Time-slot grid ───────────────────────────────────────────
-    // Duty Assignment only tells us WHICH dates a practitioner is on duty (via
-    // the branch_schedule_assignment child table), not what hours they work —
-    // there's no from/to time on that child table. So the displayed grid is
-    // always this fixed 8:00–17:30 / 30-min ladder; bookability is decided at
-    // the whole-day level (see is_day_working), not per time slot on the grid.
-    // Actual per-slot availability (accounting for already-booked appointments)
-    // is computed on demand by fetch_schedule_slots() when the user goes to book.
-    //
-    // The grid rows are only the background ruling and the click targets —
-    // appointments themselves are positioned freely on top of them, sized to
-    // their own duration (see appt_geometry below).
+    // Duty Assignment only tells us WHICH dates a practitioner is on duty, not
+    // what hours they work, so the displayed grid is a fixed 8:00–17:30 ladder
+    // and bookability is decided per practitioner per day (see is_day_working).
     var SLOT_MINUTES = 30;
-    var TIME_SLOTS = [];         // display labels, e.g. "09:00"
-    var TIME_SLOT_MINUTES = [];  // parallel array of minutes-from-midnight for each row
+    var TIME_SLOTS = [];
+    var TIME_SLOT_MINUTES = [];
 
     function build_time_slots() {
         var minutes = [];
@@ -324,39 +426,21 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     build_time_slots();
 
     // ── Appointment block geometry ───────────────────────────────
-    // Appointments are drawn as absolutely-positioned blocks over the slot grid so
-    // each one covers the span it actually occupies (appointment_time → + duration)
-    // instead of sitting inside whichever 30-minute row it happens to start in.
-    //
-    // SLOT_HEIGHT_PX must stay in sync with the `height` on .cal-time-slot /
-    // .cal-day-slot in the stylesheet — that's the only thing tying minutes to
-    // pixels. render_calendar() re-measures a real slot after painting and rescales
-    // if the theme disagrees, so a theme override degrades into a stretch rather
-    // than a drift.
     var SLOT_HEIGHT_PX   = 52;
     var PX_PER_MINUTE    = SLOT_HEIGHT_PX / SLOT_MINUTES;
-    var MIN_APPT_PX      = 18;   // keep very short appointments readable and clickable
-    var SHORT_APPT_PX    = 32;   // below this, time + patient go on one line
-    var TALL_APPT_PX     = 48;   // above this, there's room for a third line
-    var DEFAULT_DURATION = 15;   // same fallback check_slot_availability() already uses
+    var MIN_APPT_PX      = 18;
+    var SHORT_APPT_PX    = 32;
+    var TALL_APPT_PX     = 48;
+    var DEFAULT_DURATION = 15;
 
     function grid_start_minutes() { return TIME_SLOT_MINUTES[0]; }
     function grid_end_minutes()   { return TIME_SLOT_MINUTES[TIME_SLOT_MINUTES.length - 1] + SLOT_MINUTES; }
 
-    // Patient Appointment.duration is in minutes. Blank/0 on older rows, so fall
-    // back rather than collapsing the block to nothing.
     function appt_duration(a) {
         var d = parseInt(a.duration, 10);
         return (d && d > 0) ? d : DEFAULT_DURATION;
     }
 
-    function esc(v) {
-        return frappe.utils.escape_html(v === null || v === undefined ? '' : String(v));
-    }
-
-    // Vertical placement for one appointment, in px from the top of the day column.
-    // Returns null when the appointment doesn't overlap the displayed 08:00–17:30
-    // window at all — those keep the old all-day-row treatment.
     function appt_geometry(a) {
         if (!a.appointment_time) return null;
 
@@ -371,8 +455,6 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         var vis_end   = Math.min(end, ge);
         var top       = (vis_start - gs) * PX_PER_MINUTE;
         var height    = Math.max((vis_end - vis_start) * PX_PER_MINUTE, MIN_APPT_PX);
-        // A 5-minute slot at 17:25 would otherwise poke out the bottom once the
-        // minimum height kicks in — nudge it up instead of overflowing the grid.
         if (top + height > total_px) top = Math.max(0, total_px - height);
 
         return {
@@ -385,12 +467,14 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         };
     }
 
-    // Side-by-side layout for appointments whose spans overlap, so a double-booked
-    // time doesn't hide one block completely behind another. Groups them into
-    // clusters of mutually-overlapping blocks and gives each block a column within
-    // its cluster; a cluster of one keeps the full column width.
+    // Side-by-side layout for appointments whose spans overlap (different doctors
+    // at the same time, or a double booking), so none is hidden behind another.
     function layout_overlaps(items) {
-        items.sort(function(x, y) { return (x.geo.start - y.geo.start) || (x.geo.end - y.geo.end); });
+        items.sort(function(x, y) {
+            return (x.geo.start - y.geo.start)
+                || (x.geo.end - y.geo.end)
+                || String(x.a.practitioner || '').localeCompare(String(y.a.practitioner || ''));
+        });
 
         var cluster = [], col_ends = [], cluster_end = null;
 
@@ -414,72 +498,106 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         return items;
     }
 
-    // "09:00 – 09:30"
     function appt_range_label(geo) {
         return format_time_label(geo.start) + ' \u2013 ' + format_time_label(geo.end);
     }
 
-    // The Duty Assignment entry (if any) for this date — carries the Branch
-    // the practitioner is assigned to work that day.
-    function get_duty_for_date(date) {
-        return (practitioner_duty_by_date && practitioner_duty_by_date[date]) || null;
+    // ── Duty helpers (all per practitioner) ──────────────────────
+    function get_duty_for(practitioner, date) {
+        return (duty_cache[practitioner] && duty_cache[practitioner][date]) || null;
     }
 
-    // Is the practitioner scheduled to work AT ALL on this date? Fails CLOSED:
-    // if we don't have duty data loaded, there's no Duty Assignment row for this
-    // date, or the row's Branch is empty (that's how Clinical Management marks a
-    // practitioner not available that day), the day is not bookable. We never
-    // guess "available" when the duty data is unknown, missing, or blank.
-    function is_day_working(date) {
-        if (!practitioner_duty_by_date) return false;
-        var rec = practitioner_duty_by_date[date];
+    // Is this practitioner scheduled to work on this date? Fails CLOSED: unknown
+    // duty data, no row for the date, or an empty Branch => not bookable.
+    function is_day_working(practitioner, date) {
+        var rec = get_duty_for(practitioner, date);
         return !!(rec && rec.branch);
     }
 
-    // No time-of-day granularity exists in Duty Assignment, so a slot is
-    // bookable exactly when its day is.
-    function is_slot_bookable(date, time_str, duration) {
-        return is_day_working(date);
+    // Which of the currently selected practitioners work on this date.
+    function working_practitioners(date) {
+        return selected_ids().filter(function(id) { return is_day_working(id, date); });
     }
 
-    // Day-level bookability that drives the brown/non-bookable column treatment.
-    function is_day_bookable(date) {
-        return is_day_working(date);
+    function is_slot_bookable(practitioner, date, time_str, duration) {
+        return is_day_working(practitioner, date);
     }
 
-    // Pull a practitioner's actual available slots for a date straight from
-    // Healthcare's own scheduling engine — the same whitelisted method the
-    // stock Patient Appointment "Check Availability" button calls. This reads
-    // the practitioner's real Practitioner Schedule (their configured slot
-    // duration and working hours, which differ from doctor to doctor and can
-    // be under 30 min), and already excludes approved leave days and
-    // already-booked times on the server side, so we don't re-derive any of
-    // that ourselves. Callers are responsible for their own Duty Assignment
-    // gate (see open_slot_picker) — this function doesn't assume the date is
-    // within the calendar's currently-loaded range.
-    //
-    // IMPORTANT — actual signature (confirmed from two rounds of server
-    // tracebacks on this instance, healthcare 15.1.20):
-    //     get_availability_data(date, practitioner, appointment)
-    // All three are separate required arguments — practitioner is NOT just
-    // read out of the `appointment` blob, it must also be passed on its own.
-    // `appointment` is a JSON-serialized, not-yet-saved Patient Appointment
-    // doc (the same shape the standard Patient Appointment form's `frm.doc`
-    // is in when you click "Check Availability" on it) — we build a minimal
-    // one with the fields that form would already have.
-    //
-    // NOTE ON RESPONSE SHAPE: different Healthcare/Marley versions have shipped
-    // slightly different keys for the result (e.g. `slot_details` vs a bare
-    // list, or `avail_slot` vs `available_slots`). parse_availability_response()
-    // below tries the common shapes and logs the raw response to the console
-    // so it's easy to confirm/adjust against this instance if needed.
-    //
-    // Returns:
-    //   null        -> couldn't verify against the server (network/API error,
-    //                   or the server itself rejected the request) — fail
-    //                   CLOSED, caller should not offer any slot.
-    //   []          -> schedule loaded but every slot is already booked.
-    //   [{mins, time_str, duration, service_unit}, …] -> free slots, ascending.
+    // Reads every Duty Assignment for the practitioner -> its
+    // "branch_schedule_assignment" child rows (date / day_name / branch) and
+    // caches { "YYYY-MM-DD": { branch, day_name } } in duty_cache[practitioner].
+    // All dates are kept (not just the visible range) so the booking dialog can
+    // still validate if the user picks a date outside the calendar's range.
+    function fetch_practitioner_duty(practitioner, callback) {
+        frappe.call({
+            method: 'frappe.client.get_list',
+            args: {
+                doctype: 'Duty Assignment',
+                fields: ['name'],
+                filters: [['healthcare_practitioner', '=', practitioner]],
+                limit_page_length: 500
+            },
+            callback: function(r) {
+                var rows = r.message || [];
+                var duty_by_date = {};
+                if (!rows.length) {
+                    duty_cache[practitioner] = duty_by_date;
+                    callback(duty_by_date);
+                    return;
+                }
+
+                var remaining = rows.length;
+                function done() {
+                    remaining--;
+                    if (remaining === 0) {
+                        duty_cache[practitioner] = duty_by_date;
+                        callback(duty_by_date);
+                    }
+                }
+
+                rows.forEach(function(row) {
+                    frappe.call({
+                        method: 'frappe.client.get',
+                        args: { doctype: 'Duty Assignment', name: row.name },
+                        callback: function(dr) {
+                            var doc = dr.message;
+                            var children = (doc && doc.branch_schedule_assignment) || [];
+                            children.forEach(function(c) {
+                                if (!c.date) return;
+                                duty_by_date[c.date] = {
+                                    branch: c.branch || '',
+                                    day_name: c.day_name || ''
+                                };
+                            });
+                            done();
+                        },
+                        error: function() { done(); }
+                    });
+                });
+            },
+            error: function() {
+                duty_cache[practitioner] = null; // fail closed
+                callback(null);
+            }
+        });
+    }
+
+    function fetch_duty_for_many(ids, callback) {
+        var remaining = ids.length;
+        if (!remaining) { callback(); return; }
+        ids.forEach(function(id) {
+            fetch_practitioner_duty(id, function() {
+                remaining--;
+                if (remaining === 0) callback();
+            });
+        });
+    }
+
+    // ── Real availability from Healthcare's scheduling engine ────
+    // Signature confirmed on healthcare 15.1.20:
+    //   get_availability_data(date, practitioner, appointment)
+    // Returns null on failure (fail closed), [] if fully booked, or
+    // [{mins, time_str, duration, service_unit}, …] ascending.
     function fetch_schedule_slots(practitioner, date, callback) {
         frappe.db.get_value('Healthcare Practitioner', practitioner, 'department').then(function(dep_r) {
             var department = (dep_r && dep_r.message && dep_r.message.department) || '';
@@ -491,10 +609,6 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 appointment_date: date
             };
 
-            // Traceback-confirmed signature for healthcare 15.1.20:
-            // get_availability_data(date, practitioner, appointment) — all
-            // three are separate required args. `practitioner` here even
-            // though it's also inside the `appointment` JSON blob.
             var call_args = { date: date, practitioner: practitioner, appointment: JSON.stringify(appointment_doc) };
             console.log('get_availability_data call args', call_args);
 
@@ -503,14 +617,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 args: call_args,
                 callback: function(r) {
                     console.log('get_availability_data response for', practitioner, date, r.message);
-                    var slots = parse_availability_response(r.message);
-                    callback(slots); // may be [] if the parse found the response but no open slots
+                    callback(parse_availability_response(r.message));
                 },
                 error: function(r) {
-                    // Includes the case where Healthcare itself throws (e.g. "does not
-                    // have a Healthcare Practitioner Schedule" / "not available on
-                    // <weekday>") — frappe.call already shows that server message to
-                    // the user, we just fail closed here.
                     console.log('get_availability_data error', r);
                     callback(null);
                 }
@@ -518,13 +627,6 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         });
     }
 
-    // Best-effort normalizer for get_availability_data's response across
-    // Healthcare/Marley versions. Looks for a `slot_details` array (or a bare
-    // array), each entry optionally scoped to a service unit with a list of
-    // available slots under `avail_slot` / `available_slots` / `slots`, each
-    // slot carrying `from_time`/`to_time` (or `time`). Falls back to a 15-min
-    // duration if the schedule doesn't state one. Returns [] if the shape is
-    // completely unrecognized (rather than guessing).
     function parse_availability_response(msg) {
         if (!msg) return [];
         var groups = Array.isArray(msg) ? msg : (msg.slot_details || msg.slots || []);
@@ -554,83 +656,12 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 
     // ── Practitioner selection gate ───────────────────────────────
     function show_gate_message() {
+        active_load_key = '';
         document.getElementById('cal-wrap').innerHTML =
-            '<div class="cal-empty">Select a Healthcare Practitioner above to view their schedule.</div>';
+            '<div class="cal-empty">Select one or more Healthcare Practitioners above to view their schedules.</div>';
         document.getElementById('cal-stats').innerHTML = '';
         document.getElementById('cal-range-lbl').textContent = '';
         document.getElementById('btn-new-appt').disabled = true;
-    }
-
-    function on_practitioner_changed() {
-        var val = practitioner_field.get_value();
-        current_practitioner = val || null;
-        practitioner_duty_by_date = null;
-
-        if (!val) {
-            show_gate_message();
-            return;
-        }
-
-        document.getElementById('btn-new-appt').disabled = true; // re-enabled once we know duty data
-        load_schedule();
-    }
-
-    // Reads Duty Assignment doctype filtered by healthcare_practitioner -> each
-    // matching document's "branch_schedule_assignment" child table (Duty Child
-    // Table: date / day_name / branch) -> keeps only rows whose date falls in
-    // the currently loaded range, building:
-    //   { "YYYY-MM-DD": { branch, day_name }, ... }
-    // Clinical Management leaves `branch` empty on a row to mark the
-    // practitioner not available that date — that row still lands in the map,
-    // just with an empty branch (see is_day_working).
-    function fetch_practitioner_duty(practitioner, from_date, to_date, callback) {
-        frappe.call({
-            method: 'frappe.client.get_list',
-            args: {
-                doctype: 'Duty Assignment',
-                fields: ['name'],
-                filters: [['healthcare_practitioner', '=', practitioner]],
-                limit_page_length: 500
-            },
-            callback: function(r) {
-                var rows = r.message || [];
-                if (!rows.length) { callback({}); return; }
-
-                var duty_by_date = {};
-                var remaining = rows.length;
-
-                function done() {
-                    remaining--;
-                    if (remaining === 0) callback(duty_by_date);
-                }
-
-                rows.forEach(function(row) {
-                    frappe.call({
-                        method: 'frappe.client.get',
-                        args: { doctype: 'Duty Assignment', name: row.name },
-                        callback: function(dr) {
-                            var doc = dr.message;
-                            var children = (doc && doc.branch_schedule_assignment) || [];
-                            children.forEach(function(c) {
-                                if (!c.date) return;
-                                if (c.date < from_date || c.date > to_date) return;
-                                duty_by_date[c.date] = {
-                                    branch: c.branch || '',
-                                    day_name: c.day_name || ''
-                                };
-                            });
-                            done();
-                        },
-                        error: function() { done(); }
-                    });
-                });
-            },
-            error: function() {
-                // Couldn't read the practitioner's duty assignments — fail closed
-                // (never guess "available").
-                callback(null);
-            }
-        });
     }
 
     // ── Load data ──────────────────────────────────────────────
@@ -639,8 +670,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         var stats = document.getElementById('cal-stats');
         var lbl   = document.getElementById('cal-range-lbl');
 
-        var pf = practitioner_field.get_value();
-        if (!pf) {
+        var ids = selected_ids();
+        if (!ids.length) {
             show_gate_message();
             return;
         }
@@ -654,11 +685,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 + (f !== t ? ' \u2013 ' + frappe.datetime.str_to_user(t) : '');
         }
 
-        var filters = [
-            ['appointment_date', '>=', f],
-            ['appointment_date', '<=', t],
-            ['practitioner', '=', pf]
-        ];
+        var key = ids.join('|') + '#' + f + '#' + t;
+        active_load_key = key;
 
         frappe.call({
             method: 'frappe.client.get_list',
@@ -670,25 +698,37 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     'service_unit','appointment_date','appointment_time',
                     'patient','patient_name','company','duration'
                 ],
-                filters: filters,
-                limit_page_length: 500,
+                filters: [
+                    ['appointment_date', '>=', f],
+                    ['appointment_date', '<=', t],
+                    ['practitioner', 'in', ids]
+                ],
+                limit_page_length: 1000,
                 order_by: 'appointment_date asc, appointment_time asc'
             },
             callback: function(r) {
+                if (active_load_key !== key) return; // stale
                 var appts = r.message || [];
                 render_stats(appts, stats);
 
-                fetch_practitioner_duty(pf, f, t, function(duty_by_date) {
-                    // ignore stale responses if the user switched practitioner/dates meanwhile
-                    if (practitioner_field.get_value() !== pf || from_date !== f || to_date !== t) return;
+                fetch_duty_for_many(ids, function() {
+                    if (active_load_key !== key) return; // stale
 
-                    practitioner_duty_by_date = duty_by_date;
+                    var dates = get_week_dates(f, t);
+                    var failed = [];     // duty lookup failed
+                    var no_duty = [];    // no Duty Assignment row in the visible range
+                    var any_data = false;
 
-                    // Couldn't determine duty data at all (lookup failed) — don't
-                    // guess either way, say so and offer a retry.
-                    if (!practitioner_duty_by_date) {
+                    ids.forEach(function(id) {
+                        var m = duty_cache[id];
+                        if (m === null || m === undefined) { failed.push(id); return; }
+                        var has = dates.some(function(d) { return !!m[d]; });
+                        if (has) any_data = true; else no_duty.push(id);
+                    });
+
+                    if (failed.length === ids.length) {
                         wrap.innerHTML =
-                            '<div class="cal-empty">Couldn\'t load this practitioner\'s duty assignment.'
+                            '<div class="cal-empty">Couldn\'t load the duty assignment for the selected practitioners.'
                             + '<br><button class="cal-nav-btn" id="btn-retry-schedule" style="margin-top:10px">Retry</button></div>';
                         document.getElementById('btn-new-appt').disabled = true;
                         var retry_btn = document.getElementById('btn-retry-schedule');
@@ -696,19 +736,34 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         return;
                     }
 
-                    // No Duty Assignment rows found for this practitioner within
-                    // the selected date range.
-                    if (!Object.keys(practitioner_duty_by_date).length) {
+                    if (!any_data) {
                         wrap.innerHTML =
-                            '<div class="cal-empty">No Duty Assignment found for this practitioner in the selected date range.<br>'
+                            '<div class="cal-empty">No Duty Assignment found for the selected practitioner(s) in the selected date range.<br>'
                             + 'Add a Duty Assignment (with a Branch set for each working date) to make them bookable.</div>';
                         document.getElementById('btn-new-appt').disabled = true;
                         return;
                     }
 
+                    var notice = '';
+                    if (no_duty.length) {
+                        notice += 'No Duty Assignment in this date range (not bookable): '
+                            + no_duty.map(function(id) { return esc(name_of(id)); }).join(', ') + '. ';
+                    }
+                    if (failed.length) {
+                        notice += 'Couldn\'t load duty assignment for: '
+                            + failed.map(function(id) { return esc(name_of(id)); }).join(', ') + '.';
+                    }
+
                     document.getElementById('btn-new-appt').disabled = false;
-                    render_calendar(appts, wrap, f, t);
+                    render_calendar(appts, wrap, f, t, notice);
                 });
+            },
+            error: function() {
+                if (active_load_key !== key) return;
+                wrap.innerHTML = '<div class="cal-empty">Couldn\'t load appointments.'
+                    + '<br><button class="cal-nav-btn" id="btn-retry-schedule" style="margin-top:10px">Retry</button></div>';
+                var retry_btn = document.getElementById('btn-retry-schedule');
+                if (retry_btn) retry_btn.addEventListener('click', load_schedule);
             }
         });
     }
@@ -727,26 +782,16 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Calendar grid ──────────────────────────────────────────
-    function render_calendar(appts, wrap, f, t) {
+    function render_calendar(appts, wrap, f, t, notice) {
         var dates    = get_week_dates(f, t);
         var today    = frappe.datetime.get_today();
         var grid_tpl = '60px ' + dates.map(function() { return '1fr'; }).join(' ');
+        var multi    = selected.length > 1;
 
-        if (!appts.length) {
-            // still render an empty grid so the user can click a slot to book
-            appts = [];
-        }
-
-        // Per-date bookability, computed once for this render and reused by both
-        // the markup and the click handlers below. Comes straight from Duty
-        // Assignment: working that date + non-empty Branch = bookable.
+        // Per date: the selected practitioners who work that day.
         var day_working = {};
-        dates.forEach(function(d) { day_working[d] = is_day_bookable(d); });
+        dates.forEach(function(d) { day_working[d] = working_practitioners(d); });
 
-        // Each appointment becomes a positioned block covering start → start+duration.
-        // Only ones that fall entirely outside the displayed window (before 08:00 or
-        // from 17:30 on) still go in the all-day row — anything overlapping the window
-        // is drawn in the grid and clipped at the edge.
         var by_date = {};
         var allday  = {};
         appts.forEach(function(a) {
@@ -762,32 +807,42 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         });
         Object.keys(by_date).forEach(function(d) { layout_overlaps(by_date[d]); });
 
-        var html = '<div class="cal-grid">';
+        var html = '';
+        if (notice) html += '<div class="cal-notice">' + notice + '</div>';
+        html += '<div class="cal-grid">';
 
+        // Header: a coloured dot per working doctor, or "not working" if none.
         html += '<div class="cal-head-row" style="grid-template-columns:' + grid_tpl + '">';
         html += '<div class="cal-head-cell"></div>';
         dates.forEach(function(d) {
-            var off_label = day_working[d] ? '' : 'not working';
-            html += '<div class="cal-head-cell' + (d === today ? ' today' : '') + '">'
+            var w = day_working[d];
+            var dots = w.map(function(id) {
+                return '<span class="cal-dot" style="background:' + color_for(id).bd + '"></span>';
+            }).join('');
+            var tip = w.length ? 'Working: ' + w.map(name_of).join(', ') : 'Nobody selected is working';
+            html += '<div class="cal-head-cell' + (d === today ? ' today' : '') + '" title="' + esc(tip) + '">'
                 + fmt_date_header(d)
-                + (off_label ? '<span class="cal-head-off">' + off_label + '</span>' : '')
+                + (w.length ? '<span class="cal-head-dots">' + dots + '</span>'
+                            : '<span class="cal-head-off">not working</span>')
                 + '</div>';
         });
         html += '</div>';
 
+        // Appointments completely outside the 08:00–17:30 window.
         html += '<div class="cal-allday-row" style="grid-template-columns:' + grid_tpl + '">';
         html += '<div class="cal-allday-lbl">all-day</div>';
         dates.forEach(function(d) {
             html += '<div class="cal-allday-cell">';
             if (allday[d]) {
                 allday[d].forEach(function(a) {
-                    // Show the time here too — these are real timed appointments that
-                    // just sit outside the displayed window, not genuine all-day ones.
+                    var c = color_for(a.practitioner);
                     var t_lbl = a.appointment_time
                         ? format_time_label(time_str_to_minutes(a.appointment_time)) + ' \u00b7 '
                         : '';
-                    html += '<div class="cal-allday-block" title="' + esc(t_lbl + (a.patient_name || a.patient || '')) + '">'
-                        + t_lbl
+                    var who = a.patient_name || a.patient || '';
+                    html += '<div class="cal-allday-block" style="background:' + c.bg + ';color:' + c.fg + ';border-left:3px solid ' + c.bd + '"'
+                        + ' title="' + esc(t_lbl + who + ' \u2022 ' + (a.practitioner_name || a.practitioner || '')) + '">'
+                        + esc(t_lbl)
                         + esc(a.patient_name || a.patient || '\u2014')
                         + (a.service_unit ? ' \u2022 ' + esc(a.service_unit) : '')
                         + '</div>';
@@ -805,17 +860,14 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         html += '</div>';
 
         dates.forEach(function(d) {
-            html += '<div class="cal-day-col' + (d === today ? ' today' : '') + (day_working[d] ? '' : ' cal-day-unavailable') + '">';
+            var anyone = day_working[d].length > 0;
+            html += '<div class="cal-day-col' + (d === today ? ' today' : '') + (anyone ? '' : ' cal-day-unavailable') + '">';
 
-            // The slot grid stays exactly as it was: empty, clickable, one row per
-            // 30 minutes. It's the click target and the background ruling.
             TIME_SLOTS.forEach(function(ts, si) {
-                var bookable = day_working[d];
-                html += '<div class="cal-day-slot' + (bookable ? '' : ' cal-slot-off') + '"'
+                html += '<div class="cal-day-slot' + (anyone ? '' : ' cal-slot-off') + '"'
                     + ' data-date="' + d + '" data-slot="' + si + '"></div>';
             });
 
-            // Appointments sit above it, each sized to its own duration.
             html += '<div class="cal-appt-layer">';
             (by_date[d] || []).forEach(function(it) {
                 var a     = it.a;
@@ -824,10 +876,15 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 var col   = it.col || 0;
                 var w     = 100 / cols;
                 var who   = a.patient_name || a.patient || '\u2014';
+                var doc   = a.practitioner_name || a.practitioner || '';
                 var range = appt_range_label(geo);
                 var mins  = appt_duration(a);
-                var meta  = a.appointment_type || a.service_unit || '';
+                var c     = color_for(a.practitioner);
+                var meta  = multi
+                    ? [doc, a.appointment_type].filter(Boolean).join(' \u2022 ')
+                    : (a.appointment_type || a.service_unit || '');
                 var status_class = (a.status || 'Open').replace(' ', '');
+                var tick = (a.status === 'Closed') ? ' \u2713' : '';
 
                 html += '<div class="cal-appt ' + status_class
                     + (geo.height < SHORT_APPT_PX ? ' is-short' : '')
@@ -835,14 +892,15 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     + (geo.clipped_bottom ? ' clipped-bottom' : '')
                     + '" data-name="' + esc(a.name) + '"'
                     + ' data-top="' + geo.top.toFixed(2) + '" data-height="' + geo.height.toFixed(2) + '"'
-                    + ' title="' + esc(who + ' \u2022 ' + range + ' (' + mins + ' min)'
+                    + ' title="' + esc(who + ' \u2022 ' + doc + ' \u2022 ' + range + ' (' + mins + ' min)'
                         + (a.appointment_type ? ' \u2022 ' + a.appointment_type : '')
                         + (a.status ? ' \u2022 ' + a.status : '')) + '"'
                     + ' style="top:' + geo.top.toFixed(1) + 'px;'
                     + 'height:' + geo.height.toFixed(1) + 'px;'
                     + 'left:calc(' + (col * w).toFixed(4) + '% + 2px);'
-                    + 'width:calc(' + w.toFixed(4) + '% - 4px);">'
-                    + '<span class="cal-appt-time">' + range + '</span>'
+                    + 'width:calc(' + w.toFixed(4) + '% - 4px);'
+                    + 'background:' + c.bg + ';color:' + c.fg + ';border-left:3px solid ' + c.bd + ';">'
+                    + '<span class="cal-appt-time">' + range + tick + '</span>'
                     + '<span class="cal-appt-name">' + esc(who) + '</span>'
                     + (geo.height >= TALL_APPT_PX && meta
                         ? '<span class="cal-appt-meta">' + esc(meta) + '</span>' : '')
@@ -856,9 +914,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         html += '</div></div>';
         wrap.innerHTML = html;
 
-        // Minutes→pixels above assumes a slot renders at SLOT_HEIGHT_PX. If a theme
-        // or box-sizing override makes the real row a different height, rescale the
-        // blocks to match so they keep lining up with the time ruler.
+        // Rescale blocks if a theme changes the real slot height.
         var probe = wrap.querySelector('.cal-day-slot');
         if (probe) {
             var real_h = probe.getBoundingClientRect().height;
@@ -880,40 +936,32 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             });
         });
 
-        // Click an empty slot → instead of assuming that exact 30-min row is
-        // free (it might already be taken, or the practitioner's real working
-        // hours that day might be narrower than the display grid), pull the
-        // day's actual open slots and let the user pick one. This is what was
-        // letting people book times that were already spoken for.
+        // Click an empty slot → open the availability dialog, prefilled with the
+        // first selected practitioner who works that day (changeable in the dialog).
         wrap.querySelectorAll('.cal-day-slot').forEach(function(el) {
             el.addEventListener('click', function(e) {
-                if (e.target.closest('.cal-appt')) return; // handled above
+                if (e.target.closest('.cal-appt')) return;
                 var d = el.dataset.date;
+                var working = day_working[d] || [];
 
-                if (!day_working[d]) {
-                    var prac_label = practitioner_field.get_value() || 'This practitioner';
+                if (!working.length) {
+                    var who = selected.length === 1
+                        ? name_of(selected[0].id) + ' is'
+                        : 'None of the selected practitioners is';
                     frappe.msgprint({
                         title: 'Not Available',
-                        message: prac_label + ' is not scheduled to work on ' + frappe.datetime.str_to_user(d) + '.',
+                        message: who + ' scheduled to work on ' + frappe.datetime.str_to_user(d) + '.',
                         indicator: 'orange'
                     });
                     return;
                 }
 
-                open_slot_picker(d, practitioner_field.get_value());
+                open_slot_picker(d, working[0]);
             });
         });
     }
 
     // ── Availability dialog: Practitioner + Date + "Check Availability" ──────
-    // Mirrors the stock Patient Appointment "Check Availability" dialog: pick
-    // (or accept the prefilled) practitioner and date, click Check
-    // Availability, and only then are slots fetched and shown as clickable
-    // buttons. Nothing loads automatically on open. Because the practitioner
-    // and date can be changed here to anything — not just what's currently
-    // loaded in the calendar view — availability (both the Duty Assignment
-    // gate and the real schedule) is always looked up fresh for whatever is
-    // in the fields at the moment Check Availability is clicked.
     function open_slot_picker(date, practitioner) {
         var picker = new frappe.ui.Dialog({
             title: 'Check Availability',
@@ -943,13 +991,13 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         picker.show();
 
         function run_check(prac, dt) {
-            if (!prac || !dt) return; // dialog's own required-field validation covers this
+            if (!prac || !dt) return;
 
             picker.fields_dict.slot_list.$wrapper.html('<div class="cal-avail-checking">Checking availability…</div>');
 
-            // Fresh, single-date Duty Assignment lookup — not the calendar's
-            // preloaded range — since the user can pick any date here.
-            fetch_practitioner_duty(prac, dt, dt, function(duty_by_date) {
+            // Fresh Duty Assignment lookup (also refreshes duty_cache for this
+            // practitioner, which the booking dialog's checks rely on).
+            fetch_practitioner_duty(prac, function(duty_by_date) {
                 if (!duty_by_date) {
                     picker.fields_dict.slot_list.$wrapper.html(
                         '<div class="cal-avail-box cal-avail-bad">Couldn\'t load this practitioner\'s duty assignment. Please try again.</div>'
@@ -959,7 +1007,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 var duty = duty_by_date[dt];
                 if (!duty || !duty.branch) {
                     picker.fields_dict.slot_list.$wrapper.html(
-                        '<div class="cal-avail-box cal-avail-bad">' + prac + ' is not scheduled to work on ' + frappe.datetime.str_to_user(dt) + '.</div>'
+                        '<div class="cal-avail-box cal-avail-bad">' + esc(prac) + ' is not scheduled to work on ' + frappe.datetime.str_to_user(dt) + '.</div>'
                     );
                     return;
                 }
@@ -973,13 +1021,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     }
                     if (!slots.length) {
                         picker.fields_dict.slot_list.$wrapper.html(
-                            '<div class="cal-avail-box cal-avail-bad">No open slots left for ' + prac + ' on ' + frappe.datetime.str_to_user(dt) + '.</div>'
+                            '<div class="cal-avail-box cal-avail-bad">No open slots left for ' + esc(prac) + ' on ' + frappe.datetime.str_to_user(dt) + '.</div>'
                         );
                         return;
                     }
 
-                    // Group by service unit when the schedule spans more than one,
-                    // so it's clear which branch/room each block of times belongs to.
                     var by_unit = {};
                     var unit_order = [];
                     slots.forEach(function(s) {
@@ -992,12 +1038,12 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     unit_order.forEach(function(unit) {
                         if (unit_order.length > 1) {
                             html += '<div style="font-size:12px;font-weight:600;margin:10px 0 6px;color:var(--text-muted);">'
-                                + (unit || 'Unassigned') + '</div>';
+                                + esc(unit || 'Unassigned') + '</div>';
                         }
                         html += '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
                         by_unit[unit].forEach(function(s) {
                             html += '<button type="button" class="cal-nav-btn cal-slot-pick"'
-                                + ' data-time="' + s.time_str + '" data-duration="' + s.duration + '" data-unit="' + (s.service_unit || '') + '">'
+                                + ' data-time="' + esc(s.time_str) + '" data-duration="' + esc(s.duration) + '" data-unit="' + esc(s.service_unit || '') + '">'
                                 + format_time_label(s.mins) + '</button>';
                         });
                         html += '</div>';
@@ -1014,8 +1060,6 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                             appointment_time: time_str,
                             practitioner: prac,
                             duration: slot_duration,
-                            // Prefer the service unit the schedule slot belongs to;
-                            // fall back to the Duty Assignment branch for this date.
                             service_unit: slot_unit || duty.branch
                         });
                     });
@@ -1024,19 +1068,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         }
     }
 
-    // ── Availability check (mirrors the standard Patient Appointment booking flow) ──
-    // Healthcare's own `get_availability_data(date, appointment)` is designed to be
-    // called against an existing/in-progress Patient Appointment document (that's
-    // where it pulls the practitioner from), so it isn't usable for a pre-insert
-    // check against a bare practitioner + date/time. Instead this reproduces the
-    // checks that matter here: the practitioner's Duty Assignment for that date,
-    // and clashes with existing appointments — both run BEFORE the record is
-    // inserted, so a bad slot never reaches insert. This runs again right before
-    // Book even though the slot picker already only offered free times, because
-    // time can pass (or another booking can land) between picking a slot and
-    // clicking Book.
+    // ── Pre-insert availability check ────────────────────────────
+    // Duty Assignment for that practitioner/date (from duty_cache) plus clashes
+    // with that practitioner's existing appointments.
     function check_slot_availability(practitioner, date, time_str, duration, callback) {
-        if (!is_slot_bookable(date, time_str, duration)) {
+        if (!is_slot_bookable(practitioner, date, time_str, duration)) {
             callback(false, (practitioner || 'This practitioner') + ' is not scheduled to work on ' + frappe.datetime.str_to_user(date) + '.');
             return;
         }
@@ -1071,8 +1107,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     // ── Booking dialog ───────────────────────────────────────────
     function open_booking_dialog(prefill) {
         prefill = prefill || {};
+        var dialog = null;
 
-        var dialog = new frappe.ui.Dialog({
+        var dialog_def = {
             title: 'Book Appointment',
             fields: [
                 {
@@ -1080,8 +1117,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     options: 'Patient', reqd: 1
                 },
                 {
-                    // Tied to the practitioner selected in the calendar filter, since
-                    // that's whose duty assignment/availability we've already loaded.
+                    // Filled automatically when a patient is chosen.
+                    fieldtype: 'Data', fieldname: 'patient_name', label: 'Patient Name',
+                    read_only: 1
+                },
+                {
                     fieldtype: 'Link', fieldname: 'practitioner', label: 'Practitioner',
                     options: 'Healthcare Practitioner', reqd: 1,
                     default: prefill.practitioner || '',
@@ -1093,10 +1133,6 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     reqd: 1, default: prefill.appointment_date || frappe.datetime.get_today()
                 },
                 {
-                    // Comes from the slot picker (an actually-free slot at the time it
-                    // was fetched), but stays editable — if the user changes it, the
-                    // change listener below re-runs the availability check, and Book
-                    // re-validates one more time right before insert.
                     fieldtype: 'Time', fieldname: 'appointment_time', label: 'Time',
                     reqd: 1, default: prefill.appointment_time || '09:00:00'
                 },
@@ -1127,15 +1163,24 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             secondary_action: function() { run_availability_check(true); },
             primary_action_label: 'Book',
             primary_action: function(values) {
-                // Final check right before insert — the slot picker already only
-                // offered open times, but this guards against staleness (another
-                // booking landing in the meantime) or a manually-edited time.
                 run_availability_check(false, function(is_available) {
-                    if (!is_available) return; // status message already shown; stay open
+                    if (!is_available) return;
                     do_insert(values);
                 });
             }
-        });
+        };
+        dialog = new frappe.ui.Dialog(dialog_def);
+
+        // Pull the patient's name whenever a patient is picked/changed/cleared.
+        function sync_patient_name() {
+            if (!dialog) return;
+            var pid = dialog.get_value('patient');
+            if (!pid) { dialog.set_value('patient_name', ''); return; }
+            frappe.db.get_value('Patient', pid, 'patient_name').then(function(r) {
+                if (dialog.get_value('patient') !== pid) return; // changed meanwhile
+                dialog.set_value('patient_name', (r && r.message && r.message.patient_name) || '');
+            });
+        }
 
         function set_status(html, ok) {
             dialog.fields_dict.availability_status.$wrapper.html(
@@ -1151,7 +1196,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             var dur  = values.duration || 15;
 
             if (!prac || !date || !time) {
-                if (cb) cb(true); // let the dialog's own required-field validation handle it
+                if (cb) cb(true);
                 return;
             }
 
@@ -1162,7 +1207,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             check_slot_availability(prac, date, time, dur, function(is_available, message) {
                 set_status(message, is_available);
 
-                var duty = get_duty_for_date(date);
+                var duty = get_duty_for(prac, date);
                 if (duty && duty.branch) dialog.set_value('service_unit', duty.branch);
 
                 if (cb) cb(is_available);
@@ -1191,8 +1236,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 freeze_message: 'Booking appointment…',
                 callback: function(r) {
                     if (r.message) {
+                        var who = values.patient_name ? ' for ' + values.patient_name : '';
                         frappe.show_alert({
-                            message: 'Appointment ' + r.message.name + ' booked',
+                            message: 'Appointment ' + r.message.name + ' booked' + who,
                             indicator: 'green'
                         });
                         dialog.hide();
@@ -1207,14 +1253,19 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 
         dialog.show();
 
-        // Re-check whenever the date or time changes, so the status shown never goes stale.
+        // Patient name follows the patient field.
+        var patient_ctrl = dialog.fields_dict.patient;
+        if (patient_ctrl && patient_ctrl.$input) {
+            patient_ctrl.$input.on('change awesomplete-selectcomplete', sync_patient_name);
+        }
+
+        // Re-check whenever the date or time changes.
         ['appointment_date', 'appointment_time'].forEach(function(fn) {
             var f = dialog.fields_dict[fn];
             if (f && f.$input) f.$input.on('change', function() { run_availability_check(true); });
         });
 
-        // If a practitioner is already selected (e.g. from the filter bar),
-        // auto-pull their default department so front desk doesn't have to.
+        // Default department from the practitioner.
         if (prefill.practitioner) {
             frappe.db.get_value('Healthcare Practitioner', prefill.practitioner, 'department')
                 .then(function(r) {
@@ -1224,26 +1275,27 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 });
         }
 
-        // Check the prefilled slot immediately so the user sees status right away.
         run_availability_check(true);
     }
 
     // ── Detail modal ───────────────────────────────────────────
     function show_modal(a) {
+        var c = color_for(a.practitioner);
         var bg = document.createElement('div');
         bg.className = 'cal-modal-bg';
         bg.innerHTML =
             '<div class="cal-modal">' +
-            '<h3>' + (a.patient_name || a.patient) + '</h3>' +
-            modal_row('ID',           '<a href="/app/patient-appointment/' + a.name + '" target="_blank">' + a.name + '</a>') +
-            modal_row('Status',       a.status || '—') +
-            modal_row('Date',         a.appointment_date || '—') +
-            modal_row('Time',         fmt_modal_time(a)) +
-            modal_row('Type',         a.appointment_type || '—') +
-            modal_row('For',          a.appointment_for  || '—') +
-            modal_row('Practitioner', a.practitioner_name || a.practitioner || '—') +
-            modal_row('Department',   a.department   || '—') +
-            modal_row('Service Unit', a.service_unit || '—') +
+            '<h3 style="border-left:4px solid ' + c.bd + ';padding-left:10px;">' + esc(a.patient_name || a.patient) + '</h3>' +
+            modal_row('ID',           '<a href="/app/patient-appointment/' + esc(a.name) + '" target="_blank">' + esc(a.name) + '</a>') +
+            modal_row('Patient ID',   esc(a.patient || '—')) +
+            modal_row('Status',       esc(a.status || '—')) +
+            modal_row('Date',         esc(a.appointment_date || '—')) +
+            modal_row('Time',         esc(fmt_modal_time(a))) +
+            modal_row('Type',         esc(a.appointment_type || '—')) +
+            modal_row('For',          esc(a.appointment_for  || '—')) +
+            modal_row('Practitioner', esc(a.practitioner_name || a.practitioner || '—')) +
+            modal_row('Department',   esc(a.department   || '—')) +
+            modal_row('Service Unit', esc(a.service_unit || '—')) +
             '<div class="cal-modal-actions">' +
             '<button class="btn-cal-ghost" id="mc">Close</button>' +
             '<button class="btn-cal-primary" id="mo">Open Record</button>' +
@@ -1257,7 +1309,6 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         bg.addEventListener('click', function(e) { if (e.target === bg) bg.remove(); });
     }
 
-    // "09:00 – 09:30 (30 min)" — same span the calendar block covers.
     function fmt_modal_time(a) {
         if (!a.appointment_time) return '\u2014';
         var start = time_str_to_minutes(a.appointment_time);
@@ -1270,6 +1321,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         return '<div class="cal-modal-row"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>';
     }
 
-    // ── Initial state: wait for a practitioner to be picked ─────
+    // ── Initial state: wait for practitioners to be picked ─────
+    render_chips();
     show_gate_message();
 };
