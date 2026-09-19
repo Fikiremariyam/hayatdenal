@@ -617,13 +617,60 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 args: call_args,
                 callback: function(r) {
                     console.log('get_availability_data response for', practitioner, date, r.message);
-                    callback(parse_availability_response(r.message));
+                    var slots = parse_availability_response(r.message);
+                    if (!slots.length) { callback(slots); return; }
+
+                    // Healthcare returns ALL of the schedule's slots and leaves it to its
+                    // own client to grey out booked ones, so drop here any slot that
+                    // overlaps one of this practitioner's existing appointments.
+                    fetch_booked_intervals(practitioner, date, function(booked) {
+                        if (booked === null) { callback(null); return; } // can't verify -> fail closed
+                        callback(slots.filter(function(s) {
+                            return !overlaps_any(s.mins, Number(s.duration) || DEFAULT_DURATION, booked);
+                        }));
+                    });
                 },
                 error: function(r) {
                     console.log('get_availability_data error', r);
                     callback(null);
                 }
             });
+        });
+    }
+
+    // ── Booked-slot helpers ──────────────────────────────────────
+    // Turns appointment rows into [{start, end}] minute intervals (cancelled ones ignored).
+    function appts_to_intervals(list) {
+        return (list || [])
+            .filter(function(a) { return a && a.appointment_time && a.status !== 'Cancelled'; })
+            .map(function(a) {
+                var s = time_str_to_minutes(a.appointment_time);
+                return { start: s, end: s + appt_duration(a) };
+            });
+    }
+
+    function overlaps_any(start, duration, intervals) {
+        var end = start + duration;
+        return intervals.some(function(b) { return start < b.end && b.start < end; });
+    }
+
+    // The practitioner's non-cancelled appointments on a date, as intervals.
+    // Calls back with null if it couldn't be loaded (caller fails closed).
+    function fetch_booked_intervals(practitioner, date, cb) {
+        frappe.call({
+            method: 'frappe.client.get_list',
+            args: {
+                doctype: 'Patient Appointment',
+                fields: ['name', 'appointment_time', 'duration', 'status'],
+                filters: [
+                    ['practitioner', '=', practitioner],
+                    ['appointment_date', '=', date],
+                    ['status', '!=', 'Cancelled']
+                ],
+                limit_page_length: 500
+            },
+            callback: function(r) { cb(appts_to_intervals(r.message)); },
+            error: function() { cb(null); }
         });
     }
 
@@ -639,12 +686,17 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             var avail = g.avail_slot || g.available_slots || g.slots || [];
             if (!Array.isArray(avail)) return;
 
+            // Appointments Healthcare attaches to this schedule/service unit
+            // (covers bookings made by other practitioners in the same room).
+            var group_booked = appts_to_intervals(g.appointments);
+
             avail.forEach(function(s) {
                 var from = (typeof s === 'string') ? s : (s.from_time || s.time || s.from);
                 if (!from) return;
                 var to = (typeof s === 'object') ? (s.to_time || s.to) : null;
                 var mins = time_str_to_minutes(from);
                 var dur = group_duration || (s.duration) || (to ? (time_str_to_minutes(to) - mins) : 15);
+                if (overlaps_any(mins, Number(dur) || DEFAULT_DURATION, group_booked)) return; // already booked -> hide
                 var time_str = from.length === 5 ? (from + ':00') : from;
                 out.push({ mins: mins, time_str: time_str, duration: dur, service_unit: service_unit });
             });
