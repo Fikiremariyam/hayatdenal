@@ -97,14 +97,37 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             /* position:relative makes this the anchor for .cal-appt-layer below */
             .cal-day-col { border-right: 1px solid var(--border-color); background: var(--card-bg); position: relative; }
             .cal-day-col:last-child { border-right: none; }
+            .cal-day-col { display: flex; }
             .cal-day-col.today { background: #E6F1FB; }
-            /* None of the selected practitioners is working this day */
-            .cal-day-col.cal-day-unavailable { background: #F1E4D3; }
-            .cal-day-col.cal-day-unavailable.today { background: #ECD9BE; }
+            /* One lane per selected practitioner inside each day column */
+            .cal-lane { flex: 1 1 0; min-width: 0; position: relative; border-right: 1px dashed var(--border-color); }
+            .cal-lane:last-child { border-right: none; }
+            /* That practitioner is not working this day */
+            .cal-lane.cal-lane-off { background: #F1E4D3; }
+            .cal-day-col.today .cal-lane.cal-lane-off { background: #ECD9BE; }
             .cal-day-slot { height: 52px; border-bottom: 1px solid var(--border-color); padding: 2px 4px; cursor: pointer; transition: background .1s; }
             .cal-day-slot:hover { background: var(--subtle-bg); }
-            .cal-day-slot.cal-slot-off { cursor: not-allowed; background: rgba(139,94,52,0.10); }
-            .cal-day-slot.cal-slot-off:hover { background: rgba(139,94,52,0.10); }
+            .cal-day-slot.cal-slot-off, .cal-day-slot.cal-slot-off:hover { cursor: not-allowed; background: transparent; }
+            .cal-lane-head-row { display: grid; border-bottom: 1px solid var(--border-color); background: var(--card-bg); }
+            .cal-lane-head-spacer { border-right: 1px solid var(--border-color); }
+            .cal-lane-head-group { display: flex; border-right: 1px solid var(--border-color); }
+            .cal-lane-head-group:last-child { border-right: none; }
+            .cal-lane-head { flex: 1 1 0; min-width: 0; padding: 3px 4px; font-size: 10px; font-weight: 600; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .cal-lane-head.off { opacity: .4; }
+            .cal-appt-time { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+            /* Practitioner checkbox dropdown */
+            .cal-prac-dd { position: relative; }
+            .cal-prac-panel { position: absolute; top: calc(100% + 4px); left: 0; z-index: 1050; width: 300px; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.15); padding: 8px; }
+            .cal-prac-search { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+            .cal-prac-list { max-height: 300px; overflow-y: auto; }
+            .cal-prac-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; margin: 0; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: normal; }
+            .cal-prac-row:hover { background: var(--subtle-bg); }
+            .cal-prac-row input { margin: 0; flex: none; }
+            .cal-prac-swatch { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--border-color); flex: none; }
+            .cal-prac-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-color); }
+            .cal-prac-dept { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+            .cal-prac-msg { padding: 14px 6px; text-align: center; font-size: 12px; color: var(--text-muted); }
+            .cal-prac-foot { display: flex; justify-content: space-between; align-items: center; padding: 6px 6px 0; margin-top: 6px; border-top: 1px solid var(--border-color); font-size: 11px; color: var(--text-muted); }
             /* Appointments are drawn in an overlay on top of the slot grid so each block
                can be sized to its real duration. The layer itself ignores clicks so empty
                space still falls through to the slot underneath (which opens the booker). */
@@ -155,8 +178,18 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 </div>
                 <div class="cal-filter-sep"></div>
                 <div class="cal-filter-group">
-                    <span class="cal-filter-lbl">Practitioners <span class="cal-filter-required-lbl">(pick one or more)</span></span>
-                    <div id="wrap-practitioner" class="cal-filter-link-wrap"></div>
+                    <span class="cal-filter-lbl">Practitioners</span>
+                    <div class="cal-prac-dd" id="prac-dd">
+                        <button type="button" class="cal-nav-btn" id="prac-dd-btn">Select practitioners &#9662;</button>
+                        <div class="cal-prac-panel" id="prac-panel" style="display:none">
+                            <input type="text" class="cal-filter-input cal-prac-search" id="prac-search" placeholder="Search practitioners…" autocomplete="off">
+                            <div class="cal-prac-list" id="prac-list"></div>
+                            <div class="cal-prac-foot">
+                                <span id="prac-count">0 selected</span>
+                                <a href="#" id="prac-clear-sel">Clear selection</a>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="cal-chips" id="prac-chips"></div>
                 <button class="cal-nav-btn" id="btn-apply"
@@ -189,29 +222,10 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         </div>
     `);
 
-    // ── Practitioner picker: a Link field that ADDS to a list of chips ──
-    var practitioner_field = frappe.ui.form.make_control({
-        df: {
-            fieldtype: 'Link',
-            fieldname: 'practitioner_filter',
-            options:   'Healthcare Practitioner',
-            placeholder: 'Add a practitioner…'
-        },
-        parent: document.getElementById('wrap-practitioner'),
-        render_input: true
-    });
-    practitioner_field.refresh();
-    practitioner_field.$input.on('change', function() {
-        var val = practitioner_field.get_value();
-        if (val) add_practitioner(val);
-    });
-
-    // Chips: click × to remove a practitioner.
-    document.getElementById('prac-chips').addEventListener('click', function(e) {
-        var x = e.target.closest('.cal-chip-x');
-        if (!x) return;
-        remove_practitioner(x.getAttribute('data-id'));
-    });
+    // ── Practitioner picker: dropdown with one checkbox per practitioner ──
+    var all_practitioners = null;   // [{id, name, department}] once loaded
+    var prac_list_error = false;
+    var reload_timer = null;
 
     function selected_ids() { return selected.map(function(p) { return p.id; }); }
 
@@ -233,39 +247,117 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         color_idx_by_prac[id] = i % PALETTE.length;
     }
 
-    function clear_practitioner_input() {
-        practitioner_field.set_value('');
-        practitioner_field.$input.val('');
-    }
+    function by_name(a, b) { return String(a.name).localeCompare(String(b.name)); }
 
-    function add_practitioner(id) {
-        if (selected.some(function(p) { return p.id === id; })) {
-            clear_practitioner_input();
-            return;
+    // Loads every (non-disabled) Healthcare Practitioner for the checkbox list.
+    function load_practitioner_list() {
+        all_practitioners = null;
+        prac_list_error = false;
+        render_prac_list();
+
+        function done(rows) {
+            all_practitioners = (rows || [])
+                .filter(function(r) { return r.status !== 'Disabled'; })
+                .map(function(r) {
+                    return { id: r.name, name: r.practitioner_name || r.name, department: r.department || '' };
+                })
+                .sort(by_name);
+            render_prac_list();
         }
-        if (selected.length >= PALETTE.length) {
-            clear_practitioner_input();
-            frappe.msgprint({
-                message: 'You can compare up to ' + PALETTE.length + ' practitioners at once.',
-                indicator: 'orange'
-            });
-            return;
-        }
-        // Also validates the value (the Link control can fire change on partial text).
-        frappe.db.get_value('Healthcare Practitioner', id, ['name', 'practitioner_name']).then(function(r) {
-            var m = r && r.message;
-            if (!m || !m.name) { clear_practitioner_input(); return; }
-            if (selected.some(function(p) { return p.id === m.name; })) { clear_practitioner_input(); return; }
-            selected.push({ id: m.name, name: m.practitioner_name || m.name });
-            assign_color(m.name);
-            clear_practitioner_input();
-            on_selection_changed();
+        function fail() { prac_list_error = true; render_prac_list(); }
+
+        frappe.call({
+            method: 'frappe.client.get_list',
+            args: {
+                doctype: 'Healthcare Practitioner',
+                fields: ['name', 'practitioner_name', 'department', 'status'],
+                limit_page_length: 1000,
+                order_by: 'practitioner_name asc'
+            },
+            silent: true,
+            callback: function(r) { done(r.message); },
+            error: function() {
+                // `status` may not exist on every version — retry without it.
+                frappe.call({
+                    method: 'frappe.client.get_list',
+                    args: {
+                        doctype: 'Healthcare Practitioner',
+                        fields: ['name', 'practitioner_name', 'department'],
+                        limit_page_length: 1000,
+                        order_by: 'practitioner_name asc'
+                    },
+                    callback: function(r) { done(r.message); },
+                    error: fail
+                });
+            }
         });
     }
 
-    function remove_practitioner(id) {
-        selected = selected.filter(function(p) { return p.id !== id; });
-        delete color_idx_by_prac[id];
+    function render_prac_list() {
+        var box = document.getElementById('prac-list');
+        if (!box) return;
+        var cnt = document.getElementById('prac-count');
+        if (cnt) cnt.textContent = selected.length + ' selected';
+
+        if (prac_list_error) {
+            box.innerHTML = '<div class="cal-prac-msg">Couldn\'t load practitioners. <a href="#" id="prac-retry">Retry</a></div>';
+            return;
+        }
+        if (all_practitioners === null) {
+            box.innerHTML = '<div class="cal-prac-msg">Loading…</div>';
+            return;
+        }
+
+        var q = ((document.getElementById('prac-search') || {}).value || '').trim().toLowerCase();
+        var rows = all_practitioners.filter(function(p) {
+            return !q || (p.name + ' ' + p.id + ' ' + p.department).toLowerCase().indexOf(q) !== -1;
+        });
+        if (!rows.length) {
+            box.innerHTML = '<div class="cal-prac-msg">No practitioners found.</div>';
+            return;
+        }
+
+        var sel = {};
+        selected.forEach(function(p) { sel[p.id] = true; });
+        var scroll = box.scrollTop;
+        box.innerHTML = rows.map(function(p) {
+            var on = !!sel[p.id];
+            return '<label class="cal-prac-row">'
+                + '<input type="checkbox" class="cal-prac-cb" data-id="' + esc(p.id) + '"' + (on ? ' checked' : '') + '>'
+                + '<span class="cal-prac-swatch"' + (on ? ' style="background:' + color_for(p.id).bd + ';border-color:' + color_for(p.id).bd + '"' : '') + '></span>'
+                + '<span class="cal-prac-name">' + esc(p.name) + '</span>'
+                + (p.department ? '<span class="cal-prac-dept">' + esc(p.department) + '</span>' : '')
+                + '</label>';
+        }).join('');
+        box.scrollTop = scroll;
+    }
+
+    // Tick / untick one practitioner. Returns false if the tick was refused (limit).
+    function set_practitioner(id, on) {
+        var exists = selected.some(function(p) { return p.id === id; });
+        if (on && !exists) {
+            if (selected.length >= PALETTE.length) {
+                frappe.msgprint({
+                    message: 'You can compare up to ' + PALETTE.length + ' practitioners at once.',
+                    indicator: 'orange'
+                });
+                return false;
+            }
+            var rec = (all_practitioners || []).find(function(p) { return p.id === id; });
+            selected.push({ id: id, name: rec ? rec.name : id });
+            assign_color(id);
+            selected.sort(by_name); // lane order = alphabetical
+        } else if (!on && exists) {
+            selected = selected.filter(function(p) { return p.id !== id; });
+            delete color_idx_by_prac[id];
+        }
+        on_selection_changed();
+        return true;
+    }
+
+    function clear_selection() {
+        selected = [];
+        color_idx_by_prac = {};
         on_selection_changed();
     }
 
@@ -281,15 +373,75 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         }).join('');
     }
 
+    function update_dd_label() {
+        var btn = document.getElementById('prac-dd-btn');
+        btn.innerHTML = (selected.length ? selected.length + ' selected' : 'Select practitioners') + ' &#9662;';
+    }
+
     function on_selection_changed() {
         render_chips();
+        update_dd_label();
+        render_prac_list();
+        clearTimeout(reload_timer);
         if (!selected.length) {
             show_gate_message();
             return;
         }
         document.getElementById('btn-new-appt').disabled = true; // re-enabled once duty data is known
-        load_schedule();
+        // Small delay so ticking several boxes in a row triggers only one reload.
+        reload_timer = setTimeout(load_schedule, 300);
     }
+
+    // ── Dropdown open/close + events ──
+    var prac_panel = document.getElementById('prac-panel');
+
+    function toggle_prac_panel(open) {
+        var show = (open === undefined) ? prac_panel.style.display === 'none' : open;
+        prac_panel.style.display = show ? 'block' : 'none';
+        if (show) {
+            render_prac_list();
+            var s = document.getElementById('prac-search');
+            if (s) s.focus();
+        }
+    }
+
+    document.getElementById('prac-dd-btn').addEventListener('click', function(e) {
+        e.stopPropagation();
+        toggle_prac_panel();
+    });
+    document.getElementById('prac-search').addEventListener('input', render_prac_list);
+    document.getElementById('prac-clear-sel').addEventListener('click', function(e) {
+        e.preventDefault();
+        clear_selection();
+    });
+    document.getElementById('prac-list').addEventListener('change', function(e) {
+        var cb = e.target.closest('.cal-prac-cb');
+        if (!cb) return;
+        if (!set_practitioner(cb.getAttribute('data-id'), cb.checked)) cb.checked = false;
+    });
+    document.getElementById('prac-list').addEventListener('click', function(e) {
+        if (e.target.id === 'prac-retry') {
+            e.preventDefault();
+            load_practitioner_list();
+        }
+    });
+    // Click outside / Esc closes the dropdown.
+    document.addEventListener('click', function(e) {
+        if (prac_panel.style.display === 'none') return;
+        if (!e.target.isConnected) return; // target was re-rendered during the click
+        if (e.target.closest('#prac-dd')) return;
+        toggle_prac_panel(false);
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && prac_panel.style.display !== 'none') toggle_prac_panel(false);
+    });
+
+    // Chips: click × to remove a practitioner.
+    document.getElementById('prac-chips').addEventListener('click', function(e) {
+        var x = e.target.closest('.cal-chip-x');
+        if (!x) return;
+        set_practitioner(x.getAttribute('data-id'), false);
+    });
 
     // ── Wire date inputs ───────────────────────────────────────
     document.getElementById('filter-from').addEventListener('change', function() {
@@ -314,10 +466,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         to_date   = (view_mode === 'day') ? from_date : frappe.datetime.add_days(from_date, 6);
         document.getElementById('filter-from').value = from_date;
         document.getElementById('filter-to').value   = to_date;
-        selected = [];
-        color_idx_by_prac = {};
-        clear_practitioner_input();
-        on_selection_changed();
+        clear_selection();
     });
 
     // ── Day / Week view toggle ───────────────────────────────────
@@ -769,13 +918,12 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     var dates = get_week_dates(f, t);
                     var failed = [];     // duty lookup failed
                     var no_duty = [];    // no Duty Assignment row in the visible range
-                    var any_data = false;
 
                     ids.forEach(function(id) {
                         var m = duty_cache[id];
                         if (m === null || m === undefined) { failed.push(id); return; }
                         var has = dates.some(function(d) { return !!m[d]; });
-                        if (has) any_data = true; else no_duty.push(id);
+                        if (!has) no_duty.push(id);
                     });
 
                     if (failed.length === ids.length) {
@@ -788,17 +936,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         return;
                     }
 
-                    if (!any_data) {
-                        wrap.innerHTML =
-                            '<div class="cal-empty">No Duty Assignment found for the selected practitioner(s) in the selected date range.<br>'
-                            + 'Add a Duty Assignment (with a Branch set for each working date) to make them bookable.</div>';
-                        document.getElementById('btn-new-appt').disabled = true;
-                        return;
-                    }
-
                     var notice = '';
                     if (no_duty.length) {
-                        notice += 'No Duty Assignment in this date range (not bookable): '
+                        notice += 'No Duty Assignment for the selected date(s), so not bookable: '
                             + no_duty.map(function(id) { return esc(name_of(id)); }).join(', ') + '. ';
                     }
                     if (failed.length) {
@@ -834,17 +974,29 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Calendar grid ──────────────────────────────────────────
+    // Each day is split into one LANE per selected practitioner (alphabetical).
+    // Clicking a slot in a lane books THAT practitioner. A lane is shaded brown
+    // on days when that practitioner is not working (per Duty Assignment).
+    var LANE_MIN_PX = 90;
+
     function render_calendar(appts, wrap, f, t, notice) {
         var dates    = get_week_dates(f, t);
         var today    = frappe.datetime.get_today();
-        var grid_tpl = '60px ' + dates.map(function() { return '1fr'; }).join(' ');
-        var multi    = selected.length > 1;
+        var ids      = selected_ids();
+        var lanes    = Math.max(ids.length, 1);
+        var grid_tpl = '60px ' + dates.map(function() { return 'minmax(0,1fr)'; }).join(' ');
+        var min_w    = 60 + dates.length * Math.max(lanes * LANE_MIN_PX, 110);
 
-        // Per date: the selected practitioners who work that day.
-        var day_working = {};
-        dates.forEach(function(d) { day_working[d] = working_practitioners(d); });
+        // working[practitioner][date] -> is that doctor on duty that day
+        var working = {};
+        ids.forEach(function(id) {
+            working[id] = {};
+            dates.forEach(function(d) { working[id][d] = is_day_working(id, d); });
+        });
 
-        var by_date = {};
+        // Appointments bucketed per lane ("date|practitioner"); those completely
+        // outside the 08:00–17:30 window go in the all-day row.
+        var by_lane = {};
         var allday  = {};
         appts.forEach(function(a) {
             var d   = a.appointment_date;
@@ -852,35 +1004,49 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             if (!geo) {
                 if (!allday[d]) allday[d] = [];
                 allday[d].push(a);
-            } else {
-                if (!by_date[d]) by_date[d] = [];
-                by_date[d].push({ a: a, geo: geo });
+                return;
             }
+            var k = d + '|' + a.practitioner;
+            if (!by_lane[k]) by_lane[k] = [];
+            by_lane[k].push({ a: a, geo: geo });
         });
-        Object.keys(by_date).forEach(function(d) { layout_overlaps(by_date[d]); });
+        // Overlap layout now only matters inside one lane (double bookings).
+        Object.keys(by_lane).forEach(function(k) { layout_overlaps(by_lane[k]); });
 
         var html = '';
         if (notice) html += '<div class="cal-notice">' + notice + '</div>';
-        html += '<div class="cal-grid">';
+        html += '<div class="cal-grid" style="min-width:' + min_w + 'px">';
 
-        // Header: a coloured dot per working doctor, or "not working" if none.
+        // Day header
         html += '<div class="cal-head-row" style="grid-template-columns:' + grid_tpl + '">';
         html += '<div class="cal-head-cell"></div>';
         dates.forEach(function(d) {
-            var w = day_working[d];
-            var dots = w.map(function(id) {
-                return '<span class="cal-dot" style="background:' + color_for(id).bd + '"></span>';
-            }).join('');
-            var tip = w.length ? 'Working: ' + w.map(name_of).join(', ') : 'Nobody selected is working';
-            html += '<div class="cal-head-cell' + (d === today ? ' today' : '') + '" title="' + esc(tip) + '">'
+            var anyone = ids.some(function(id) { return working[id][d]; });
+            html += '<div class="cal-head-cell' + (d === today ? ' today' : '') + '">'
                 + fmt_date_header(d)
-                + (w.length ? '<span class="cal-head-dots">' + dots + '</span>'
-                            : '<span class="cal-head-off">not working</span>')
+                + (anyone ? '' : '<span class="cal-head-off">not working</span>')
                 + '</div>';
         });
         html += '</div>';
 
-        // Appointments completely outside the 08:00–17:30 window.
+        // Doctor sub-header: one coloured label per lane
+        html += '<div class="cal-lane-head-row" style="grid-template-columns:' + grid_tpl + '">';
+        html += '<div class="cal-lane-head-spacer"></div>';
+        dates.forEach(function(d) {
+            html += '<div class="cal-lane-head-group">';
+            ids.forEach(function(id) {
+                var c   = color_for(id);
+                var off = !working[id][d];
+                html += '<div class="cal-lane-head' + (off ? ' off' : '') + '"'
+                    + ' style="background:' + c.bg + ';color:' + c.fg + ';border-bottom:2px solid ' + c.bd + '"'
+                    + ' title="' + esc(name_of(id) + (off ? ' \u2014 not working' : '')) + '">'
+                    + esc(name_of(id)) + '</div>';
+            });
+            html += '</div>';
+        });
+        html += '</div>';
+
+        // All-day row (appointments outside the displayed window)
         html += '<div class="cal-allday-row" style="grid-template-columns:' + grid_tpl + '">';
         html += '<div class="cal-allday-lbl">all-day</div>';
         dates.forEach(function(d) {
@@ -904,6 +1070,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         });
         html += '</div>';
 
+        // Body: time ruler + one column per day, each split into lanes
         html += '<div class="cal-body-row" style="display:grid;grid-template-columns:' + grid_tpl + '">';
         html += '<div class="cal-time-col">';
         TIME_SLOTS.forEach(function(ts) {
@@ -912,55 +1079,59 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         html += '</div>';
 
         dates.forEach(function(d) {
-            var anyone = day_working[d].length > 0;
-            html += '<div class="cal-day-col' + (d === today ? ' today' : '') + (anyone ? '' : ' cal-day-unavailable') + '">';
+            html += '<div class="cal-day-col' + (d === today ? ' today' : '') + '">';
 
-            TIME_SLOTS.forEach(function(ts, si) {
-                html += '<div class="cal-day-slot' + (anyone ? '' : ' cal-slot-off') + '"'
-                    + ' data-date="' + d + '" data-slot="' + si + '"></div>';
+            ids.forEach(function(id) {
+                var ok = working[id][d];
+                html += '<div class="cal-lane' + (ok ? '' : ' cal-lane-off') + '">';
+
+                TIME_SLOTS.forEach(function(ts, si) {
+                    html += '<div class="cal-day-slot' + (ok ? '' : ' cal-slot-off') + '"'
+                        + ' data-date="' + d + '" data-prac="' + esc(id) + '" data-slot="' + si + '"></div>';
+                });
+
+                html += '<div class="cal-appt-layer">';
+                (by_lane[d + '|' + id] || []).forEach(function(it) {
+                    var a     = it.a;
+                    var geo   = it.geo;
+                    var cols  = it.cols || 1;
+                    var col   = it.col || 0;
+                    var w     = 100 / cols;
+                    var who   = a.patient_name || a.patient || '\u2014';
+                    var doc   = a.practitioner_name || a.practitioner || '';
+                    var range = appt_range_label(geo);
+                    var mins  = appt_duration(a);
+                    var c     = color_for(a.practitioner);
+                    var meta  = a.appointment_type || a.service_unit || '';
+                    var status_class = (a.status || 'Open').replace(' ', '');
+                    var tick = (a.status === 'Closed') ? ' \u2713' : '';
+
+                    html += '<div class="cal-appt ' + status_class
+                        + (geo.height < SHORT_APPT_PX ? ' is-short' : '')
+                        + (geo.clipped_top ? ' clipped-top' : '')
+                        + (geo.clipped_bottom ? ' clipped-bottom' : '')
+                        + '" data-name="' + esc(a.name) + '"'
+                        + ' data-top="' + geo.top.toFixed(2) + '" data-height="' + geo.height.toFixed(2) + '"'
+                        + ' title="' + esc(who + ' \u2022 ' + doc + ' \u2022 ' + range + ' (' + mins + ' min)'
+                            + (a.appointment_type ? ' \u2022 ' + a.appointment_type : '')
+                            + (a.status ? ' \u2022 ' + a.status : '')) + '"'
+                        + ' style="top:' + geo.top.toFixed(1) + 'px;'
+                        + 'height:' + geo.height.toFixed(1) + 'px;'
+                        + 'left:calc(' + (col * w).toFixed(4) + '% + 2px);'
+                        + 'width:calc(' + w.toFixed(4) + '% - 4px);'
+                        + 'background:' + c.bg + ';color:' + c.fg + ';border-left:3px solid ' + c.bd + ';">'
+                        + '<span class="cal-appt-time">' + range + tick + '</span>'
+                        + '<span class="cal-appt-name">' + esc(who) + '</span>'
+                        + (geo.height >= TALL_APPT_PX && meta
+                            ? '<span class="cal-appt-meta">' + esc(meta) + '</span>' : '')
+                        + '</div>';
+                });
+                html += '</div>'; // appt layer
+
+                html += '</div>'; // lane
             });
 
-            html += '<div class="cal-appt-layer">';
-            (by_date[d] || []).forEach(function(it) {
-                var a     = it.a;
-                var geo   = it.geo;
-                var cols  = it.cols || 1;
-                var col   = it.col || 0;
-                var w     = 100 / cols;
-                var who   = a.patient_name || a.patient || '\u2014';
-                var doc   = a.practitioner_name || a.practitioner || '';
-                var range = appt_range_label(geo);
-                var mins  = appt_duration(a);
-                var c     = color_for(a.practitioner);
-                var meta  = multi
-                    ? [doc, a.appointment_type].filter(Boolean).join(' \u2022 ')
-                    : (a.appointment_type || a.service_unit || '');
-                var status_class = (a.status || 'Open').replace(' ', '');
-                var tick = (a.status === 'Closed') ? ' \u2713' : '';
-
-                html += '<div class="cal-appt ' + status_class
-                    + (geo.height < SHORT_APPT_PX ? ' is-short' : '')
-                    + (geo.clipped_top ? ' clipped-top' : '')
-                    + (geo.clipped_bottom ? ' clipped-bottom' : '')
-                    + '" data-name="' + esc(a.name) + '"'
-                    + ' data-top="' + geo.top.toFixed(2) + '" data-height="' + geo.height.toFixed(2) + '"'
-                    + ' title="' + esc(who + ' \u2022 ' + doc + ' \u2022 ' + range + ' (' + mins + ' min)'
-                        + (a.appointment_type ? ' \u2022 ' + a.appointment_type : '')
-                        + (a.status ? ' \u2022 ' + a.status : '')) + '"'
-                    + ' style="top:' + geo.top.toFixed(1) + 'px;'
-                    + 'height:' + geo.height.toFixed(1) + 'px;'
-                    + 'left:calc(' + (col * w).toFixed(4) + '% + 2px);'
-                    + 'width:calc(' + w.toFixed(4) + '% - 4px);'
-                    + 'background:' + c.bg + ';color:' + c.fg + ';border-left:3px solid ' + c.bd + ';">'
-                    + '<span class="cal-appt-time">' + range + tick + '</span>'
-                    + '<span class="cal-appt-name">' + esc(who) + '</span>'
-                    + (geo.height >= TALL_APPT_PX && meta
-                        ? '<span class="cal-appt-meta">' + esc(meta) + '</span>' : '')
-                    + '</div>';
-            });
-            html += '</div>';
-
-            html += '</div>';
+            html += '</div>'; // day col
         });
 
         html += '</div></div>';
@@ -988,27 +1159,22 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             });
         });
 
-        // Click an empty slot → open the availability dialog, prefilled with the
-        // first selected practitioner who works that day (changeable in the dialog).
+        // Click an empty slot → availability dialog for the practitioner of that lane
         wrap.querySelectorAll('.cal-day-slot').forEach(function(el) {
-            el.addEventListener('click', function(e) {
-                if (e.target.closest('.cal-appt')) return;
-                var d = el.dataset.date;
-                var working = day_working[d] || [];
+            el.addEventListener('click', function() {
+                var d    = el.dataset.date;
+                var prac = el.dataset.prac;
 
-                if (!working.length) {
-                    var who = selected.length === 1
-                        ? name_of(selected[0].id) + ' is'
-                        : 'None of the selected practitioners is';
+                if (!is_day_working(prac, d)) {
                     frappe.msgprint({
                         title: 'Not Available',
-                        message: who + ' scheduled to work on ' + frappe.datetime.str_to_user(d) + '.',
+                        message: name_of(prac) + ' is not scheduled to work on ' + frappe.datetime.str_to_user(d) + '.',
                         indicator: 'orange'
                     });
                     return;
                 }
 
-                open_slot_picker(d, working[0]);
+                open_slot_picker(d, prac);
             });
         });
     }
@@ -1375,5 +1541,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 
     // ── Initial state: wait for practitioners to be picked ─────
     render_chips();
+    update_dd_label();
     show_gate_message();
+    load_practitioner_list();
 };
