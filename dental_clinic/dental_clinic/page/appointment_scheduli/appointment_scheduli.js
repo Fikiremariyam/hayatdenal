@@ -39,6 +39,10 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     // Used to ignore stale responses when the user changes filters mid-load.
     var active_load_key = '';
 
+    // The appointments the calendar is currently drawing. The slot picker also
+    // treats these as booked, so it can never offer a time that is visibly taken.
+    var loaded_appts = [];
+
     // ── Styles ─────────────────────────────────────────────────
     if (!document.getElementById('cal-sched-styles')) {
         var style = document.createElement('style');
@@ -772,11 +776,16 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     // Healthcare returns ALL of the schedule's slots and leaves it to its
                     // own client to grey out booked ones, so drop here any slot that
                     // overlaps one of this practitioner's existing appointments.
-                    fetch_booked_intervals(practitioner, date, function(booked) {
-                        if (booked === null) { callback(null); return; } // can't verify -> fail closed
-                        callback(slots.filter(function(s) {
+                    fetch_booked_intervals(practitioner, date, function(fresh) {
+                        if (fresh === null) { callback(null); return; } // can't verify -> fail closed
+                        // Fresh server query + whatever the calendar is drawing right now.
+                        var booked = fresh.concat(local_booked_intervals(practitioner, date));
+                        var free = slots.filter(function(s) {
                             return !overlaps_any(s.mins, Number(s.duration) || DEFAULT_DURATION, booked);
-                        }));
+                        });
+                        console.log('slot filter', { practitioner: practitioner, date: date,
+                            booked: booked, slots_before: slots.length, slots_after: free.length });
+                        callback(free);
                     });
                 },
                 error: function(r) {
@@ -801,6 +810,13 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     function overlaps_any(start, duration, intervals) {
         var end = start + duration;
         return intervals.some(function(b) { return start < b.end && b.start < end; });
+    }
+
+    // Booked intervals taken from the appointments already loaded for the calendar.
+    function local_booked_intervals(practitioner, date) {
+        return appts_to_intervals((loaded_appts || []).filter(function(a) {
+            return a.practitioner === practitioner && a.appointment_date === date;
+        }));
     }
 
     // The practitioner's non-cancelled appointments on a date, as intervals.
@@ -910,6 +926,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             callback: function(r) {
                 if (active_load_key !== key) return; // stale
                 var appts = r.message || [];
+                loaded_appts = appts;
                 render_stats(appts, stats);
 
                 fetch_duty_for_many(ids, function() {
