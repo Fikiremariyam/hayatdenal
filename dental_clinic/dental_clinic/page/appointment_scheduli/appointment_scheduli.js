@@ -155,6 +155,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-modal-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border-color); font-size: 13px; }
             .cal-modal-row .k { color: var(--text-muted); }
             .cal-modal-row .v { font-weight: 500; color: var(--text-color); }
+            .cal-modal-desc { padding: 8px 0; border-bottom: 1px solid var(--border-color); font-size: 13px; }
+            .cal-modal-desc .k { color: var(--text-muted); margin-bottom: 4px; }
+            .cal-modal-desc .v { font-weight: 500; color: var(--text-color); white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow-y: auto; }
             .cal-modal-actions { margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end; }
             .btn-cal-primary { background: #1a2340; color: #fff; border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
             .btn-cal-ghost { background: var(--subtle-bg); color: var(--text-color); border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
@@ -913,7 +916,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     'name','status','appointment_type','appointment_for',
                     'practitioner','practitioner_name','department',
                     'service_unit','appointment_date','appointment_time',
-                    'patient','patient_name','company','duration'
+                    'patient','patient_name','company','duration','custom_appt_description'
                 ],
                 filters: [
                     ['appointment_date', '>=', f],
@@ -1392,12 +1395,21 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     default: prefill.duration || 15
                 },
                 { fieldtype: 'Section Break' },
+                {
+                    fieldtype: 'Small Text', fieldname: 'custom_appt_description', label: 'Description',
+                    reqd: 1
+                },
                 { fieldtype: 'HTML', fieldname: 'availability_status' }
             ],
             secondary_action_label: 'Check Availability',
             secondary_action: function() { run_availability_check(true); },
             primary_action_label: 'Book',
             primary_action: function(values) {
+                // Mandatory — also reject a description that is only spaces.
+                if (!(values.custom_appt_description || '').trim()) {
+                    frappe.msgprint({ message: 'Please enter a description for the appointment.', indicator: 'orange' });
+                    return;
+                }
                 run_availability_check(false, function(is_available) {
                     if (!is_available) return;
                     do_insert(values);
@@ -1464,6 +1476,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         service_unit: values.service_unit,
                         department: values.department,
                         appointment_type: values.appointment_type,
+                        custom_appt_description: values.custom_appt_description.trim(),
                         company: frappe.defaults.get_default('company')
                     }
                 },
@@ -1531,6 +1544,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             modal_row('Practitioner', esc(a.practitioner_name || a.practitioner || '—')) +
             modal_row('Department',   esc(a.department   || '—')) +
             modal_row('Service Unit', esc(a.service_unit || '—')) +
+            '<div class="cal-modal-desc"><div class="k">Description</div>'
+                + '<div class="v">' + esc(a.custom_appt_description || '—') + '</div></div>' +
             '<div class="cal-modal-actions">' +
             '<button class="btn-cal-ghost" id="mc">Close</button>' +
             '<button class="btn-cal-primary" id="mo">Open Record</button>' +
