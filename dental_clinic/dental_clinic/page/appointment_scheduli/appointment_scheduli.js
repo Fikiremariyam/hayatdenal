@@ -28,6 +28,29 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     ];
     var color_idx_by_prac = {};
 
+    // Colors for the workflow-state action buttons in the detail modal. Each
+    // target state gets a consistent color (picked by hashing its name), so
+    // e.g. "Move to In Clinic" always looks the same regardless of what else
+    // is on screen — distinct from the practitioner PALETTE above, which
+    // colors lanes/appointments by doctor, not by status.
+    var WF_BUTTON_COLORS = [
+        { bg: '#185FA5', fg: '#fff' }, // blue
+        { bg: '#2E8B57', fg: '#fff' }, // sea green
+        { bg: '#B8860B', fg: '#fff' }, // dark goldenrod
+        { bg: '#8E24AA', fg: '#fff' }, // purple
+        { bg: '#D9772B', fg: '#fff' }, // orange
+        { bg: '#C62828', fg: '#fff' }, // red
+        { bg: '#00838F', fg: '#fff' }, // teal
+        { bg: '#5D4037', fg: '#fff' }  // brown
+    ];
+
+    function color_for_workflow_state(state) {
+        var s = String(state || '');
+        var hash = 0;
+        for (var i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+        return WF_BUTTON_COLORS[hash % WF_BUTTON_COLORS.length];
+    }
+
     // Duty Assignment data per practitioner, filled by fetch_practitioner_duty():
     //   duty_cache[practitioner] = null  -> lookup failed -> fail CLOSED
     //   duty_cache[practitioner] = {}    -> no Duty Assignment rows at all -> fail CLOSED
@@ -161,7 +184,13 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-modal-actions { margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
             .btn-cal-primary { background: #1a2340; color: #fff; border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
             .btn-cal-ghost { background: var(--subtle-bg); color: var(--text-color); border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
-            .btn-cal-state { background: #185FA5; color: #fff; border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
+            .btn-cal-state { border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
+            .btn-cal-state:disabled { opacity: .55; cursor: not-allowed; }
+            /* Small badge on each appointment block showing the first letter of its
+               current workflow state, so it's readable without opening the card. */
+            .cal-appt-wf-badge { position: absolute; top: 1px; right: 2px; width: 14px; height: 14px; line-height: 14px; text-align: center; border-radius: 50%; font-size: 9px; font-weight: 700; background: rgba(255,255,255,.85); color: inherit; box-shadow: 0 0 0 1px rgba(0,0,0,.18) inset; pointer-events: none; }
+            .cal-appt.is-short .cal-appt-wf-badge { position: static; display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; line-height: 12px; font-size: 8px; margin-left: 4px; vertical-align: middle; }
+            .cal-allday-wf-badge { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; line-height: 12px; border-radius: 50%; font-size: 8px; font-weight: 700; background: rgba(255,255,255,.85); box-shadow: 0 0 0 1px rgba(0,0,0,.18) inset; margin-right: 4px; vertical-align: middle; }
             .cal-avail-box { font-size: 12px; padding: 8px 10px; border-radius: 6px; }
             .cal-avail-ok { background: #E3F5EE; color: #085041; }
             .cal-avail-bad { background: #FBE7E7; color: #791F1F; }
@@ -1079,8 +1108,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         ? format_time_label(time_str_to_minutes(a.appointment_time)) + ' \u00b7 '
                         : '';
                     var who = a.patient_name || a.patient || '';
+                    var wf_letter = (a.workflow_state || '').trim().charAt(0).toUpperCase();
                     html += '<div class="cal-allday-block" style="background:' + c.bg + ';color:' + c.fg + ';border-left:3px solid ' + c.bd + '"'
-                        + ' title="' + esc(t_lbl + who + ' \u2022 ' + (a.practitioner_name || a.practitioner || '')) + '">'
+                        + ' title="' + esc(t_lbl + who + ' \u2022 ' + (a.practitioner_name || a.practitioner || '')
+                            + (a.workflow_state ? ' \u2022 ' + a.workflow_state : '')) + '">'
+                        + (wf_letter ? '<span class="cal-allday-wf-badge" title="' + esc(a.workflow_state) + '">' + esc(wf_letter) + '</span>' : '')
                         + esc(t_lbl)
                         + esc(a.patient_name || a.patient || '\u2014')
                         + (a.service_unit ? ' \u2022 ' + esc(a.service_unit) : '')
@@ -1126,6 +1158,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     var meta  = a.appointment_type || a.service_unit || '';
                     var status_class = (a.status || 'Open').replace(' ', '');
                     var tick = (a.status === 'Closed') ? ' \u2713' : '';
+                    var wf_letter = (a.workflow_state || '').trim().charAt(0).toUpperCase();
 
                     html += '<div class="cal-appt ' + status_class
                         + (geo.height < SHORT_APPT_PX ? ' is-short' : '')
@@ -1135,12 +1168,16 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         + ' data-top="' + geo.top.toFixed(2) + '" data-height="' + geo.height.toFixed(2) + '"'
                         + ' title="' + esc(who + ' \u2022 ' + doc + ' \u2022 ' + range + ' (' + mins + ' min)'
                             + (a.appointment_type ? ' \u2022 ' + a.appointment_type : '')
-                            + (a.status ? ' \u2022 ' + a.status : '')) + '"'
+                            + (a.status ? ' \u2022 ' + a.status : '')
+                            + (a.workflow_state ? ' \u2022 ' + a.workflow_state : '')) + '"'
                         + ' style="top:' + geo.top.toFixed(1) + 'px;'
                         + 'height:' + geo.height.toFixed(1) + 'px;'
                         + 'left:calc(' + (col * w).toFixed(4) + '% + 2px);'
                         + 'width:calc(' + w.toFixed(4) + '% - 4px);'
                         + 'background:' + c.bg + ';color:' + c.fg + ';border-left:3px solid ' + c.bd + ';">'
+                        + (wf_letter
+                            ? '<span class="cal-appt-wf-badge" title="' + esc(a.workflow_state) + '">' + esc(wf_letter) + '</span>'
+                            : '')
                         + '<span class="cal-appt-time">' + range + tick + '</span>'
                         + '<span class="cal-appt-name">' + esc(who) + '</span>'
                         + (geo.height >= TALL_APPT_PX && meta
@@ -1661,7 +1698,10 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 return;
             }
             box.innerHTML = transitions.map(function(t, i) {
-                return '<button type="button" class="btn-cal-state" data-idx="' + i + '">Move to ' + esc(t.next_state) + '</button>';
+                var wc = color_for_workflow_state(t.next_state);
+                return '<button type="button" class="btn-cal-state" data-idx="' + i + '"'
+                    + ' style="background:' + wc.bg + ';color:' + wc.fg + ';">'
+                    + 'Move to ' + esc(t.next_state) + '</button>';
             }).join('');
             box.querySelectorAll('button[data-idx]').forEach(function(btn) {
                 btn.addEventListener('click', function() {
