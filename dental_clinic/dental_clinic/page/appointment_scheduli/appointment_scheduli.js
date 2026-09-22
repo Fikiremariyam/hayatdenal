@@ -1343,29 +1343,37 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         });
     }
 
-    // ── Workflow state helper ─────────────────────────────────────
-    // Updates the Patient Appointment's workflow_state field via a plain
-    // set_value call (no full-doc save), then invokes cb(new_state) on success.
-    function update_workflow_state(appt_name, new_state, cb) {
+    // ── Workflow engine helpers ───────────────────────────────────
+    // Patient Appointment has a real Frappe Workflow attached (its
+    // workflow_state field starts at a default state such as "Pending" on
+    // insert). Frappe validates every change to that field against the
+    // Workflow document's own transitions, so a raw field write (e.g.
+    // frappe.client.set_value) is rejected with "Workflow State transition
+    // not allowed from X to Y" unless it happens to match one exactly.
+    // Instead we go through the same two calls the desk's own workflow
+    // buttons use: ask which actions are available from the doc's current
+    // state, then apply the one whose next_state is what we want.
+    //
+    // `doc` must be a full document object (doctype + name + current field
+    // values, workflow_state included) — a plain object is fine, it does
+    // not need to be a real frappe.model instance.
+    function get_workflow_transitions(doc, callback) {
         frappe.call({
-            method: 'frappe.client.set_value',
-            args: {
-                doctype: 'Patient Appointment',
-                name: appt_name,
-                fieldname: 'workflow_state',
-                value: new_state
-            },
+            method: 'frappe.model.workflow.get_transitions',
+            args: { doc: JSON.stringify(doc) },
+            callback: function(r) { callback(r.message || []); },
+            error: function() { callback(null); }
+        });
+    }
+
+    function apply_workflow_action(doc, action, callback) {
+        frappe.call({
+            method: 'frappe.model.workflow.apply_workflow',
+            args: { doc: JSON.stringify(doc), action: action },
             freeze: true,
             freeze_message: 'Updating status…',
-            callback: function(r) {
-                if (r.message) {
-                    frappe.show_alert({ message: 'Status updated to ' + new_state, indicator: 'green' });
-                    if (cb) cb(new_state);
-                }
-            },
-            error: function() {
-                frappe.msgprint({ message: 'Could not update the workflow state. Please try again.', indicator: 'red' });
-            }
+            callback: function(r) { callback(r.message || null); },
+            error: function() { callback(null); }
         });
     }
 
@@ -1521,24 +1529,37 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         department: values.department,
                         appointment_type: values.appointment_type,
                         custom_appt_description: values.custom_appt_description.trim(),
-                        company: frappe.defaults.get_default('company'),
-                        // New bookings enter the workflow at "Scheduled"; the modal's
-                        // status buttons move them on to "In Clinic" / "Dis Charged".
-                        workflow_state: 'Scheduled'
+                        company: frappe.defaults.get_default('company')
+                        // workflow_state is left unset: Frappe assigns the workflow's
+                        // own default state (e.g. "Pending") on insert. We move it on
+                        // to "Scheduled" right after, via the workflow engine below,
+                        // rather than writing the field directly.
                     }
                 },
                 freeze: true,
                 freeze_message: 'Booking appointment…',
                 callback: function(r) {
-                    if (r.message) {
-                        var who = values.patient_name ? ' for ' + values.patient_name : '';
+                    if (!r.message) return;
+                    var new_doc = r.message;
+                    var who = values.patient_name ? ' for ' + values.patient_name : '';
+
+                    function done() {
                         frappe.show_alert({
-                            message: 'Appointment ' + r.message.name + ' booked' + who,
+                            message: 'Appointment ' + new_doc.name + ' booked' + who,
                             indicator: 'green'
                         });
                         dialog.hide();
                         load_schedule();
                     }
+
+                    // Best-effort: if no action currently leads to "Scheduled" (e.g.
+                    // permissions, or the workflow is set up differently), the
+                    // appointment still books — it just stays at its default state.
+                    get_workflow_transitions(new_doc, function(transitions) {
+                        var match = (transitions || []).find(function(t) { return t.next_state === 'Scheduled'; });
+                        if (!match) { done(); return; }
+                        apply_workflow_action(new_doc, match.action, function() { done(); });
+                    });
                 },
                 error: function() {
                     dialog.set_df_property('patient', 'read_only', 0);
@@ -1580,21 +1601,14 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Detail modal ───────────────────────────────────────────
-    // Workflow state advances Scheduled -> In Clinic -> Dis Charged. The modal
-    // only offers the single next step available from the appointment's
-    // current state (falling back to "Scheduled" if workflow_state is unset,
-    // e.g. for appointments created before this workflow existed).
-    var WORKFLOW_STEPS = ['Scheduled', 'In Clinic', 'Dis Charged'];
-
-    function next_workflow_state(current) {
-        var idx = WORKFLOW_STEPS.indexOf(current || 'Scheduled');
-        if (idx === -1 || idx === WORKFLOW_STEPS.length - 1) return null;
-        return WORKFLOW_STEPS[idx + 1];
-    }
-
+    // The status buttons are built from whatever the workflow engine says is
+    // actually reachable from the appointment's current state for the current
+    // user (see get_workflow_transitions above) — not a hardcoded list — so
+    // this keeps working whatever the real Patient Appointment workflow turns
+    // out to allow (e.g. Pending → Scheduled → In Clinic → Dis Charged), and
+    // naturally hides an action a role isn't permitted to take.
     function show_modal(a) {
         var c = color_for(a.practitioner);
-        var next_state = next_workflow_state(a.workflow_state);
 
         var bg = document.createElement('div');
         bg.className = 'cal-modal-bg';
@@ -1604,7 +1618,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             modal_row('ID',           '<a href="/app/patient-appointment/' + esc(a.name) + '" target="_blank">' + esc(a.name) + '</a>') +
             modal_row('Patient ID',   esc(a.patient || '—')) +
             modal_row('Status',       esc(a.status || '—')) +
-            modal_row('Workflow State', esc(a.workflow_state || 'Scheduled')) +
+            modal_row('Workflow State', esc(a.workflow_state || '—')) +
             modal_row('Date',         esc(a.appointment_date || '—')) +
             modal_row('Time',         esc(fmt_modal_time(a))) +
             modal_row('Type',         esc(a.appointment_type || '—')) +
@@ -1614,8 +1628,10 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             modal_row('Service Unit', esc(a.service_unit || '—')) +
             '<div class="cal-modal-desc"><div class="k">Description</div>'
                 + '<div class="v">' + esc(a.custom_appt_description || '—') + '</div></div>' +
+            '<div class="cal-modal-actions" id="cal-modal-wf-actions">'
+                + '<span style="font-size:11px;color:var(--text-muted);">Loading status actions…</span>'
+                + '</div>' +
             '<div class="cal-modal-actions">' +
-            (next_state ? '<button class="btn-cal-state" id="mw">Move to ' + esc(next_state) + '</button>' : '') +
             '<button class="btn-cal-ghost" id="mc">Close</button>' +
             '<button class="btn-cal-primary" id="mo">Open Record</button>' +
             '</div></div>';
@@ -1625,18 +1641,47 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             frappe.set_route('Form', 'Patient Appointment', a.name);
             bg.remove();
         };
-        var mw = bg.querySelector('#mw');
-        if (mw) {
-            mw.onclick = function() {
-                update_workflow_state(a.name, next_state, function(new_state) {
-                    a.workflow_state = new_state;
-                    bg.remove();
-                    show_modal(a);      // reopen with the button set refreshed
-                    load_schedule();    // keep the underlying list in sync
-                });
-            };
-        }
         bg.addEventListener('click', function(e) { if (e.target === bg) bg.remove(); });
+
+        load_workflow_action_buttons(a, bg);
+    }
+
+    function load_workflow_action_buttons(a, bg) {
+        var box = bg.querySelector('#cal-modal-wf-actions');
+        var doc = Object.assign({ doctype: 'Patient Appointment' }, a);
+
+        get_workflow_transitions(doc, function(transitions) {
+            if (!bg.isConnected) return; // modal was closed while this was loading
+            if (transitions === null) {
+                box.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">Could not load status actions.</span>';
+                return;
+            }
+            if (!transitions.length) {
+                box.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">No status actions available to you right now.</span>';
+                return;
+            }
+            box.innerHTML = transitions.map(function(t, i) {
+                return '<button type="button" class="btn-cal-state" data-idx="' + i + '">Move to ' + esc(t.next_state) + '</button>';
+            }).join('');
+            box.querySelectorAll('button[data-idx]').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    var t = transitions[parseInt(btn.getAttribute('data-idx'), 10)];
+                    box.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+                    apply_workflow_action(doc, t.action, function(new_doc) {
+                        if (!new_doc) {
+                            frappe.msgprint({ message: 'Could not update the status. Please try again.', indicator: 'red' });
+                            box.querySelectorAll('button').forEach(function(b) { b.disabled = false; });
+                            return;
+                        }
+                        a.workflow_state = new_doc.workflow_state;
+                        frappe.show_alert({ message: 'Status updated to ' + a.workflow_state, indicator: 'green' });
+                        bg.remove();
+                        show_modal(a);   // reopen with the action list refreshed
+                        load_schedule(); // keep the underlying list in sync
+                    });
+                });
+            });
+        });
     }
 
     function fmt_modal_time(a) {

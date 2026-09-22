@@ -41,6 +41,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 /* patient bar */
 #dc-root .dc-pt-bar     { background:var(--panel);border-bottom:1px solid var(--border);padding:9px 16px;display:flex;align-items:center;gap:18px;flex-wrap:wrap; }
 #dc-root .dc-pt-name    { font-size:15px;font-weight:700; }
+#dc-root .dc-pt-fullname { font-size:15px;font-weight:700;color:var(--text); }
 #dc-root .dc-pt-meta    { display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted); }
 #dc-root .dc-pt-meta b  { color:var(--text);font-weight:600; }
 #dc-root .dc-pt-badge   { background:var(--accent-light);color:var(--accent);font-size:10px;font-weight:600;padding:3px 10px;border-radius:20px;letter-spacing:.04em; }
@@ -172,6 +173,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
   <!-- PATIENT BANNER -->
   <div class="dc-pt-bar">
     <div class="dc-pt-name" id="dc-pt-name"></div>
+    <div class="dc-pt-fullname" id="dc-pt-fullname">—</div> 
 
     <div class="dc-doc-name" id="dc-doc-name"> </div>
 
@@ -529,8 +531,10 @@ class PatientInfo {
             this.id       = doc.name;
             this.fullName = doc.patient_name || patientId;
             this.dob      = doc.dob ? frappe.datetime.str_to_user(doc.dob) : '—';
+             _set('dc-pt-fullname', this.fullName);
         } catch (err) {
             console.warn('[DentalChart] PatientInfo.load failed:', err);
+            _set('dc-pt-fullname', patientId);  
         }
     }
 }
@@ -912,6 +916,7 @@ class DentalChart {
 
         /* Patient link – load patient info and latest chart on change */
         this.patient.onChange(async (patientId) => {
+             _set('dc-pt-fullname', 'Loading…');  
             await this.patient.load(patientId);
             this.savedChartName = null;
             this.chartStatus    = 'Planned';
