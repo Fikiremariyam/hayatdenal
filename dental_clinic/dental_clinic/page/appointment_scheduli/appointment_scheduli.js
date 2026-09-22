@@ -158,9 +158,10 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-modal-desc { padding: 8px 0; border-bottom: 1px solid var(--border-color); font-size: 13px; }
             .cal-modal-desc .k { color: var(--text-muted); margin-bottom: 4px; }
             .cal-modal-desc .v { font-weight: 500; color: var(--text-color); white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow-y: auto; }
-            .cal-modal-actions { margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end; }
+            .cal-modal-actions { margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
             .btn-cal-primary { background: #1a2340; color: #fff; border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
             .btn-cal-ghost { background: var(--subtle-bg); color: var(--text-color); border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
+            .btn-cal-state { background: #185FA5; color: #fff; border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
             .cal-avail-box { font-size: 12px; padding: 8px 10px; border-radius: 6px; }
             .cal-avail-ok { background: #E3F5EE; color: #085041; }
             .cal-avail-bad { background: #FBE7E7; color: #791F1F; }
@@ -913,7 +914,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             args: {
                 doctype: 'Patient Appointment',
                 fields: [
-                    'name','status','appointment_type','appointment_for',
+                    'name','status','workflow_state','appointment_type','appointment_for',
                     'practitioner','practitioner_name','department',
                     'service_unit','appointment_date','appointment_time',
                     'patient','patient_name','company','duration','custom_appt_description'
@@ -1342,6 +1343,32 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         });
     }
 
+    // ── Workflow state helper ─────────────────────────────────────
+    // Updates the Patient Appointment's workflow_state field via a plain
+    // set_value call (no full-doc save), then invokes cb(new_state) on success.
+    function update_workflow_state(appt_name, new_state, cb) {
+        frappe.call({
+            method: 'frappe.client.set_value',
+            args: {
+                doctype: 'Patient Appointment',
+                name: appt_name,
+                fieldname: 'workflow_state',
+                value: new_state
+            },
+            freeze: true,
+            freeze_message: 'Updating status…',
+            callback: function(r) {
+                if (r.message) {
+                    frappe.show_alert({ message: 'Status updated to ' + new_state, indicator: 'green' });
+                    if (cb) cb(new_state);
+                }
+            },
+            error: function() {
+                frappe.msgprint({ message: 'Could not update the workflow state. Please try again.', indicator: 'red' });
+            }
+        });
+    }
+
     // ── Booking dialog ───────────────────────────────────────────
     function open_booking_dialog(prefill) {
         prefill = prefill || {};
@@ -1388,7 +1415,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 { fieldtype: 'Column Break' },
                 {
                     fieldtype: 'Link', fieldname: 'appointment_type', label: 'Appointment Type',
-                    options: 'Appointment Type'
+                    options: 'Appointment Type',
+                    description: 'Duration is filled in automatically from the Appointment Type.'
                 },
                 {
                     fieldtype: 'Int', fieldname: 'duration', label: 'Duration (mins)',
@@ -1426,6 +1454,22 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             frappe.db.get_value('Patient', pid, 'patient_name').then(function(r) {
                 if (dialog.get_value('patient') !== pid) return; // changed meanwhile
                 dialog.set_value('patient_name', (r && r.message && r.message.patient_name) || '');
+            });
+        }
+
+        // Pull the default duration from the chosen Appointment Type. The Healthcare
+        // module stores this on the "default_duration" (In Mins) field.
+        function sync_duration_from_appointment_type() {
+            if (!dialog) return;
+            var at = dialog.get_value('appointment_type');
+            if (!at) return;
+            frappe.db.get_value('Appointment Type', at, 'default_duration').then(function(r) {
+                if (dialog.get_value('appointment_type') !== at) return; // changed meanwhile
+                var dur = r && r.message && r.message.default_duration;
+                if (dur) {
+                    dialog.set_value('duration', dur);
+                    run_availability_check(true);
+                }
             });
         }
 
@@ -1477,7 +1521,10 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         department: values.department,
                         appointment_type: values.appointment_type,
                         custom_appt_description: values.custom_appt_description.trim(),
-                        company: frappe.defaults.get_default('company')
+                        company: frappe.defaults.get_default('company'),
+                        // New bookings enter the workflow at "Scheduled"; the modal's
+                        // status buttons move them on to "In Clinic" / "Dis Charged".
+                        workflow_state: 'Scheduled'
                     }
                 },
                 freeze: true,
@@ -1507,6 +1554,12 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             patient_ctrl.$input.on('change awesomplete-selectcomplete', sync_patient_name);
         }
 
+        // Duration follows the appointment type field.
+        var apt_type_ctrl = dialog.fields_dict.appointment_type;
+        if (apt_type_ctrl && apt_type_ctrl.$input) {
+            apt_type_ctrl.$input.on('change awesomplete-selectcomplete', sync_duration_from_appointment_type);
+        }
+
         // Re-check whenever the date or time changes.
         ['appointment_date', 'appointment_time'].forEach(function(fn) {
             var f = dialog.fields_dict[fn];
@@ -1527,8 +1580,22 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Detail modal ───────────────────────────────────────────
+    // Workflow state advances Scheduled -> In Clinic -> Dis Charged. The modal
+    // only offers the single next step available from the appointment's
+    // current state (falling back to "Scheduled" if workflow_state is unset,
+    // e.g. for appointments created before this workflow existed).
+    var WORKFLOW_STEPS = ['Scheduled', 'In Clinic', 'Dis Charged'];
+
+    function next_workflow_state(current) {
+        var idx = WORKFLOW_STEPS.indexOf(current || 'Scheduled');
+        if (idx === -1 || idx === WORKFLOW_STEPS.length - 1) return null;
+        return WORKFLOW_STEPS[idx + 1];
+    }
+
     function show_modal(a) {
         var c = color_for(a.practitioner);
+        var next_state = next_workflow_state(a.workflow_state);
+
         var bg = document.createElement('div');
         bg.className = 'cal-modal-bg';
         bg.innerHTML =
@@ -1537,6 +1604,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             modal_row('ID',           '<a href="/app/patient-appointment/' + esc(a.name) + '" target="_blank">' + esc(a.name) + '</a>') +
             modal_row('Patient ID',   esc(a.patient || '—')) +
             modal_row('Status',       esc(a.status || '—')) +
+            modal_row('Workflow State', esc(a.workflow_state || 'Scheduled')) +
             modal_row('Date',         esc(a.appointment_date || '—')) +
             modal_row('Time',         esc(fmt_modal_time(a))) +
             modal_row('Type',         esc(a.appointment_type || '—')) +
@@ -1547,6 +1615,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             '<div class="cal-modal-desc"><div class="k">Description</div>'
                 + '<div class="v">' + esc(a.custom_appt_description || '—') + '</div></div>' +
             '<div class="cal-modal-actions">' +
+            (next_state ? '<button class="btn-cal-state" id="mw">Move to ' + esc(next_state) + '</button>' : '') +
             '<button class="btn-cal-ghost" id="mc">Close</button>' +
             '<button class="btn-cal-primary" id="mo">Open Record</button>' +
             '</div></div>';
@@ -1556,6 +1625,17 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             frappe.set_route('Form', 'Patient Appointment', a.name);
             bg.remove();
         };
+        var mw = bg.querySelector('#mw');
+        if (mw) {
+            mw.onclick = function() {
+                update_workflow_state(a.name, next_state, function(new_state) {
+                    a.workflow_state = new_state;
+                    bg.remove();
+                    show_modal(a);      // reopen with the button set refreshed
+                    load_schedule();    // keep the underlying list in sync
+                });
+            };
+        }
         bg.addEventListener('click', function(e) { if (e.target === bg) bg.remove(); });
     }
 
