@@ -28,52 +28,49 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     ];
     var color_idx_by_prac = {};
 
-    // Workflow-state → badge symbol. Shown on every appointment card (calendar
-    // block and all-day row) so the status is readable without opening it.
-    // Matching is case-insensitive; anything not in this list falls back to
-    // its own first letter so new/renamed states still show something.
+    // Symbol shown on each appointment card for its workflow state, without
+    // needing to open the card. A plain first-letter scheme collides here
+    // ("Completed Appt" and "Cancelled" both start with C), so these are
+    // explicit, non-colliding letters instead. Anything not in this map
+    // (e.g. the workflow's own starting state) falls back to its own first
+    // letter — see workflow_state_symbol() below.
     var WF_STATE_SYMBOLS = {
-        'arrived':   'A',
-        'waiting':   'W',
-        'in clinic': 'IN',
-        'discharged':'D'
+        'in clinic': 'B',
+        'completed appt': 'C',
+        'did not attend': 'D',
+        'cancelled': 'E'
     };
 
-    function wf_symbol(state) {
-        var s = String(state || '').trim();
-        if (!s) return '';
-        var known = WF_STATE_SYMBOLS[s.toLowerCase()];
-        return known || s.charAt(0).toUpperCase();
-    }
-
-    // Colors for the workflow-state action buttons in the detail modal. Each
-    // target state gets a consistent color (picked by hashing its name), so
-    // e.g. "Move to In Clinic" always looks the same regardless of what else
-    // is on screen — distinct from the practitioner PALETTE above, which
-    // colors lanes/appointments by doctor, not by status.
-    var WF_BUTTON_COLORS = [
-        { bg: '#185FA5', accent: '#0C3A66' }, // blue
-        { bg: '#2E8B57', accent: '#1D5B38' }, // sea green
-        { bg: '#B8860B', accent: '#7A5A07' }, // dark goldenrod
-        { bg: '#8E24AA', accent: '#5E1871' }, // purple
-        { bg: '#D9772B', accent: '#9B531C' }, // orange
-        { bg: '#C62828', accent: '#8A1C1C' }, // red
-        { bg: '#00838F', accent: '#005A63' }, // teal
-        { bg: '#5D4037', accent: '#3D2A24' }  // brown
+    // Gradient + accent color for each workflow-state action button, keyed by
+    // the same symbol so a state's badge and its "Move to …" button always
+    // read as the same color. Unmapped states/symbols fall back to a hash-based
+    // pick from this list, so any workflow keeps working even with states
+    // outside the four named above.
+    var WF_STATE_COLORS = {
+        'A': { from: '#2E86C1', to: '#1B5E8C' }, // default/starting state — blue
+        'B': { from: '#3E7CB1', to: '#2C5A85' }, // In Clinic — steel blue
+        'C': { from: '#2FA36B', to: '#1F7A4E' }, // Completed Appt — green
+        'D': { from: '#D98E2B', to: '#B06F1A' }, // Did Not Attend — amber
+        'E': { from: '#D1495B', to: '#A8324A' }  // Cancelled — red
+    };
+    var WF_FALLBACK_COLORS = [
+        { from: '#7B5EA7', to: '#5E4380' }, // purple
+        { from: '#3E9C9C', to: '#2A7373' }, // teal
+        { from: '#8A6D3B', to: '#6B5228' }, // bronze
+        { from: '#4E6D8C', to: '#374F68' }  // slate
     ];
 
-    function color_for_workflow_state(state) {
-        var s = String(state || '');
-        var hash = 0;
-        for (var i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
-        return WF_BUTTON_COLORS[hash % WF_BUTTON_COLORS.length];
+    function workflow_state_symbol(state) {
+        var key = String(state || '').trim().toLowerCase();
+        if (!key) return '';
+        return WF_STATE_SYMBOLS[key] || key.charAt(0).toUpperCase();
     }
 
-    // The state a newly-booked appointment is auto-advanced to (from whatever
-    // default state the Workflow assigns on insert, e.g. "Pending"). Change
-    // this one string if your workflow expects new bookings to land somewhere
-    // else in Arrived / Waiting / In Clinic / Discharged.
-    var POST_BOOKING_STATE = 'Waiting';
+    function color_for_workflow_symbol(symbol) {
+        if (WF_STATE_COLORS[symbol]) return WF_STATE_COLORS[symbol];
+        var code = (symbol || '').charCodeAt(0) || 0;
+        return WF_FALLBACK_COLORS[code % WF_FALLBACK_COLORS.length];
+    }
 
     // Duty Assignment data per practitioner, filled by fetch_practitioner_duty():
     //   duty_cache[practitioner] = null  -> lookup failed -> fail CLOSED
@@ -208,21 +205,31 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-modal-actions { margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
             .btn-cal-primary { background: #1a2340; color: #fff; border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
             .btn-cal-ghost { background: var(--subtle-bg); color: var(--text-color); border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
-            .btn-cal-state { border: none; border-radius: 8px; padding: 9px 20px; font-size: 13px; font-weight: 600; letter-spacing: .2px; color: #fff; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.25); transition: transform .08s ease, box-shadow .08s ease, filter .08s ease; }
-            .btn-cal-state:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 3px 10px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.3); transform: translateY(-1px); }
-            .btn-cal-state:active:not(:disabled) { transform: translateY(0); filter: brightness(.96); }
-            .btn-cal-state:disabled { opacity: .5; cursor: not-allowed; filter: none; transform: none; box-shadow: none; }
-            /* Small pill on each appointment block showing its workflow-state
-               symbol (A / W / IN / D …), so it's readable without opening the card. */
-            .cal-appt-wf-badge { position: absolute; top: 1px; right: 2px; min-width: 14px; height: 14px; padding: 0 3px; line-height: 14px; text-align: center; border-radius: 7px; font-size: 9px; font-weight: 700; background: rgba(255,255,255,.9); color: inherit; box-shadow: 0 0 0 1.5px var(--wf-badge-ring, rgba(0,0,0,.18)) inset; pointer-events: none; white-space: nowrap; }
-            .cal-appt.is-short .cal-appt-wf-badge { position: static; display: inline-flex; align-items: center; justify-content: center; min-width: 13px; height: 12px; padding: 0 2px; line-height: 12px; font-size: 8px; margin-left: 4px; vertical-align: middle; }
-            .cal-allday-wf-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 13px; height: 12px; padding: 0 2px; line-height: 12px; border-radius: 6px; font-size: 8px; font-weight: 700; background: rgba(255,255,255,.9); box-shadow: 0 0 0 1.5px var(--wf-badge-ring, rgba(0,0,0,.18)) inset; margin-right: 4px; vertical-align: middle; white-space: nowrap; }
             .cal-avail-box { font-size: 12px; padding: 8px 10px; border-radius: 6px; }
             .cal-avail-ok { background: #E3F5EE; color: #085041; }
             .cal-avail-bad { background: #FBE7E7; color: #791F1F; }
             .cal-avail-checking { color: var(--text-muted); }
             .cal-slot-pick { min-width: 64px; }
             .cal-slot-pick:hover { background: var(--subtle-bg); }
+            /* Small badge on each appointment block showing its workflow-state symbol,
+               so the state is readable without opening the card. */
+            .cal-appt-wf-badge { position: absolute; top: 1px; right: 2px; width: 15px; height: 15px; line-height: 15px; text-align: center; border-radius: 50%; font-size: 9px; font-weight: 700; background: rgba(255,255,255,.9); color: inherit; box-shadow: 0 0 0 1px rgba(0,0,0,.2) inset; pointer-events: none; }
+            .cal-appt.is-short .cal-appt-wf-badge { position: static; display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; line-height: 13px; font-size: 8px; margin-left: 4px; vertical-align: middle; }
+            .cal-allday-wf-badge { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; line-height: 13px; border-radius: 50%; font-size: 8px; font-weight: 700; background: rgba(255,255,255,.9); box-shadow: 0 0 0 1px rgba(0,0,0,.2) inset; margin-right: 4px; vertical-align: middle; }
+            /* Classy workflow-action buttons: pill shape, soft gradient per target
+               state, a matching letter chip, and a gentle hover lift. */
+            .btn-cal-state {
+                display: inline-flex; align-items: center; gap: 7px;
+                border: none; border-radius: 999px; padding: 8px 16px 8px 10px;
+                font-size: 12.5px; font-weight: 600; letter-spacing: .01em;
+                cursor: pointer; color: #fff;
+                box-shadow: 0 1px 2px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.25);
+                transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+            }
+            .btn-cal-state:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.3); filter: brightness(1.05); }
+            .btn-cal-state:active:not(:disabled) { transform: translateY(0); filter: brightness(.97); }
+            .btn-cal-state:disabled { opacity: .5; cursor: not-allowed; filter: grayscale(.3); }
+            .btn-cal-state-chip { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,.28); font-size: 10.5px; font-weight: 800; box-shadow: inset 0 0 0 1px rgba(255,255,255,.4); }
         `;
         document.head.appendChild(style);
     }
@@ -1134,12 +1141,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         ? format_time_label(time_str_to_minutes(a.appointment_time)) + ' \u00b7 '
                         : '';
                     var who = a.patient_name || a.patient || '';
-                    var wf_sym = wf_symbol(a.workflow_state);
-                    var wf_ring = color_for_workflow_state(a.workflow_state).bg;
+                    var wf_symbol = workflow_state_symbol(a.workflow_state);
                     html += '<div class="cal-allday-block" style="background:' + c.bg + ';color:' + c.fg + ';border-left:3px solid ' + c.bd + '"'
                         + ' title="' + esc(t_lbl + who + ' \u2022 ' + (a.practitioner_name || a.practitioner || '')
                             + (a.workflow_state ? ' \u2022 ' + a.workflow_state : '')) + '">'
-                        + (wf_sym ? '<span class="cal-allday-wf-badge" style="--wf-badge-ring:' + wf_ring + '" title="' + esc(a.workflow_state) + '">' + esc(wf_sym) + '</span>' : '')
+                        + (wf_symbol ? '<span class="cal-allday-wf-badge" title="' + esc(a.workflow_state) + '">' + esc(wf_symbol) + '</span>' : '')
                         + esc(t_lbl)
                         + esc(a.patient_name || a.patient || '\u2014')
                         + (a.service_unit ? ' \u2022 ' + esc(a.service_unit) : '')
@@ -1185,8 +1191,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     var meta  = a.appointment_type || a.service_unit || '';
                     var status_class = (a.status || 'Open').replace(' ', '');
                     var tick = (a.status === 'Closed') ? ' \u2713' : '';
-                    var wf_sym = wf_symbol(a.workflow_state);
-                    var wf_ring = color_for_workflow_state(a.workflow_state).bg;
+                    var wf_symbol = workflow_state_symbol(a.workflow_state);
 
                     html += '<div class="cal-appt ' + status_class
                         + (geo.height < SHORT_APPT_PX ? ' is-short' : '')
@@ -1203,8 +1208,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         + 'left:calc(' + (col * w).toFixed(4) + '% + 2px);'
                         + 'width:calc(' + w.toFixed(4) + '% - 4px);'
                         + 'background:' + c.bg + ';color:' + c.fg + ';border-left:3px solid ' + c.bd + ';">'
-                        + (wf_sym
-                            ? '<span class="cal-appt-wf-badge" style="--wf-badge-ring:' + wf_ring + '" title="' + esc(a.workflow_state) + '">' + esc(wf_sym) + '</span>'
+                        + (wf_symbol
+                            ? '<span class="cal-appt-wf-badge" title="' + esc(a.workflow_state) + '">' + esc(wf_symbol) + '</span>'
                             : '')
                         + '<span class="cal-appt-time">' + range + tick + '</span>'
                         + '<span class="cal-appt-name">' + esc(who) + '</span>'
@@ -1408,40 +1413,6 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         });
     }
 
-    // ── Workflow engine helpers ───────────────────────────────────
-    // Patient Appointment has a real Frappe Workflow attached (its
-    // workflow_state field starts at a default state such as "Pending" on
-    // insert). Frappe validates every change to that field against the
-    // Workflow document's own transitions, so a raw field write (e.g.
-    // frappe.client.set_value) is rejected with "Workflow State transition
-    // not allowed from X to Y" unless it happens to match one exactly.
-    // Instead we go through the same two calls the desk's own workflow
-    // buttons use: ask which actions are available from the doc's current
-    // state, then apply the one whose next_state is what we want.
-    //
-    // `doc` must be a full document object (doctype + name + current field
-    // values, workflow_state included) — a plain object is fine, it does
-    // not need to be a real frappe.model instance.
-    function get_workflow_transitions(doc, callback) {
-        frappe.call({
-            method: 'frappe.model.workflow.get_transitions',
-            args: { doc: JSON.stringify(doc) },
-            callback: function(r) { callback(r.message || []); },
-            error: function() { callback(null); }
-        });
-    }
-
-    function apply_workflow_action(doc, action, callback) {
-        frappe.call({
-            method: 'frappe.model.workflow.apply_workflow',
-            args: { doc: JSON.stringify(doc), action: action },
-            freeze: true,
-            freeze_message: 'Updating status…',
-            callback: function(r) { callback(r.message || null); },
-            error: function() { callback(null); }
-        });
-    }
-
     // ── Booking dialog ───────────────────────────────────────────
     function open_booking_dialog(prefill) {
         prefill = prefill || {};
@@ -1530,8 +1501,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             });
         }
 
-        // Pull the default duration from the chosen Appointment Type. The Healthcare
-        // module stores this on the "default_duration" (In Mins) field.
+        // Pull the default duration from the chosen Appointment Type. Healthcare
+        // stores this on the "default_duration" (In Mins) field.
         function sync_duration_from_appointment_type() {
             if (!dialog) return;
             var at = dialog.get_value('appointment_type');
@@ -1597,8 +1568,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         company: frappe.defaults.get_default('company')
                         // workflow_state is left unset: Frappe assigns the workflow's
                         // own default state (e.g. "Pending") on insert. We move it on
-                        // right after, via the workflow engine below, rather than
-                        // writing the field directly.
+                        // to "Scheduled" right after, via the workflow engine below,
+                        // rather than writing the field directly (a raw write is
+                        // rejected as an invalid transition).
                     }
                 },
                 freeze: true,
@@ -1617,11 +1589,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         load_schedule();
                     }
 
-                    // Best-effort: if no action currently leads to POST_BOOKING_STATE
-                    // (e.g. permissions, or the workflow is set up differently), the
+                    // Best-effort: if no action currently leads to "Scheduled" (e.g.
+                    // permissions, or the workflow is set up differently), the
                     // appointment still books — it just stays at its default state.
                     get_workflow_transitions(new_doc, function(transitions) {
-                        var match = (transitions || []).find(function(t) { return t.next_state === POST_BOOKING_STATE; });
+                        var match = (transitions || []).find(function(t) { return t.next_state === 'Scheduled'; });
                         if (!match) { done(); return; }
                         apply_workflow_action(new_doc, match.action, function() { done(); });
                     });
@@ -1665,16 +1637,50 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         run_availability_check(true);
     }
 
+    // ── Workflow engine helpers ───────────────────────────────────
+    // Patient Appointment has a real Frappe Workflow attached (its
+    // workflow_state field starts at the workflow's own default state on
+    // insert, e.g. "Pending"). Frappe validates every change to that field
+    // against the Workflow document's own transitions, so a raw field write
+    // (frappe.client.set_value) is rejected with "Workflow State transition
+    // not allowed from X to Y" unless it happens to match one exactly.
+    // Instead we go through the same two calls the desk's own workflow
+    // buttons use: ask which actions are available from the doc's current
+    // state, then apply the one whose next_state is what we want.
+    //
+    // `doc` must be a full-enough document object (doctype + name + current
+    // field values, workflow_state included) — a plain object is fine, it
+    // does not need to be a real frappe.model instance.
+    function get_workflow_transitions(doc, callback) {
+        frappe.call({
+            method: 'frappe.model.workflow.get_transitions',
+            args: { doc: JSON.stringify(doc) },
+            callback: function(r) { callback(r.message || []); },
+            error: function() { callback(null); }
+        });
+    }
+
+    function apply_workflow_action(doc, action, callback) {
+        frappe.call({
+            method: 'frappe.model.workflow.apply_workflow',
+            args: { doc: JSON.stringify(doc), action: action },
+            freeze: true,
+            freeze_message: 'Updating status…',
+            callback: function(r) { callback(r.message || null); },
+            error: function() { callback(null); }
+        });
+    }
+
     // ── Detail modal ───────────────────────────────────────────
     // The status buttons are built from whatever the workflow engine says is
     // actually reachable from the appointment's current state for the current
     // user (see get_workflow_transitions above) — not a hardcoded list — so
-    // this keeps working whatever the real Patient Appointment workflow turns
-    // out to allow (e.g. Pending → Waiting → Arrived → In Clinic → Discharged), and
-    // naturally hides an action a role isn't permitted to take.
+    // this keeps working whatever the real Patient Appointment workflow
+    // allows (Pending → In Clinic → Completed Appt, or → Did Not Attend /
+    // Cancelled, etc.), and naturally hides an action a role isn't permitted
+    // to take.
     function show_modal(a) {
         var c = color_for(a.practitioner);
-
         var bg = document.createElement('div');
         bg.className = 'cal-modal-bg';
         bg.innerHTML =
@@ -1726,13 +1732,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 return;
             }
             box.innerHTML = transitions.map(function(t, i) {
-                var wc = color_for_workflow_state(t.next_state);
-                var sym = wf_symbol(t.next_state);
+                var symbol = workflow_state_symbol(t.next_state);
+                var wc = color_for_workflow_symbol(symbol);
                 return '<button type="button" class="btn-cal-state" data-idx="' + i + '"'
-                    + ' style="background:linear-gradient(135deg,' + wc.bg + ',' + wc.accent + ');">'
-                    + (sym ? '<span style="display:inline-block;min-width:16px;padding:0 3px;margin-right:6px;'
-                        + 'border-radius:4px;background:rgba(255,255,255,.22);font-size:11px;font-weight:800;">'
-                        + esc(sym) + '</span>' : '')
+                    + ' style="background:linear-gradient(135deg,' + wc.from + ',' + wc.to + ');">'
+                    + (symbol ? '<span class="btn-cal-state-chip">' + esc(symbol) + '</span>' : '')
                     + 'Move to ' + esc(t.next_state) + '</button>';
             }).join('');
             box.querySelectorAll('button[data-idx]').forEach(function(btn) {
