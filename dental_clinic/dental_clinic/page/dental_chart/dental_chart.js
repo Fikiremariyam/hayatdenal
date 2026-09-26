@@ -514,10 +514,15 @@ class PatientInfo {
      * Pre-fill the provider link control with a known provider ID.
      * @param {string} providerId
      */
-    setProvider(providerId) {
+    async setProvider(providerId) {
         if (!providerId) return;
         this.provider = providerId;
         this.provider_ctrl.set_value(providerId);
+        try {
+            const name = await frappe.db.get_value('Healthcare Practitioner', providerId, 'practitioner_name');
+            this._showTitle(this.provider_ctrl, 'Healthcare Practitioner', providerId,
+                            name?.message?.practitioner_name);
+        } catch (e) { /* keep ID display */ }
     }
 
     /**
@@ -525,18 +530,33 @@ class PatientInfo {
      * @param {string} patientId
      */
     async load(patientId) {
-        if (!patientId) return;
-        try {
-            const doc     = await frappe.db.get_doc('Patient', patientId);
-            this.id       = doc.name;
-            this.fullName = doc.patient_name || patientId;
-            this.dob      = doc.dob ? frappe.datetime.str_to_user(doc.dob) : '—';
-             _set('dc-pt-fullname', this.fullName);
-        } catch (err) {
-            console.warn('[DentalChart] PatientInfo.load failed:', err);
-            _set('dc-pt-fullname', patientId);  
-        }
+    if (!patientId) return;
+    try {
+        const doc     = await frappe.db.get_doc('Patient', patientId);
+        this.id       = doc.name;
+        this.fullName = doc.patient_name || patientId;
+        this.dob      = doc.dob ? frappe.datetime.str_to_user(doc.dob) : '—';
+
+        /* Show patient_name in the link input while keeping the ID as its value */
+        this._showTitle(this._ctrl, 'Patient', doc.name, this.fullName);
+
+        _set('dc-pt-fullname', this.fullName);
+    } catch (err) {
+        console.warn('[DentalChart] PatientInfo.load failed:', err);
+        _set('dc-pt-fullname', patientId);
     }
+}
+
+/** Display a record's title in a Link control; the stored value stays the ID. */
+_showTitle(ctrl, doctype, name, title) {
+    if (!name || !title) return;
+    if (frappe.utils.add_link_title) {
+        frappe.utils.add_link_title(doctype, name, title);   // cache name → title
+    }
+    if (ctrl.set_formatted_input) {
+        ctrl.set_formatted_input(name);                      // re-render using the cached title
+    }
+}
 }
 
 

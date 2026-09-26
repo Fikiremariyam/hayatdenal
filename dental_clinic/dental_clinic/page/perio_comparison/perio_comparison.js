@@ -1,42 +1,3 @@
-/**
- * perio_exam.js  —  ERPNext 15 · Dental Chart Page
- * (Single-exam entry tool — modeled on "Appendix D. Dental sheet")
- *
- * ── HOW TO USE ────────────────────────────────────────────────────────────
- * 1. Desk → Search "Page" → open your existing "perio_comparison" Page
- *    (this script's `frappe.pages["perio_comparison"]` key MUST exactly
- *    match the Page record's own name, or on_page_load will be set on
- *    `undefined` and crash — that was the cause of the error you hit)
- * 2. Click the "Script" tab
- * 3. SELECT ALL existing code and DELETE it
- * 4. PASTE the entire contents of this file
- * 5. Click Save
- * 6. Navigate to /app/perio-comparison            → blank new exam
- *    or /app/perio-comparison?patient=PT-00001    → new exam pre-loaded for a patient
- *    or /app/perio-comparison?name=DPE-00007      → open an existing exam for editing
- *
- *    If you'd rather the URL say /app/perio-exam, rename the Page record
- *    itself first (Page List → open it → Rename), then change the string
- *    in `frappe.pages["perio_comparison"]` below to match the new name.
- *
- * ── DocType required: "Dental Perio Exam" ───────────────────────────────
- *   Parent fields:
- *     patient (Link: Patient), exam_date (Date), assessed_by (Data),
- *     total_teeth_present (Int), total_teeth_lost (Int),
- *     periodontitis (Select: Present\nAbsent),
- *     severity (Select: \nMild\nModerate\nSevere),
- *     other_findings (Small Text), recommendation (Small Text),
- *     missing_teeth (Data — comma separated tooth numbers)
- *   Child table "perio_measurements" (doctype "Dental Perio Exam Measurement"):
- *     tooth_number (Int), surface (Select: Buccal\nPalatal\nLingual),
- *     recession_1_s1..s3 (Int) × 2 rows,
- *     pocket_depth_1_s1..s3 (Int) × 4 rows,
- *     mobility_1_s1..s3 (Int) × 2 rows   — mobility fields only populated on Buccal rows
- *     furcation (Check), plaque (Check), bleeding (Check), pus (Check)
- *       — single 0/1 Yes-No value per tooth, only populated on Buccal rows,
- *       default 0 (No)
- */
-
 frappe.pages["perio_comparison"].on_page_load = function (wrapper) {
     const page = frappe.ui.make_app_page({
         parent: wrapper,
@@ -455,12 +416,39 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
         },
         render_input: true,
     });
-    if (selectedPatient) patientCtrl.set_value(selectedPatient);
+
+    // ── Show patient_name in the Link input (the stored value stays the ID) ──
+    function showLinkTitle(ctrl, doctype, name, title) {
+        if (!name || !title) return;
+        if (frappe.utils.add_link_title) {
+            frappe.utils.add_link_title(doctype, name, title); // cache ID → title
+        }
+        if (ctrl.set_formatted_input) {
+            ctrl.set_formatted_input(name); // re-render input using the cached title
+        }
+    }
+    async function showPatientName(patientId) {
+        if (!patientId) return;
+        try {
+            const r = await frappe.db.get_value("Patient", patientId, "patient_name");
+            const patientName = r && r.message && r.message.patient_name;
+            showLinkTitle(patientCtrl, "Patient", patientId, patientName);
+        } catch (e) {
+            console.warn("[Perio] could not fetch patient_name:", e);
+        }
+    }
+
+    if (selectedPatient) {
+        Promise.resolve(patientCtrl.set_value(selectedPatient)).then(() =>
+            showPatientName(selectedPatient),
+        );
+    }
     patientCtrl.$input.on("change", function () {
         const val = patientCtrl.get_value();
         if (val && val !== selectedPatient) {
             selectedPatient = val;
             existingExamName = null;
+            showPatientName(selectedPatient);
             fetchExamPicker(selectedPatient);
         }
     });
@@ -475,9 +463,8 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
     refreshSeverityState();
 
     // ── Build one grid (Recession ×2 / Pocket Depth ×4 [/ Mobility ×2 / Furcation / Plaque / Bleeding / Pus]) ──
-    // Each box (tooth × row) now holds 3 hand-filled sub-columns: M / B / D
-    // (Mesial / Buccal-Mid / Distal). Row counts are configurable here if
-    // your charting convention differs. The Furcation / Plaque / Bleeding /
+    // Each box (tooth × row) holds 3 hand-filled sub-columns: M / B / D
+    // (Mesial / Buccal-Mid / Distal). The Furcation / Plaque / Bleeding /
     // Pus rows are single Yes/No values per tooth (not per M/B/D site) and
     // only appear on the two Buccal grids, defaulting to No.
     const RECESSION_ROWS = 2;
@@ -500,13 +487,9 @@ padding: 2px 2px 0; font-size: 10.5px; color: #666;
         }
         const boolGroups = includeMobility ? BOOL_ROWS : []; // Buccal grids only
 
-        // Explicit colgroup: table-layout:fixed only respects the *first*
-        // width it sees per column, so without this the browser guesses
-        // column widths from content and the right-most columns end up
-        // squeezed / clipped. Every input column gets the same fixed width.
-        const ROW_LABEL_COL_W = 80; // "Recession / Pocket Depth / Mobility" column
-        const SITE_NUM_COL_W = 22; // "1 / 2 / 3 / 4" row-site column
-        const SITE_COL_W = 34; // each M / B / D input column
+        const ROW_LABEL_COL_W = 80;
+        const SITE_NUM_COL_W = 22;
+        const SITE_COL_W = 34;
         let colgroup = `<colgroup><col style="width:${ROW_LABEL_COL_W}px"><col style="width:${SITE_NUM_COL_W}px">`;
         teeth.forEach(() => {
             SITES.forEach(() => (colgroup += `<col style="width:${SITE_COL_W}px">`));
@@ -575,7 +558,7 @@ class="pe-cell-input" data-field="${g.field}-${i}" data-site="${s}" data-surface
     buildGrid("pe-grid-lingual", LOWER_TEETH, "Lingual", false);
     buildGrid("pe-grid-buccal-lower", LOWER_TEETH, "Buccal", true);
 
-    // ── Live PD colour + delegated pocket-depth colouring (per site) ───────
+    // ── Live PD colour (per site) ──────────────────────────────────────────
     $(document).on("input", '.pe-cell-input[data-field^="pocket_depth-"]', function () {
         const v = parseInt($(this).val()) || 0;
         $(this).removeClass("pd-h pd-w pd-d");
@@ -590,11 +573,7 @@ class="pe-cell-input" data-field="${g.field}-${i}" data-site="${s}" data-surface
         $(this).closest(".pe-bool-toggle").toggleClass("is-yes", checked);
     });
 
-    // ── Tooth diagrams (Buccal-upper controls upper missing set,
-    //     Buccal-lower controls lower missing set) ──────────────────────────
-    // A simple, recognisable tooth silhouette — rounded crown tapering to a
-    // root — instead of a plain rectangle. (x,y) is the top-left corner of
-    // the bounding box, (w,h) its width/height.
+    // ── Tooth diagrams ─────────────────────────────────────────────────────
     function toothShapePath(x, y, w, h) {
         const cx = x + w / 2;
         return `M ${x} ${y + h * 0.32}
@@ -609,8 +588,7 @@ Z`;
         const isMissing = missingTeeth.has(tn);
         const cls = "pe-tooth-shape" + (isMissing ? " missing" : "");
         let s = `<g class="pe-tooth-click" data-tooth="${tn}" style="cursor:pointer;">`;
-        s += `<path class="${cls}" d="${toothShapePath(x, y, w, h)}" fill="${isMissing ? "#e9ecef" : "#fff"
-            }"></path>`;
+        s += `<path class="${cls}" d="${toothShapePath(x, y, w, h)}" fill="${isMissing ? "#e9ecef" : "#fff"}"></path>`;
         s += `<text class="pe-tooth-num" x="${x + w / 2}" y="${y - 3}">${quadrantLabel(tn)}</text>`;
         if (isMissing) {
             s += `<text class="pe-tooth-x" x="${x + w / 2}" y="${y + h / 2 + 4}">✕</text>`;
@@ -697,8 +675,7 @@ Z`;
                     .append('<option value="">— New exam —</option>')
                     .prop("disabled", false);
                 exams.forEach((e) => {
-                    const label = `${frappe.datetime.str_to_user(e.exam_date)}${e.assessed_by ? " · " + e.assessed_by : ""
-                        }`;
+                    const label = `${frappe.datetime.str_to_user(e.exam_date)}${e.assessed_by ? " · " + e.assessed_by : ""}`;
                     $("#pe-exam-picker").append(`<option value="${e.name}">${label}</option>`);
                 });
                 if (existingExamName && exams.find((e) => e.name === existingExamName)) {
@@ -763,10 +740,7 @@ Z`;
                 existingExamName = doc.name;
                 $("#pe-exam-date").val(doc.exam_date || frappe.datetime.get_today());
                 $("#pe-assessed-by").val(doc.assessed_by || "");
-                $(`input[name="pe-periodontitis"][value="${doc.periodontitis || "Absent"}"]`).prop(
-                    "checked",
-                    true,
-                );
+                $(`input[name="pe-periodontitis"][value="${doc.periodontitis || "Absent"}"]`).prop("checked", true);
                 refreshSeverityState();
                 if (doc.severity) {
                     $(`input[name="pe-severity"][value="${doc.severity}"]`).prop("checked", true);
@@ -833,13 +807,6 @@ Z`;
     }
 
     // ── Collect form data into a Dental Perio Exam doc payload ─────────────
-    // Every recession / pocket_depth / mobility field is split into 3
-    // hand-filled sub-values per tooth (site 1=M, 2=B, 3=D), stored as
-    // "<field>_<row>_s<site>", e.g. pocket_depth_1_s1, pocket_depth_1_s2,
-    // pocket_depth_1_s3. Add these ×3 fields to the "Dental Perio Exam
-    // Measurement" child doctype in place of the old single-value fields.
-    // furcation / plaque / bleeding / pus are single 0/1 (Check) values per
-    // tooth, only collected on Buccal rows, defaulting to 0 (No).
     function collectPayload() {
         const measurements = [];
 
@@ -874,10 +841,10 @@ Z`;
                 const boolFieldNames = BOOL_ROWS.map((b) => b.field);
                 const hasAny = Object.keys(row).some((k) => {
                     if (k === "tooth_number" || k === "surface") return false;
-                    if (boolFieldNames.includes(k)) return row[k] === 1; // only "Yes" counts as entered data
+                    if (boolFieldNames.includes(k)) return row[k] === 1;
                     return row[k] !== null;
                 });
-                if (!hasAny) return; // nothing entered for this tooth
+                if (!hasAny) return;
                 measurements.push(row);
             });
         }
@@ -927,7 +894,7 @@ Z`;
         $("#pe-save-msg").text("");
 
         const method = existingExamName ? "frappe.client.save" : "frappe.client.insert";
-        const args = existingExamName ? { doc: payload } : { doc: payload };
+        const args = { doc: payload };
 
         frappe
             .call({ method, args })
