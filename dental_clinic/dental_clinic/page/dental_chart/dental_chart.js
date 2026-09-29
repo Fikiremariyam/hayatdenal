@@ -42,6 +42,7 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .dc-pt-bar     { background:var(--panel);border-bottom:1px solid var(--border);padding:9px 16px;display:flex;align-items:center;gap:18px;flex-wrap:wrap; }
 #dc-root .dc-pt-name    { font-size:15px;font-weight:700; }
 #dc-root .dc-pt-fullname { font-size:15px;font-weight:700;color:var(--text); }
+#dc-root .dc-doc-name   { min-width:180px; }
 #dc-root .dc-pt-meta    { display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted); }
 #dc-root .dc-pt-meta b  { color:var(--text);font-weight:600; }
 #dc-root .dc-pt-badge   { background:var(--accent-light);color:var(--accent);font-size:10px;font-weight:600;padding:3px 10px;border-radius:20px;letter-spacing:.04em; }
@@ -335,15 +336,11 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
    });
 };
 
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   DENTAL CHART ENGINE
-   ► No HTML or CSS changes required
-   ► frappe.after_ajax(() => { window._dc = new DentalChart(); window._dc.init(); });
-   ► page.set_primary_action("Save Chart", () => window._dc.save(), "save");
-     page.add_inner_button("Export JSON", () => window._dc.export());
-     page.add_inner_button("Clear Chart", () => { frappe.confirm(..., () => window._dc.clear()); });
-   ═══════════════════════════════════════════════════════════════════════════*/
+/* Runs every time the page is opened (Frappe caches pages, so on_page_load
+   only runs the first time). Picks up the patient sent from the Patient form. */
+frappe.pages['dental-chart'].on_page_show = function () {
+    if (window._dc) window._dc.applyRouteOptions();
+};
 
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -352,9 +349,6 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 ─────────────────────────────────────────────────────────────────────────────*/
 class ToothState {
 
-    /**
-     * @param {{ fdi:string, uni:string, name:string, type:string }} meta
-     */
     constructor(meta) {
         this.fdi         = meta.fdi;
         this.uni         = meta.uni;
@@ -367,10 +361,6 @@ class ToothState {
         this.notes       = '';
     }
 
-    /**
-     * Add a condition, deduplicating on type+surface.
-     * @param {{type:string, label:string, color:string, surface:string}} cond
-     */
     addCondition(cond) {
         this.conditions = this.conditions.filter(
             c => !(c.type === cond.type && c.surface === cond.surface)
@@ -379,12 +369,10 @@ class ToothState {
         this.conditions.push(cond);
     }
 
-    /** Remove a condition by index. */
     removeCondition(index) {
         this.conditions.splice(index, 1);
     }
 
-    /** Reset tooth to blank state. */
     reset() {
         this.conditions  = [];
         this.mobility    = '0';
@@ -393,13 +381,6 @@ class ToothState {
         this.notes       = '';
     }
 
-    /**
-     * Populate from a "Condition summary child table" row.
-     * @param {Object} row  – one item from doc.condition_summary
-     *        Fields: fdi, name1, condition, surface, notes
-     * @param {Array}  [catalog] – the Tooth Status catalog, used to recover the
-     *        original color for a saved condition label when possible.
-     */
     loadFromDocRow(row, catalog = []) {
         const label = row.condition || '';
         if (label && label.toLowerCase() !== 'healthy') {
@@ -414,7 +395,6 @@ class ToothState {
         if (row.notes) this.notes = row.notes;
     }
 
-    /** Serialize to a "Condition summary child table" row object. */
     toDocRow() {
         return {
             doctype  : 'Condition summary child table',
@@ -430,7 +410,7 @@ class ToothState {
 
 /* ───────────────────────────────────────────────────────────────────────────
    CLASS: PatientInfo
-   Manages the patient link control and banner rendering.
+   Manages the patient link control, the provider (logged-in user) and banner.
 ─────────────────────────────────────────────────────────────────────────────*/
 class PatientInfo {
 
@@ -438,11 +418,10 @@ class PatientInfo {
         this.id       = null;
         this.fullName = '—';
         this.dob      = '—';
-        this.provider = '—';
-        this._onChangeCb         = null;
-        this._onProviderChangeCb = null;
+        this.provider = frappe.session.user;
+        this._onChangeCb = null;
 
-        /* Mount the Frappe Link control into .dc-pt-name */
+        /* Patient link control */
         this._ctrl = frappe.ui.form.make_control({
             parent: $('.dc-pt-name'),
             df: {
@@ -460,26 +439,19 @@ class PatientInfo {
             if (val && this._onChangeCb) this._onChangeCb(val);
         });
 
-        /* Provider (Healthcare Practitioner) link control — bare input, no label */
+        /* Provider = the logged-in user who creates the chart (read-only) */
         this.provider_ctrl = frappe.ui.form.make_control({
             parent: $('.dc-doc-name'),
             df: {
-                fieldtype  : 'Link',
-                options    : 'Healthcare Practitioner',
-                fieldname  : 'provider',
-                placeholder: 'Search provider name or ID…',
+                fieldtype : 'Link',
+                options   : 'User',
+                label     : 'Provider',
+                fieldname : 'provider',
+                read_only : 1,
             },
-            only_input  : true,
             render_input: true,
         });
-
-        this.provider_ctrl.$input.on('change', () => {
-            const providerVal = this.provider_ctrl.get_value();
-            if (providerVal) {
-                this.provider = providerVal;
-                if (this._onProviderChangeCb) this._onProviderChangeCb(providerVal);
-            }
-        });
+        this.setProvider(frappe.session.user);
     }
 
     /** Currently linked patient ID (Frappe name). */
@@ -487,82 +459,61 @@ class PatientInfo {
         return this._ctrl.get_value() || null;
     }
 
-    /** Currently selected provider ID. */
+    /** Currently shown provider (User ID). */
     get providerValue() {
-        return this.provider_ctrl.get_value() || null;
+        return this.provider_ctrl.get_value() || this.provider || null;
     }
 
-    /** Set a callback that fires whenever the patient changes. */
     onChange(cb) {
         this._onChangeCb = cb;
     }
 
-    /** Set a callback that fires whenever the provider changes. */
-    onProviderChange(cb) {
-        this._onProviderChangeCb = cb;
-    }
-
-    /**
-     * Pre-fill the link control with a known patient ID (e.g. from URL param).
-     * @param {string} patientId
-     */
     setValue(patientId) {
         this._ctrl.set_value(patientId);
     }
 
-    /**
-     * Pre-fill the provider link control with a known provider ID.
-     * @param {string} providerId
-     */
-    async setProvider(providerId) {
-        if (!providerId) return;
-        this.provider = providerId;
-        this.provider_ctrl.set_value(providerId);
-        try {
-            const name = await frappe.db.get_value('Healthcare Practitioner', providerId, 'practitioner_name');
-            this._showTitle(this.provider_ctrl, 'Healthcare Practitioner', providerId,
-                            name?.message?.practitioner_name);
-        } catch (e) { /* keep ID display */ }
+    /** Show a user as the provider (value = user ID, display = full name). */
+    setProvider(userId) {
+        if (!userId) return;
+        this.provider = userId;
+        this.provider_ctrl.set_value(userId);
+        const fullName = frappe.user.full_name ? frappe.user.full_name(userId) : userId;
+        this._showTitle(this.provider_ctrl, 'User', userId, fullName);
     }
 
-    /**
-     * Fetch patient doc from Frappe and update banner fields.
-     * @param {string} patientId
-     */
     async load(patientId) {
-    if (!patientId) return;
-    try {
-        const doc     = await frappe.db.get_doc('Patient', patientId);
-        this.id       = doc.name;
-        this.fullName = doc.patient_name || patientId;
-        this.dob      = doc.dob ? frappe.datetime.str_to_user(doc.dob) : '—';
+        if (!patientId) return;
+        try {
+            const doc     = await frappe.db.get_doc('Patient', patientId);
+            this.id       = doc.name;
+            this.fullName = doc.patient_name || patientId;
+            this.dob      = doc.dob ? frappe.datetime.str_to_user(doc.dob) : '—';
 
-        /* Show patient_name in the link input while keeping the ID as its value */
-        this._showTitle(this._ctrl, 'Patient', doc.name, this.fullName);
+            /* Show patient_name in the link input while keeping the ID as its value */
+            this._showTitle(this._ctrl, 'Patient', doc.name, this.fullName);
 
-        _set('dc-pt-fullname', this.fullName);
-    } catch (err) {
-        console.warn('[DentalChart] PatientInfo.load failed:', err);
-        _set('dc-pt-fullname', patientId);
+            _set('dc-pt-fullname', this.fullName);
+        } catch (err) {
+            console.warn('[DentalChart] PatientInfo.load failed:', err);
+            _set('dc-pt-fullname', patientId);
+        }
     }
-}
 
-/** Display a record's title in a Link control; the stored value stays the ID. */
-_showTitle(ctrl, doctype, name, title) {
-    if (!name || !title) return;
-    if (frappe.utils.add_link_title) {
-        frappe.utils.add_link_title(doctype, name, title);   // cache name → title
+    /** Display a record's title in a Link control; the stored value stays the ID. */
+    _showTitle(ctrl, doctype, name, title) {
+        if (!name || !title) return;
+        if (frappe.utils.add_link_title) {
+            frappe.utils.add_link_title(doctype, name, title);
+        }
+        if (ctrl.set_formatted_input) {
+            ctrl.set_formatted_input(name);
+        }
     }
-    if (ctrl.set_formatted_input) {
-        ctrl.set_formatted_input(name);                      // re-render using the cached title
-    }
-}
 }
 
 
 /* ───────────────────────────────────────────────────────────────────────────
    CLASS: ToothSVG  (static helpers only)
-   Generates inline SVG markup for each tooth morphology.
 ─────────────────────────────────────────────────────────────────────────────*/
 class ToothSVG {
 
@@ -586,7 +537,6 @@ class ToothSVG {
         healthy : { f:'#e8f5e9', s:'#27ae60' },
     };
 
-    /** Pick fill/stroke from active conditions array. */
     static resolve(conditions) {
         const types = conditions.map(c => c.type);
         for (const key of ToothSVG.FILL_PRIORITY) {
@@ -595,23 +545,14 @@ class ToothSVG {
         return types.length ? ToothSVG.COLORS.healthy : ToothSVG.COLORS.none;
     }
 
-    /** Entry point: dispatch to the correct morphology renderer. */
     static render(toothMeta, isUpper, conditions) {
         return ToothSVG._grid(conditions);
     }
 
-    /**
-     * Dentally-style surface-grid tooth: a plain square divided into
-     * 4 outer triangles (Buccal/Facial, Distal, Lingual/Palatal, Mesial)
-     * around a small center square (Occlusal/Incisal). Every tooth —
-     * molar or incisor — renders as the same uniform square so the
-     * whole arch reads as one continuous grid, matching a classic
-     * odontogram / surface-chart layout.
-     */
     static _grid(conditions) {
         const SZ   = 44;
         const HALF = SZ / 2;
-        const OSZ  = 16;                 // center occlusal square size
+        const OSZ  = 16;
         const OOFF = (SZ - OSZ) / 2;
 
         const isMissing = conditions.some(c => (c.label || c.type || '').toLowerCase() === 'missing');
@@ -648,133 +589,14 @@ class ToothSVG {
                   <rect x="0" y="0" width="${SZ}" height="${SZ}" fill="none" stroke="var(--border2)" stroke-width="1" pointer-events="none"/>
                 </svg>`;
     }
-
-    /* cross lines for missing teeth */
-    static _missCross(x1a, y1a, x2a, y2a, x1b, y1b, x2b, y2b) {
-        return `<line x1="${x1a}" y1="${y1a}" x2="${x2a}" y2="${y2a}" stroke="#95a5a6" stroke-width="2" stroke-linecap="round" opacity=".5"/>
-                <line x1="${x1b}" y1="${y1b}" x2="${x2b}" y2="${y2b}" stroke="#95a5a6" stroke-width="2" stroke-linecap="round" opacity=".5"/>`;
-    }
-
-    static _molar(conditions, up) {
-        const { f, s } = ToothSVG.resolve(conditions);
-        const t = conditions.map(c => c.type);
-        const miss = t.includes('missing');
-        const op   = miss ? .3 : 1;
-        let ex = '';
-        if (t.includes('rct')) ex += up
-            ? `<line x1="16" y1="28" x2="12" y2="50" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="2,1" opacity=".7"/>
-               <line x1="24" y1="30" x2="24" y2="52" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="2,1" opacity=".7"/>
-               <line x1="32" y1="28" x2="36" y2="50" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="2,1" opacity=".7"/>`
-            : `<line x1="16" y1="28" x2="12" y2="6"  stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="2,1" opacity=".7"/>
-               <line x1="24" y1="26" x2="24" y2="4"  stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="2,1" opacity=".7"/>
-               <line x1="32" y1="28" x2="36" y2="6"  stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="2,1" opacity=".7"/>`;
-        if (t.includes('fracture'))
-            ex += `<path d="M20,${up?8:24} L22,${up?14:30} L18,${up?18:34} L22,${up?24:40}" stroke="#e67e22" stroke-width="1.5" fill="none" stroke-linecap="round"/>`;
-        if (t.includes('implant'))
-            ex += `<rect x="21" y="${up?36:4}" width="6" height="16" rx="2" fill="#27ae60" opacity=".7"/>
-                   <line x1="20" y1="${up?40:12}" x2="28" y2="${up?40:12}" stroke="#1a7a48" stroke-width="1"/>
-                   <line x1="20" y1="${up?44:16}" x2="28" y2="${up?44:16}" stroke="#1a7a48" stroke-width="1"/>`;
-        const crown = up
-            ? `<rect x="6" y="4" width="36" height="28" rx="7" fill="${f}" stroke="${s}" stroke-width="1.5"/>
-               <circle cx="14" cy="10" r="4" fill="${s}" opacity=".25"/><circle cx="28" cy="10" r="4" fill="${s}" opacity=".25"/>
-               <circle cx="14" cy="24" r="4" fill="${s}" opacity=".25"/><circle cx="28" cy="24" r="4" fill="${s}" opacity=".25"/>
-               <path d="M14,10 Q21,17 28,10 M14,24 Q21,17 28,24" stroke="${s}" stroke-width=".8" fill="none" opacity=".5"/>`
-            : `<rect x="6" y="24" width="36" height="28" rx="7" fill="${f}" stroke="${s}" stroke-width="1.5"/>
-               <circle cx="14" cy="30" r="4" fill="${s}" opacity=".25"/><circle cx="28" cy="30" r="4" fill="${s}" opacity=".25"/>
-               <circle cx="14" cy="44" r="4" fill="${s}" opacity=".25"/><circle cx="28" cy="44" r="4" fill="${s}" opacity=".25"/>
-               <path d="M14,30 Q21,37 28,30 M14,44 Q21,37 28,44" stroke="${s}" stroke-width=".8" fill="none" opacity=".5"/>`;
-        const roots = up
-            ? `<path d="M10,32 Q8,44 8,52"  stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>
-               <path d="M24,32 Q24,44 24,54" stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>
-               <path d="M38,32 Q40,44 40,52" stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`
-            : `<path d="M14,24 Q12,12 10,4" stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>
-               <path d="M34,24 Q36,12 38,4" stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`;
-        return `<svg viewBox="0 0 48 56" width="42" height="48" xmlns="http://www.w3.org/2000/svg" style="display:block">
-                  <g opacity="${op}">${crown}${roots}${ex}</g>
-                  ${miss ? ToothSVG._missCross(8,8,40,48,40,8,8,48) : ''}
-                </svg>`;
-    }
-
-    static _premolar(conditions, up) {
-        const { f, s } = ToothSVG.resolve(conditions);
-        const t = conditions.map(c => c.type);
-        const miss = t.includes('missing');
-        const op   = miss ? .3 : 1;
-        let ex = '';
-        if (t.includes('rct')) ex += up
-            ? `<line x1="18" y1="28" x2="14" y2="48" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="2,1" opacity=".7"/>
-               <line x1="26" y1="28" x2="30" y2="48" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="2,1" opacity=".7"/>`
-            : `<line x1="18" y1="22" x2="14" y2="4"  stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="2,1" opacity=".7"/>
-               <line x1="26" y1="22" x2="30" y2="4"  stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="2,1" opacity=".7"/>`;
-        if (t.includes('fracture'))
-            ex += `<path d="M22,${up?8:24} L24,${up?16:32} L20,${up?20:36}" stroke="#e67e22" stroke-width="1.5" fill="none" stroke-linecap="round"/>`;
-        const crown = up
-            ? `<path d="M8,6 Q8,4 22,4 Q36,4 36,6 L36,28 Q36,32 22,32 Q8,32 8,28 Z" fill="${f}" stroke="${s}" stroke-width="1.5"/>
-               <circle cx="15" cy="14" r="4" fill="${s}" opacity=".2"/><circle cx="29" cy="14" r="4" fill="${s}" opacity=".2"/>
-               <line x1="22" y1="8" x2="22" y2="28" stroke="${s}" stroke-width=".8" opacity=".4"/>`
-            : `<path d="M8,20 Q8,24 22,24 Q36,24 36,20 L36,46 Q36,50 22,50 Q8,50 8,46 Z" fill="${f}" stroke="${s}" stroke-width="1.5"/>
-               <circle cx="15" cy="36" r="4" fill="${s}" opacity=".2"/><circle cx="29" cy="36" r="4" fill="${s}" opacity=".2"/>
-               <line x1="22" y1="24" x2="22" y2="46" stroke="${s}" stroke-width=".8" opacity=".4"/>`;
-        const roots = up
-            ? `<path d="M10,32 Q8,42 10,50"  stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>
-               <path d="M34,32 Q36,42 34,50"  stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`
-            : `<path d="M14,20 Q12,10 10,2"  stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>
-               <path d="M30,20 Q32,10 34,2"   stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`;
-        return `<svg viewBox="0 0 44 52" width="38" height="46" xmlns="http://www.w3.org/2000/svg" style="display:block">
-                  <g opacity="${op}">${crown}${roots}${ex}</g>
-                  ${miss ? ToothSVG._missCross(6,6,38,46,38,6,6,46) : ''}
-                </svg>`;
-    }
-
-    static _canine(conditions, up) {
-        const { f, s } = ToothSVG.resolve(conditions);
-        const miss = conditions.some(c => c.type === 'missing');
-        const op   = miss ? .3 : 1;
-        const crown = up
-            ? `<path d="M6,8 Q6,4 19,4 Q32,4 32,8 L32,28 Q32,32 19,32 Q6,32 6,28 Z" fill="${f}" stroke="${s}" stroke-width="1.5"/>
-               <path d="M13,4 Q19,0 25,4" stroke="${s}" stroke-width="1.5" fill="none"/>
-               <line x1="19" y1="4" x2="19" y2="28" stroke="${s}" stroke-width=".8" opacity=".4"/>`
-            : `<path d="M6,24 Q6,28 19,28 Q32,28 32,24 L32,48 Q32,52 19,52 Q6,52 6,48 Z" fill="${f}" stroke="${s}" stroke-width="1.5"/>
-               <path d="M13,52 Q19,56 25,52" stroke="${s}" stroke-width="1.5" fill="none"/>`;
-        const roots = up
-            ? `<path d="M19,32 Q17,44 17,54" stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`
-            : `<path d="M19,24 Q17,12 17,2"  stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`;
-        return `<svg viewBox="0 0 38 56" width="32" height="48" xmlns="http://www.w3.org/2000/svg" style="display:block">
-                  <g opacity="${op}">${crown}${roots}</g>
-                  ${miss ? ToothSVG._missCross(4,4,34,52,34,4,4,52) : ''}
-                </svg>`;
-    }
-
-    static _incisor(conditions, up) {
-        const { f, s } = ToothSVG.resolve(conditions);
-        const t    = conditions.map(c => c.type);
-        const miss = t.includes('missing');
-        const op   = miss ? .3 : 1;
-        const ven  = t.includes('veneer');
-        const crown = up
-            ? `<path d="M5,8 Q5,4 17,4 Q29,4 29,8 L29,28 Q29,32 17,32 Q5,32 5,28 Z" fill="${f}" stroke="${s}" stroke-width="1.5"/>
-               ${ven ? `<path d="M5,8 Q5,4 17,4 Q29,4 29,8 L29,18" stroke="#00bcd4" stroke-width="2.5" fill="none" stroke-linecap="round" opacity=".8"/>` : ''}
-               <line x1="17" y1="4" x2="17" y2="28" stroke="${s}" stroke-width=".6" opacity=".3"/>`
-            : `<path d="M5,20 Q5,24 17,24 Q29,24 29,20 L29,44 Q29,48 17,48 Q5,48 5,44 Z" fill="${f}" stroke="${s}" stroke-width="1.5"/>
-               ${ven ? `<path d="M5,44 Q5,48 17,48 Q29,48 29,44 L29,34" stroke="#00bcd4" stroke-width="2.5" fill="none" stroke-linecap="round" opacity=".8"/>` : ''}`;
-        const roots = up
-            ? `<path d="M17,32 Q15,42 15,50" stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`
-            : `<path d="M17,20 Q15,10 15,2"  stroke="${s}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`;
-        return `<svg viewBox="0 0 34 52" width="28" height="46" xmlns="http://www.w3.org/2000/svg" style="display:block">
-                  <g opacity="${op}">${crown}${roots}</g>
-                  ${miss ? ToothSVG._missCross(4,4,30,48,30,4,4,48) : ''}
-                </svg>`;
-    }
 }
 
 
 /* ───────────────────────────────────────────────────────────────────────────
    CLASS: DentalChart  – main controller
-   Owns all state, UI events, save/load/clear/export.
 ─────────────────────────────────────────────────────────────────────────────*/
 class DentalChart {
 
-    /* ── tooth catalogue (static) ───────────────────────────────────────── */
     static UPPER_META = [
         {fdi:'18',uni:'1', name:'Upper Right 3rd Molar',    type:'molar'},
         {fdi:'17',uni:'2', name:'Upper Right 2nd Molar',    type:'molar'},
@@ -813,7 +635,6 @@ class DentalChart {
         {fdi:'38',uni:'17',name:'Lower Left 3rd Molar',     type:'molar'},
     ];
 
-    /* Primary / deciduous (child) dentition — FDI 51–65, 71–85, Universal letters A–T */
     static UPPER_META_CHILD = [
         {fdi:'55',uni:'A',name:'Upper Right 2nd Primary Molar', type:'molar'},
         {fdi:'54',uni:'B',name:'Upper Right 1st Primary Molar', type:'molar'},
@@ -840,13 +661,11 @@ class DentalChart {
         {fdi:'75',uni:'K',name:'Lower Left 2nd Primary Molar',  type:'molar'},
     ];
 
-    /* Which tooth the midline divider goes after, per dentition */
     static MIDLINE_AFTER = {
         permanent: ['11', '41'],
         primary  : ['51', '81'],
     };
 
-    /* Colors for the overall chart status pill in the top bar */
     static STATUS_COLORS = {
         'Planned'   : '#f39c12',
         'Approved'  : '#3498db',
@@ -855,24 +674,6 @@ class DentalChart {
         'Completed' : '#27ae60',
     };
 
-
-    static COL = {
-        healthy:'#27ae60', missing:'#95a5a6', implant:'#27ae60',
-        bridge :'#16a085', crown  :'#f39c12', filling:'#3498db',
-        rct    :'#8e44ad', veneer :'#00bcd4', decay  :'#e74c3c',
-        fracture:'#e67e22',mobility:'#e91e63',abscess:'#ff5722',
-    };
-
-    static LBL = {
-        healthy:'Healthy', missing:'Missing',  implant:'Implant',
-        bridge :'Bridge',  crown  :'Crown',    filling:'Filling',
-        rct    :'RCT',     veneer :'Veneer',   decay  :'Decay',
-        fracture:'Fracture',mobility:'Mobility',abscess:'Abscess',
-    };
-
-    /* Sextant labels for the BPE / BEWE 2-row × 3-column grids.
-       Index 0-2 = upper row (sextants 1-3), index 3-5 = lower row (sextants 4-6),
-       mapped to bpe1..bpe6 / bewe1..bewe6 on "Dental charting_". */
     static SEXTANT_LABELS = [
         'Upper Right', 'Upper Anterior', 'Upper Left',
         'Lower Right', 'Lower Anterior', 'Lower Left',
@@ -880,86 +681,50 @@ class DentalChart {
 
     /* ── constructor ────────────────────────────────────────────────────── */
     constructor() {
-        /* Condition (uid) currently checked in the Condition Summary grid */
         this.summarySelectedIds = new Set();
 
-        /* Both dentitions are always kept and always shown side by side */
         this.teethSets = { permanent: {}, primary: {} };
         [...DentalChart.UPPER_META, ...DentalChart.LOWER_META]
             .forEach(m => { this.teethSets.permanent[m.fdi] = new ToothState(m); });
         [...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD]
             .forEach(m => { this.teethSets.primary[m.fdi] = new ToothState(m); });
 
-        /* Observations catalog, fetched from the "Tooth Status" doctype */
         this.toothStatusCatalog = [];
-        /* Currently selected observation: { id, label, color, isHealthy } */
         this.selStatus = null;
-        /* Live search filter for the observations list */
         this.obsSearchTerm = '';
 
-        /* UI state */
         this.selFDI  = null;
         this.useFDI  = true;
 
-        /* Patient sub-component */
         this.patient = new PatientInfo();
 
-        /* Saved chart name (after first save) */
         this.savedChartName = null;
-
-        /* Overall chart status shown in the top bar */
         this.chartStatus = 'Planned';
 
-        /* BPE / BEWE sextant scores, keyed 1–6, mapped to bpe1..bpe6 / bewe1..bewe6 */
         this.bpe  = {1:'',2:'',3:'',4:'',5:'',6:''};
         this.bewe = {1:'',2:'',3:'',4:'',5:'',6:''};
 
-        /* Tooltip element (already in HTML) */
         this._tip = document.getElementById('dc-tip');
     }
 
-    /** All permanent + primary teeth combined — both dentitions are always shown together. */
     get allMeta() {
         return [
             ...DentalChart.UPPER_META,       ...DentalChart.LOWER_META,
             ...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD,
         ];
     }
-    /** ToothState dict across both dentitions, keyed by FDI (codes never collide between the two). */
     get teeth() { return { ...this.teethSets.permanent, ...this.teethSets.primary }; }
 
 
     /* ── init ───────────────────────────────────────────────────────────── */
     init() {
-        /* Date */
         _set('dc-pt-date', frappe.datetime.str_to_user(frappe.datetime.get_today()));
 
-        /* Patient link – load patient info and latest chart on change */
+        /* Patient picked manually in the link field */
         this.patient.onChange(async (patientId) => {
-             _set('dc-pt-fullname', 'Loading…');  
-            await this.patient.load(patientId);
-            this.savedChartName = null;
-            this.chartStatus    = 'Planned';
-            _set('dc-pt-badge', 'New Chart');
-            this._renderChartStatus();
-            await this._loadLatestChart(patientId);
+            await this._openPatient(patientId);
         });
 
-        /* Provider link – banner is updated live inside PatientInfo constructor */
-        this.patient.onProviderChange((_providerId) => {
-            /* hook available for future side-effects */
-        });
-
-        /* Pre-fill patient from URL param if present */
-        const params = frappe.utils.get_query_params();
-        if (params.patient) {
-            this.patient.setValue(params.patient);
-            this.patient.load(params.patient);
-            /* Also try to load the most recent chart for this patient */
-            this._loadLatestChart(params.patient);
-        }
-
-        /* Bind all palette and surface events */
         this._loadToothStatuses();
         this._bindObservationSearch();
         this._bindNumberingToggle();
@@ -967,24 +732,44 @@ class DentalChart {
         this._bindChartStatus();
         this._renderChartStatus();
 
-        /* Initial render */
         this.render();
+
+        /* Patient passed from the Patient form (or ?patient= in the URL) */
+        this.applyRouteOptions();
     }
 
-    /**
-     * Load the most recent Dental Chart doc for a patient and populate state.
-     * @param {string} patientId
-     */
+    /* ── PATIENT PASSED FROM THE PATIENT FORM ─────────────────────────── */
+    applyRouteOptions() {
+        let patientId = null;
+
+        if (frappe.route_options && frappe.route_options.patient) {
+            patientId = frappe.route_options.patient;
+            frappe.route_options = null;
+        } else {
+            const params = frappe.utils.get_query_params();
+            if (params.patient) patientId = params.patient;
+        }
+
+        if (!patientId) return;
+        if (patientId === this.patient.value && this.patient.id === patientId) return;   // already open
+
+        this.patient.setValue(patientId);
+        this._openPatient(patientId);
+    }
+
+    /** Switch the page to a patient: fresh chart, then load their latest saved chart. */
+    async _openPatient(patientId) {
+        this.clear();
+        _set('dc-pt-fullname', 'Loading…');
+        await this.patient.load(patientId);
+        await this._loadLatestChart(patientId);
+    }
+
     async _loadLatestChart(patientId) {
-        frappe.show_alert({
-            message  : 'Loading latest chart…',
-            indicator: 'blue',
-        });
         try {
-            /* Get list of charts for this patient, newest first */
             const list = await frappe.db.get_list('Dental charting_', {
                 filters : { patient: patientId },
-                fields  : ['name', 'chart_date', 'provider', 'clinical_notes'],
+                fields  : ['name', 'chart_date'],
                 order_by: 'chart_date desc',
                 limit   : 1,
             });
@@ -1004,51 +789,36 @@ class DentalChart {
         }
     }
 
-    /**
-     * Fetch a specific Dental Chart doc by name and hydrate all tooth states.
-     * @param {string} chartName  e.g. "DCH-00001"
-     */
     async _loadChartByName(chartName) {
         try {
             const doc = await frappe.db.get_doc('Dental charting_', chartName);
 
-            /* Reset first so stale data is cleared (both dentitions) */
             this._resetAllTeeth();
             this.summarySelectedIds = new Set();
 
-            /* Make sure the observation catalog is available so saved condition
-               labels can be matched back to their original color. */
             if (!this.toothStatusCatalog.length) {
                 await this._loadToothStatuses();
             }
 
-            /* Restore notes */
             const clinicalEl = document.getElementById('dc-notes-clinical');
             if (clinicalEl) clinicalEl.value = doc.clinical_notes || '';
 
             const disclaimerEl = document.getElementById('dc-notes-disclaimer');
-            if (disclaimerEl) disclaimerEl.value = doc.disclaimer || '';   // ← adjust fieldname here if your doctype differs
+            if (disclaimerEl) disclaimerEl.value = doc.disclaimer || '';
 
-            /* Restore provider into link control and banner */
-            if (doc.provider) {
-                this.patient.setProvider(doc.provider);
-            }
+            /* Provider = the user who created this chart */
+            this.patient.setProvider(doc.owner || doc.provider || frappe.session.user);
 
-            /* Restore per-tooth conditions — a real child table (fieldname: condition_summary).
-               Fields: fdi, name1, condition, surface, notes.
-               Look across both dentition sets since permanent/primary FDI codes never overlap. */
             (doc.condition_summary || []).forEach(row => {
                 const state = this.teethSets.permanent[row.fdi] || this.teethSets.primary[row.fdi];
                 if (state) state.loadFromDocRow(row, this.toothStatusCatalog);
             });
 
-            /* Restore BPE / BEWE sextant scores */
             for (let n = 1; n <= 6; n++) {
                 this.bpe[n]  = doc['bpe' + n]  || '';
                 this.bewe[n] = doc['bewe' + n] || '';
             }
 
-            /* Track the loaded chart name and status */
             this.savedChartName = doc.name;
             this.chartStatus    = doc.status && DentalChart.STATUS_COLORS[doc.status] ? doc.status : 'Planned';
             _set('dc-pt-badge', doc.name);
@@ -1063,10 +833,6 @@ class DentalChart {
         }
     }
 
-    /**
-     * Show a dialog listing all saved charts for the current patient
-     * so the user can pick one to load.
-     */
     async loadChartHistory() {
         const patientId = this.patient.value;
         if (!patientId) {
@@ -1077,7 +843,7 @@ class DentalChart {
         try {
             const list = await frappe.db.get_list('Dental charting_', {
                 filters : { patient: patientId },
-                fields  : ['name', 'chart_date', 'provider'],
+                fields  : ['name', 'chart_date', 'owner'],
                 order_by: 'chart_date desc',
                 limit   : 20,
             });
@@ -1089,26 +855,23 @@ class DentalChart {
 
             const d = new frappe.ui.Dialog({
                 title : 'Select a Chart to Load',
-                fields: [{
-                    fieldtype: 'HTML',
-                    fieldname: 'chart_list_html',
-                }],
+                fields: [{ fieldtype: 'HTML', fieldname: 'chart_list_html' }],
             });
 
-            const rows = list.map(c =>
-                `<div class="hist-item" data-name="${c.name}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e2e6ea;border-radius:6px;margin-bottom:5px;cursor:pointer;font-size:12px;transition:background .13s;" 
+            const rows = list.map(c => {
+                const by = frappe.user.full_name ? frappe.user.full_name(c.owner) : c.owner;
+                return `<div class="hist-item" data-name="${c.name}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e2e6ea;border-radius:6px;margin-bottom:5px;cursor:pointer;font-size:12px;transition:background .13s;"
                      onmouseover="this.style.background='#e8f0fe'" onmouseout="this.style.background=''">
                   <span style="font-family:'DM Mono',monospace;font-weight:600">${c.name}</span>
                   <span style="color:#6b7a8d">${frappe.datetime.str_to_user(c.chart_date)}</span>
-                  <span style="color:#9aa3af;font-size:11px">by ${c.provider}</span>
-                </div>`
-            ).join('');
+                  <span style="color:#9aa3af;font-size:11px">by ${by}</span>
+                </div>`;
+            }).join('');
 
             d.fields_dict.chart_list_html.$wrapper.html(
                 `<div style="max-height:340px;overflow-y:auto">${rows}</div>`
             );
 
-            /* Click to load */
             d.fields_dict.chart_list_html.$wrapper.on('click', '.hist-item', async (e) => {
                 const name = $(e.currentTarget).data('name');
                 d.hide();
@@ -1123,11 +886,11 @@ class DentalChart {
     }
 
     /* ══════════════════════════════════════════════════════════════════════
-       DOCTYPE  ──  SAVE (Insert new chart OR update existing chart)
+       SAVE
     ══════════════════════════════════════════════════════════════════════*/
 
     async save() {
-        const patientId = this.patient.value || frappe.utils.get_query_params().patient;
+        const patientId = this.patient.value;
 
         if (!patientId) {
             frappe.msgprint({
@@ -1138,22 +901,12 @@ class DentalChart {
             return;
         }
 
-        /* Build "Condition summary" child-table rows – one row per condition
-           per tooth, across BOTH dentitions (permanent + primary), since FDI
-           codes never collide between the two sets.
-           Fields: fdi, name1, condition, surface, notes */
         const conditionRows = [];
-        const fullMeta = [
-            ...DentalChart.UPPER_META,       ...DentalChart.LOWER_META,
-            ...DentalChart.UPPER_META_CHILD, ...DentalChart.LOWER_META_CHILD,
-        ];
-
-        fullMeta.forEach(meta => {
+        this.allMeta.forEach(meta => {
             const state = this.teethSets.permanent[meta.fdi] || this.teethSets.primary[meta.fdi];
             if (!state) return;
 
             if (!state.conditions.length) {
-                /* Save healthy teeth too so the chart is complete */
                 conditionRows.push({
                     doctype  : 'Condition summary child table',
                     fdi      : state.fdi,
@@ -1176,11 +929,10 @@ class DentalChart {
             }
         });
 
-        const providerVal    = this.patient.providerValue || this.patient.provider || '';
+        const providerVal    = this.patient.providerValue || frappe.session.user;
         const clinicalNotes  = (document.getElementById('dc-notes-clinical')   || {}).value || '';
         const disclaimerText = (document.getElementById('dc-notes-disclaimer') || {}).value || '';
 
-        /* BPE / BEWE sextant scores → bpe1..bpe6 / bewe1..bewe6 */
         const perioFields = {};
         for (let n = 1; n <= 6; n++) {
             perioFields['bpe'  + n] = this.bpe[n]  || '';
@@ -1189,19 +941,14 @@ class DentalChart {
 
         try {
             if (this.savedChartName) {
-                /* ── UPDATE existing chart ──────────────────────────────────────
-                   frappe.client.save needs the FULL document — saving a partial
-                   object here was the bug: fields we don't manage (or even ones
-                   we do, on some Frappe versions) would get wiped out instead of
-                   updated. Fetch the real doc first, mutate it, then save it whole.
-                ────────────────────────────────────────────────────────────────*/
+                /* UPDATE — round-trip the full existing doc so no other fields are lost */
                 const existing = await frappe.db.get_doc('Dental charting_', this.savedChartName);
                 existing.patient           = patientId;
                 existing.chart_date        = frappe.datetime.get_today();
                 existing.provider          = providerVal;
                 existing.status            = this.chartStatus;
                 existing.clinical_notes    = clinicalNotes;
-                existing.disclaimer        = disclaimerText;   // ← adjust fieldname here if your doctype differs
+                existing.disclaimer        = disclaimerText;
                 existing.condition_summary = conditionRows;
                 Object.assign(existing, perioFields);
 
@@ -1214,14 +961,10 @@ class DentalChart {
                             frappe.show_alert({ message: `Updated: ${r.message.name}`, indicator: 'green' });
                         }
                     },
-                    error: (r) => {
-                        console.error('[DentalChart] save (update) failed:', r);
-                    },
+                    error: (r) => console.error('[DentalChart] save (update) failed:', r),
                 });
             } else {
-                /* ── CREATE new chart ───────────────────────────────────────────
-                   Insert a fresh Dental charting_ document.
-                ────────────────────────────────────────────────────────────────*/
+                /* CREATE */
                 frappe.call({
                     method  : 'frappe.client.insert',
                     args    : {
@@ -1232,7 +975,7 @@ class DentalChart {
                             provider         : providerVal,
                             status           : this.chartStatus,
                             clinical_notes   : clinicalNotes,
-                            disclaimer       : disclaimerText,   // ← adjust fieldname here if your doctype differs
+                            disclaimer       : disclaimerText,
                             condition_summary: conditionRows,
                             ...perioFields,
                         },
@@ -1244,9 +987,7 @@ class DentalChart {
                             frappe.show_alert({ message: `Saved: ${r.message.name}`, indicator: 'green' });
                         }
                     },
-                    error: (r) => {
-                        console.error('[DentalChart] save (insert) failed:', r);
-                    },
+                    error: (r) => console.error('[DentalChart] save (insert) failed:', r),
                 });
             }
         } catch (err) {
@@ -1267,6 +1008,15 @@ class DentalChart {
         this.chartStatus        = 'Planned';
         this.bpe  = {1:'',2:'',3:'',4:'',5:'',6:''};
         this.bewe = {1:'',2:'',3:'',4:'',5:'',6:''};
+
+        const clinicalEl = document.getElementById('dc-notes-clinical');
+        if (clinicalEl) clinicalEl.value = '';
+        const disclaimerEl = document.getElementById('dc-notes-disclaimer');
+        if (disclaimerEl) disclaimerEl.value = '';
+
+        /* New chart → provider is whoever is logged in */
+        this.patient.setProvider(frappe.session.user);
+
         _set('dc-pt-badge', 'New Chart');
         this._renderChartStatus();
         this.render();
@@ -1276,6 +1026,7 @@ class DentalChart {
         const payload = {
             chart   : this.savedChartName,
             patient : this.patient.value,
+            provider: this.patient.providerValue,
             exported: new Date().toISOString(),
             state   : {},
             bpe     : { ...this.bpe },
@@ -1326,7 +1077,6 @@ class DentalChart {
 
         metaList.forEach(meta => {
             row.appendChild(this._buildToothCell(meta, isUpper));
-            /* Midline marker after the last tooth of the right side (varies by dentition) */
             if (DentalChart.MIDLINE_AFTER[dentitionKey].includes(meta.fdi)) {
                 const ml = document.createElement('div');
                 ml.className = 'midline-marker';
@@ -1348,7 +1098,6 @@ class DentalChart {
         const alt    = this.useFDI ? `U:${meta.uni}` : `FDI:${meta.fdi}`;
         const sel    = this.selFDI === meta.fdi;
 
-        /* Badge (first condition's initial, colored to match) */
         const fc    = state.conditions[0];
         const badge = fc
             ? `<div class="tooth-badge" style="background:${fc.color || '#999'};${isUp ? '' : 'bottom:-4px;top:auto'}">${(fc.label || fc.type || '?').charAt(0).toUpperCase()}</div>`
@@ -1362,15 +1111,10 @@ class DentalChart {
         const svgH  = `<div class="tooth-svg-wrap">${ToothSVG.render(meta, isUp, state.conditions)}${badge}</div>`;
         el.innerHTML = isUp ? (numH + svgH) : (svgH + numH);
 
-        /* Whole-cell click just selects the tooth (used as the default
-           tooth for new treatment plan rows, and for the tooltip). */
         el.addEventListener('click',       ()  => this._selectTooth(meta.fdi));
         el.addEventListener('mouseenter',  (e) => this._showTip(e, meta));
         el.addEventListener('mouseleave',  ()  => this._hideTip());
 
-        /* Each surface region of the tooth diagram is individually
-           clickable: clicking a side applies the currently selected
-           observation to exactly that surface, right on the diagram. */
         el.querySelectorAll('[data-surface]').forEach(region => {
             region.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1391,28 +1135,15 @@ class DentalChart {
         _set('dc-st-fl', flagged);
     }
 
-    /**
-     * Render the BPE and BEWE sextant score grids (2 rows × 3 columns each),
-     * shown above the Condition Summary table. Values live in this.bpe /
-     * this.bewe, keyed 1–6, and map straight onto the bpe1..bpe6 /
-     * bewe1..bewe6 fields on the "Dental charting_" doctype.
-     */
     _renderPerioGrids() {
         this._buildPerioGrid('dc-bpe-grid',  this.bpe,  4, '*');
         this._buildPerioGrid('dc-bewe-grid', this.bewe, 3, null);
     }
 
-    /**
-     * @param {string} containerId  – id of the grid element to fill
-     * @param {Object} dataObj      – this.bpe or this.bewe, keyed 1..6
-     * @param {number} maxScore     – highest numeric score (inclusive)
-     * @param {?string} extraOption – optional extra allowed character (e.g. '*')
-     */
     _buildPerioGrid(containerId, dataObj, maxScore, extraOption) {
         const grid = document.getElementById(containerId);
         if (!grid) return;
 
-        /* Characters the user is allowed to type into a sextant cell */
         const allowed = Array.from({ length: maxScore + 1 }, (_, k) => String(k));
         if (extraOption) allowed.push(extraOption);
 
@@ -1429,8 +1160,6 @@ class DentalChart {
         grid.querySelectorAll('.dc-perio-input').forEach(input => {
             const n = input.dataset.n;
 
-            /* Live-validate as the user types: keep only allowed characters,
-               anything else (including a 2nd keystroke) is rejected. */
             input.addEventListener('input', (e) => {
                 let v = (e.target.value || '').trim().toUpperCase();
                 if (v && !allowed.includes(v)) v = dataObj[n] || '';
@@ -1438,7 +1167,6 @@ class DentalChart {
                 dataObj[n] = v;
             });
 
-            /* Select-all-on-focus so a fresh keystroke just overwrites the value */
             input.addEventListener('focus', (e) => e.target.select());
         });
     }
@@ -1450,7 +1178,6 @@ class DentalChart {
         const toothOptions   = this.allMeta.map(m => m.fdi);
         const surfaceOptions = ['All', 'M', 'O', 'D', 'B', 'L'];
 
-        /* Flatten every condition across the current dentition into rows */
         const flat = [];
         this.allMeta.forEach(meta => {
             this.teeth[meta.fdi].conditions.forEach(c => {
@@ -1515,7 +1242,6 @@ class DentalChart {
         this._bindConditionSummaryEvents();
     }
 
-    /** Find a condition (and its owning ToothState) by its uid, across the current dentition. */
     _findConditionByUid(uid) {
         for (const meta of this.allMeta) {
             const state = this.teeth[meta.fdi];
@@ -1579,12 +1305,11 @@ class DentalChart {
             el.addEventListener('change', (e) => {
                 const state = this.teeth[el.dataset.fdi];
                 if (state) state.notes = e.target.value;
-                this._renderSummary();   // other rows for the same tooth show the same notes value
+                this._renderSummary();
             });
         });
     }
 
-    /** "+ Add Row" — a blank, unassigned observation waiting to be picked. */
     _addBlankConditionRow() {
         const fdi = this.selFDI || (this.allMeta[0] && this.allMeta[0].fdi);
         if (!fdi) return;
@@ -1605,7 +1330,6 @@ class DentalChart {
         this.summarySelectedIds.forEach(uid => {
             const found = this._findConditionByUid(uid);
             if (found) {
-                /* Push directly (bypassing addCondition's type+surface dedup) so the copy isn't collapsed back into the original */
                 found.state.conditions.push({
                     ...found.cond,
                     uid: 'cond_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
@@ -1626,7 +1350,6 @@ class DentalChart {
         this.render();
     }
 
-    /** Move a condition from its current tooth to a different one, keeping its uid/status/surface. */
     _moveConditionTooth(uid, newFdi) {
         const found = this._findConditionByUid(uid);
         if (!found || found.fdi === newFdi) return;
@@ -1637,7 +1360,6 @@ class DentalChart {
         this.render();
     }
 
-    /** Change which observation a Condition Summary row represents. Picking "Healthy" removes the row. */
     _setConditionObservation(uid, statusId) {
         const found = this._findConditionByUid(uid);
         if (!found) return;
@@ -1674,13 +1396,6 @@ class DentalChart {
         this.render();
     }
 
-    /**
-     * Apply (or clear) the currently selected observation on one tooth/surface.
-     * Shared by the palette "apply to selected tooth" flow and by clicking
-     * a surface region directly on the tooth diagram. Applying the exact
-     * same observation to the exact same surface a second time toggles it
-     * back off, rolling back the change.
-     */
     _applyStatusToTooth(fdi, surface) {
         if (!this.selStatus) return;
         const state = this.teeth[fdi];
@@ -1697,7 +1412,6 @@ class DentalChart {
                 c => c.type === this.selStatus.id && c.surface === surface
             );
             if (alreadyApplied) {
-                /* Toggle off — clicking the same observation again rolls it back */
                 state.conditions = state.conditions.filter(
                     c => !(c.type === this.selStatus.id && c.surface === surface)
                 );
@@ -1725,7 +1439,6 @@ class DentalChart {
         this._applyStatusToTooth(this.selFDI, 'All');
     }
 
-    /** Clicking directly on a tooth surface applies the selected observation right there. */
     _applyToSurface(fdi, surface) {
         this.selFDI = fdi;
         if (!this.selStatus) {
@@ -1740,17 +1453,13 @@ class DentalChart {
        EVENT BINDING
     ══════════════════════════════════════════════════════════════════════*/
 
-    /**
-     * Fetch the observation catalog from the "Tooth Status" doctype and
-     * render it as a clickable, color-coded list in the left palette.
-     */
     async _loadToothStatuses() {
         const wrap = document.getElementById('dc-obs-list');
         if (wrap) wrap.innerHTML = `<div style="font-size:11px;color:var(--muted2);padding:6px 0">Loading observations…</div>`;
 
         try {
             this.toothStatusCatalog = await frappe.db.get_list('Tooth Status', {
-                fields            : ['name', 'status_name', 'color'],   // ← adjust fieldnames here if needed
+                fields            : ['name', 'status_name', 'color'],
                 limit_page_length : 0,
                 order_by          : 'status_name asc',
             });
@@ -1764,7 +1473,6 @@ class DentalChart {
             });
         }
 
-        /* Sort alphabetically client-side too, as a safety net */
         this.toothStatusCatalog.sort((a, b) =>
             (a.status_name || a.name).localeCompare(b.status_name || b.name)
         );
@@ -1893,7 +1601,7 @@ class DentalChart {
 
 
 /* ───────────────────────────────────────────────────────────────────────────
-   Shared DOM util (mirrors original _dcSet)
+   Shared DOM util
 ─────────────────────────────────────────────────────────────────────────────*/
 function _set(id, val) {
     const el = document.getElementById(id);

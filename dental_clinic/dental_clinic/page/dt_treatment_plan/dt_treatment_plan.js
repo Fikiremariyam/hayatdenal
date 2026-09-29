@@ -229,6 +229,12 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
 	});
 };
 
+// Runs every time the page is opened (Frappe caches pages, so on_page_load
+// only runs the first time). Picks up the patient sent from the Patient form.
+frappe.pages['dt_treatment_plan'].on_page_show = function () {
+	if (window._dtp) window._dtp.applyRouteOptions();
+};
+
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Deterministic color + category guess for procedures pulled from Item.
@@ -559,10 +565,7 @@ class DentalTreatmentPlanChart {
 		[...DentalTreatmentPlanChart.UPPER_META_CHILD, ...DentalTreatmentPlanChart.LOWER_META_CHILD]
 			.forEach(m => { this.teethSets.primary[m.fdi] = new DtpToothState(m); });
 
-		// Small lazily-built cache of Items already looked up (via search or
-		// loaded from a saved plan) — NOT a full catalog. We no longer
-		// preload every Item at page load; the left palette only ever shows
-		// the single item currently picked from the search field.
+		// Small cache of Items already looked up — not a full catalog.
 		this.itemCatalog = [];
 		this.selItem = null;
 
@@ -587,11 +590,15 @@ class DentalTreatmentPlanChart {
 			df: { fieldtype: 'Link', options: 'Patient', label: 'Patient', fieldname: 'patient', placeholder: 'Search patient…', reqd: 1 },
 			render_input: true,
 		});
+
+		// Provider = the logged-in user who creates the plan (read-only)
 		this.provider_ctrl = frappe.ui.form.make_control({
 			parent: $('#dtp-provider'),
-			df: { fieldtype: 'Link', options: 'Healthcare Practitioner', label: 'Provider', fieldname: 'provider', placeholder: 'Search provider…' },
+			df: { fieldtype: 'Link', options: 'User', label: 'Provider', fieldname: 'provider', read_only: 1 },
 			render_input: true,
 		});
+		this.provider_ctrl.set_value(frappe.session.user);
+
 		this.plan_date_ctrl = frappe.ui.form.make_control({
 			parent: $('#dtp-plan-date'),
 			df: { fieldtype: 'Date', label: 'Plan Date', fieldname: 'plan_date' },
@@ -599,9 +606,6 @@ class DentalTreatmentPlanChart {
 		});
 		this.plan_date_ctrl.set_value(frappe.datetime.get_today());
 
-		// The ONLY way to pick a treatment item now — a Link field that
-		// searches Item server-side (so it scales fine no matter how many
-		// items exist; nothing is preloaded or rendered as a big list).
 		this.item_search_ctrl = frappe.ui.form.make_control({
 			parent: $('#dtp-item-search-link'),
 			df: {
@@ -620,12 +624,23 @@ class DentalTreatmentPlanChart {
 		this._renderSelectedItem();
 
 		this.render();
+		this.applyRouteOptions();
 	}
 
-	/* ── SELECTED ITEM (left palette) ─────────────────────────────────────
-	   No preloaded list anymore. Searching + picking an Item builds one
-	   "currently clicked service" object (id/label/color/category/rate).
-	   That object is what gets applied to whichever tooth is clicked. ── */
+	/* ── PATIENT PASSED FROM THE PATIENT FORM ─────────────────────────── */
+	applyRouteOptions() {
+		const opts = frappe.route_options;
+		if (!opts || !opts.patient) return;
+		frappe.route_options = null;
+
+		// Different patient than the one on screen → start a fresh plan
+		if (this.patient_ctrl.get_value() !== opts.patient) {
+			this.reset();
+		}
+		this.patient_ctrl.set_value(opts.patient);
+	}
+
+	/* ── SELECTED ITEM (left palette) ─────────────────────────────────── */
 	async _onItemSearchSelected() {
 		const val = this.item_search_ctrl.get_value();
 		if (!val) return;
@@ -649,13 +664,9 @@ class DentalTreatmentPlanChart {
 		this._renderSelectedItem();
 		if (this.selFDI) this._applySelectedItem();
 
-		// Clear the field so it's ready for the next search/pick.
 		this.item_search_ctrl.set_value('');
 	}
 
-	/** Cache a looked-up Item so re-selecting it (or loading a saved plan
-	 *  that references it) doesn't need another round trip. Does NOT render
-	 *  a list — only _renderSelectedItem shows anything in the UI. */
 	_cacheItem(item) {
 		const item_name = item.item_name || item.name;
 		const category = dtpClassifyProcedure(item_name);
@@ -953,9 +964,6 @@ class DentalTreatmentPlanChart {
 			el.addEventListener('change', (e) => this._moveRowTooth(el.dataset.uid, e.target.value));
 		});
 
-		// Real Link controls for the Procedure cell — gives search-as-you-type
-		// against Item plus Frappe's built-in "Create a new Item" option when
-		// nothing matches, which a plain <select> can't offer.
 		wrap.querySelectorAll('.dtp-item-cell').forEach(cell => {
 			const uid = cell.dataset.uid;
 			const found = this._findRowByUid(uid);
@@ -984,9 +992,7 @@ class DentalTreatmentPlanChart {
 			});
 		});
 
-		// Note is free text and affects neither the tooth graphics nor the
-		// totals, so it's stored on every keystroke WITHOUT a re-render —
-		// re-rendering here would rebuild the table and steal focus mid-word.
+		// Note is stored on every keystroke without re-render (keeps focus).
 		wrap.querySelectorAll('.dtp-note-edit').forEach(el => {
 			el.addEventListener('input', (e) => {
 				const found = this._findRowByUid(el.dataset.uid);
@@ -1079,9 +1085,6 @@ class DentalTreatmentPlanChart {
 		let doc = this.itemCatalog.find(s => s.name === itemCode);
 
 		if (!doc) {
-			// Not in the cache yet — most likely just created via the Link
-			// field's "Create a new Item" option. Fetch it and cache it so
-			// the "currently selected" chip and other rows can reuse it.
 			try {
 				const r = await frappe.db.get_value('Item', itemCode, ['item_name', 'standard_rate']);
 				doc = this._cacheItem({
@@ -1118,9 +1121,7 @@ class DentalTreatmentPlanChart {
 		_dtpSet('dtp-total-ins', format_currency(totalIns));
 	}
 
-	/* ══════════════════════════════════════════════════════════════════
-	   SAVE — first point Dental Treatment Plan Procedure is referenced.
-	══════════════════════════════════════════════════════════════════*/
+	/* ── SAVE ──────────────────────────────────────────────────────────── */
 	async save() {
 		const patientId = this.patient_ctrl.get_value();
 		if (!patientId) {
@@ -1136,7 +1137,7 @@ class DentalTreatmentPlanChart {
 
 		const fieldValues = {
 			patient: patientId,
-			provider: this.provider_ctrl.get_value(),
+			provider: this.provider_ctrl.get_value() || frappe.session.user,
 			plan_type: document.getElementById('dtp-plan-type').value,
 			plan_date: this.plan_date_ctrl.get_value(),
 			dental_treatment_plan_procedure: procedureRows,
@@ -1150,14 +1151,7 @@ class DentalTreatmentPlanChart {
 
 		try {
 			if (this.docname) {
-				// UPDATE — fetch the full existing document first and mutate
-				// only the fields we manage, then send the whole thing back.
-				// Building a bare doc from scratch (as before) silently drops
-				// or blanks out every other field on the record — owner,
-				// creation, docstatus, idx, anything else — which is exactly
-				// what caused "Value cannot be changed for Created On" and
-				// the earlier false-positive "Document has been modified"
-				// conflict. Round-tripping the full doc avoids both.
+				// UPDATE — round-trip the full existing doc so no other fields are lost
 				const existing = await frappe.db.get_doc(this.frm_doctype, this.docname);
 				Object.assign(existing, fieldValues);
 
@@ -1168,7 +1162,7 @@ class DentalTreatmentPlanChart {
 					error: () => frappe.dom.unfreeze(),
 				});
 			} else {
-				// INSERT — nothing pre-existing to preserve, a fresh doc is fine.
+				// INSERT
 				frappe.call({
 					method: 'frappe.client.insert',
 					args: { doc: Object.assign({ doctype: this.frm_doctype }, fieldValues) },
@@ -1193,11 +1187,7 @@ class DentalTreatmentPlanChart {
 		frappe.show_alert({ message: `Saved: ${doc.name}`, indicator: 'green' });
 	}
 
-	/* ══════════════════════════════════════════════════════════════════
-	   NEW / LOAD HISTORY — second (and only other) point the child
-	   doctype is referenced: frappe.client.get returns it as part of
-	   the parent doc, server-side, only when the user asks for it.
-	══════════════════════════════════════════════════════════════════*/
+	/* ── NEW / LOAD HISTORY ────────────────────────────────────────────── */
 	reset() {
 		this.docname = null;
 		this.selFDI = null;
@@ -1205,7 +1195,7 @@ class DentalTreatmentPlanChart {
 		this.selectedRowIds = new Set();
 		this._resetAllTeeth();
 		this.patient_ctrl.set_value('');
-		this.provider_ctrl.set_value('');
+		this.provider_ctrl.set_value(frappe.session.user);
 		document.getElementById('dtp-plan-type').value = 'Active';
 		this.plan_date_ctrl.set_value(frappe.datetime.get_today());
 		document.getElementById('dtp-plan-note').value = '';
@@ -1280,7 +1270,8 @@ class DentalTreatmentPlanChart {
 
 					this.docname = doc.name;
 					this.patient_ctrl.set_value(doc.patient || '');
-					this.provider_ctrl.set_value(doc.provider || '');
+					// Show the user who created the plan
+					this.provider_ctrl.set_value(doc.owner || doc.provider || '');
 					document.getElementById('dtp-plan-type').value = doc.plan_type || 'Active';
 					this.plan_date_ctrl.set_value(doc.plan_date || '');
 					document.getElementById('dtp-plan-note').value = doc.plan_note || '';
