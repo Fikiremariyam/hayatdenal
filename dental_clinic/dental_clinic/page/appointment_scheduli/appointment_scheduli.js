@@ -42,10 +42,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     };
 
     // Gradient + accent color for each workflow-state action button, keyed by
-    // the same symbol so a state's badge and its "Move to …" button always
-    // read as the same color. Unmapped states/symbols fall back to a hash-based
-    // pick from this list, so any workflow keeps working even with states
-    // outside the four named above.
+    // the same symbol so a state's badge and its button always read as the
+    // same color. Unmapped states/symbols fall back to a hash-based pick from
+    // this list, so any workflow keeps working even with other states.
     var WF_STATE_COLORS = {
         'A': { from: '#2E86C1', to: '#1B5E8C' }, // default/starting state — blue
         'B': { from: '#3E7CB1', to: '#2C5A85' }, // In Clinic — steel blue
@@ -72,6 +71,15 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         return WF_FALLBACK_COLORS[code % WF_FALLBACK_COLORS.length];
     }
 
+    // An appointment counts as cancelled if either its status or its
+    // workflow state says so. Cancelled appointments are not drawn on the
+    // calendar and never block a slot.
+    function is_cancelled(a) {
+        if (!a) return false;
+        return a.status === 'Cancelled'
+            || String(a.workflow_state || '').trim().toLowerCase() === 'cancelled';
+    }
+
     // Duty Assignment data per practitioner, filled by fetch_practitioner_duty():
     //   duty_cache[practitioner] = null  -> lookup failed -> fail CLOSED
     //   duty_cache[practitioner] = {}    -> no Duty Assignment rows at all -> fail CLOSED
@@ -83,12 +91,15 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     // Used to ignore stale responses when the user changes filters mid-load.
     var active_load_key = '';
 
-    // The appointments the calendar is currently drawing. The slot picker also
-    // treats these as booked, so it can never offer a time that is visibly taken.
+    // The appointments the calendar is currently drawing (cancelled ones excluded).
+    // The slot picker also treats these as booked, so it can never offer a time
+    // that is visibly taken.
     var loaded_appts = [];
 
     // ── Styles ─────────────────────────────────────────────────
-    if (!document.getElementById('cal-sched-styles')) {
+    var old_style = document.getElementById('cal-sched-styles');
+    if (old_style) old_style.remove(); // make sure edits to the CSS below take effect
+    (function() {
         var style = document.createElement('style');
         style.id = 'cal-sched-styles';
         style.textContent = `
@@ -138,7 +149,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-allday-lbl { padding: 4px 8px; font-size: 10px; color: var(--text-muted); text-align: right; border-right: 1px solid var(--border-color); }
             .cal-allday-cell { padding: 3px 4px; border-right: 1px solid var(--border-color); min-height: 26px; }
             .cal-allday-cell:last-child { border-right: none; }
-            .cal-allday-block { border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 500; margin-bottom: 2px; }
+            .cal-allday-block { border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 500; margin-bottom: 2px; cursor: pointer; }
             .cal-body-row { display: grid; }
             .cal-time-col { background: var(--card-bg); border-right: 1px solid var(--border-color); }
             .cal-time-slot { height: 52px; padding: 4px 8px; font-size: 10px; color: var(--text-muted); text-align: right; border-bottom: 1px solid var(--border-color); }
@@ -189,12 +200,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-appt.is-short .cal-appt-name { margin-left: 4px; }
             .cal-appt.clipped-top { border-top: 2px dotted rgba(0,0,0,.3); border-top-left-radius: 0; border-top-right-radius: 0; }
             .cal-appt.clipped-bottom { border-bottom: 2px dotted rgba(0,0,0,.3); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-            /* Colour now identifies the doctor; status is shown by these instead. */
-            .cal-appt.Cancelled { opacity: .55; }
-            .cal-appt.Cancelled .cal-appt-name { text-decoration: line-through; }
             .cal-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 13px; }
             .cal-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 9998; display: flex; align-items: center; justify-content: center; }
-            .cal-modal { background: var(--card-bg); border-radius: 14px; padding: 28px; width: 440px; max-width: 95vw; z-index: 9999; }
+            .cal-modal { background: var(--card-bg); border-radius: 14px; padding: 28px; width: 620px; max-width: 95vw; max-height: 92vh; overflow-y: auto; z-index: 9999; }
             .cal-modal h3 { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: var(--text-color); }
             .cal-modal-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border-color); font-size: 13px; }
             .cal-modal-row .k { color: var(--text-muted); }
@@ -205,6 +213,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-modal-actions { margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
             .btn-cal-primary { background: #1a2340; color: #fff; border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
             .btn-cal-ghost { background: var(--subtle-bg); color: var(--text-color); border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
+            .btn-cal-ghost:disabled, .btn-cal-primary:disabled { opacity: .45; cursor: not-allowed; }
             .cal-avail-box { font-size: 12px; padding: 8px 10px; border-radius: 6px; }
             .cal-avail-ok { background: #E3F5EE; color: #085041; }
             .cal-avail-bad { background: #FBE7E7; color: #791F1F; }
@@ -216,23 +225,33 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-appt-wf-badge { position: absolute; top: 1px; right: 2px; width: 15px; height: 15px; line-height: 15px; text-align: center; border-radius: 50%; font-size: 9px; font-weight: 700; background: rgba(255,255,255,.9); color: inherit; box-shadow: 0 0 0 1px rgba(0,0,0,.2) inset; pointer-events: none; }
             .cal-appt.is-short .cal-appt-wf-badge { position: static; display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; line-height: 13px; font-size: 8px; margin-left: 4px; vertical-align: middle; }
             .cal-allday-wf-badge { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; line-height: 13px; border-radius: 50%; font-size: 8px; font-weight: 700; background: rgba(255,255,255,.9); box-shadow: 0 0 0 1px rgba(0,0,0,.2) inset; margin-right: 4px; vertical-align: middle; }
-            /* Classy workflow-action buttons: pill shape, soft gradient per target
-               state, a matching letter chip, and a gentle hover lift. */
+            /* Workflow status row: every state of the workflow shown as a button in
+               one row. States reachable from the current one are coloured and
+               clickable; the current state is ringed; everything else is dull. */
+            .cal-wf-title { margin-top: 16px; margin-bottom: 6px; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+            .cal-wf-row { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; padding: 4px 4px 8px; }
+            .cal-wf-note { font-size: 11px; color: var(--text-muted); }
             .btn-cal-state {
-                display: inline-flex; align-items: center; gap: 7px;
-                border: none; border-radius: 999px; padding: 8px 16px 8px 10px;
-                font-size: 12.5px; font-weight: 600; letter-spacing: .01em;
+                flex: none; white-space: nowrap;
+                display: inline-flex; align-items: center; gap: 6px;
+                border: none; border-radius: 999px; padding: 6px 12px 6px 7px;
+                font-size: 12px; font-weight: 600; letter-spacing: .01em;
                 cursor: pointer; color: #fff;
                 box-shadow: 0 1px 2px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.25);
                 transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
             }
             .btn-cal-state:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.3); filter: brightness(1.05); }
             .btn-cal-state:active:not(:disabled) { transform: translateY(0); filter: brightness(.97); }
-            .btn-cal-state:disabled { opacity: .5; cursor: not-allowed; filter: grayscale(.3); }
+            .btn-cal-state:disabled { cursor: not-allowed; }
+            .btn-cal-state.is-busy { opacity: .6; }
             .btn-cal-state-chip { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,.28); font-size: 10.5px; font-weight: 800; box-shadow: inset 0 0 0 1px rgba(255,255,255,.4); }
+            .btn-cal-state.is-current { cursor: default; }
+            .btn-cal-state.is-dull,
+            .btn-cal-state.is-dull:disabled { background: #ECEEF1 !important; color: #A3A8AF; box-shadow: inset 0 0 0 1px #DADDE2; filter: none; }
+            .btn-cal-state.is-dull .btn-cal-state-chip { background: #DADDE2; color: #8C9198; box-shadow: none; }
         `;
         document.head.appendChild(style);
-    }
+    })();
 
     // ── Page skeleton ──────────────────────────────────────────
     $(wrapper).find('.layout-main-section').html(`
@@ -613,7 +632,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 
     function time_str_to_minutes(t) {
         if (!t) return 0;
-        var parts = t.split(':');
+        var parts = String(t).split(':');
         return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || 0, 10);
     }
 
@@ -686,8 +705,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         };
     }
 
-    // Side-by-side layout for appointments whose spans overlap (different doctors
-    // at the same time, or a double booking), so none is hidden behind another.
+    // Side-by-side layout for appointments whose spans overlap (double bookings),
+    // so none is hidden behind another.
     function layout_overlaps(items) {
         items.sort(function(x, y) {
             return (x.geo.start - y.geo.start)
@@ -817,7 +836,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     //   get_availability_data(date, practitioner, appointment)
     // Returns null on failure (fail closed), [] if fully booked, or
     // [{mins, time_str, duration, service_unit}, …] ascending.
-    function fetch_schedule_slots(practitioner, date, callback) {
+    // `exclude_name` (optional) is an appointment being rescheduled: its own
+    // current slot is not counted as booked.
+    function fetch_schedule_slots(practitioner, date, callback, exclude_name) {
         frappe.db.get_value('Healthcare Practitioner', practitioner, 'department').then(function(dep_r) {
             var department = (dep_r && dep_r.message && dep_r.message.department) || '';
 
@@ -836,7 +857,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 args: call_args,
                 callback: function(r) {
                     console.log('get_availability_data response for', practitioner, date, r.message);
-                    var slots = parse_availability_response(r.message);
+                    var slots = parse_availability_response(r.message, exclude_name);
                     if (!slots.length) { callback(slots); return; }
 
                     // Healthcare returns ALL of the schedule's slots and leaves it to its
@@ -845,14 +866,14 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     fetch_booked_intervals(practitioner, date, function(fresh) {
                         if (fresh === null) { callback(null); return; } // can't verify -> fail closed
                         // Fresh server query + whatever the calendar is drawing right now.
-                        var booked = fresh.concat(local_booked_intervals(practitioner, date));
+                        var booked = fresh.concat(local_booked_intervals(practitioner, date, exclude_name));
                         var free = slots.filter(function(s) {
                             return !overlaps_any(s.mins, Number(s.duration) || DEFAULT_DURATION, booked);
                         });
                         console.log('slot filter', { practitioner: practitioner, date: date,
                             booked: booked, slots_before: slots.length, slots_after: free.length });
                         callback(free);
-                    });
+                    }, exclude_name);
                 },
                 error: function(r) {
                     console.log('get_availability_data error', r);
@@ -863,10 +884,14 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Booked-slot helpers ──────────────────────────────────────
-    // Turns appointment rows into [{start, end}] minute intervals (cancelled ones ignored).
-    function appts_to_intervals(list) {
+    // Turns appointment rows into [{start, end}] minute intervals
+    // (cancelled ones, and the optional `exclude_name`, ignored).
+    function appts_to_intervals(list, exclude_name) {
         return (list || [])
-            .filter(function(a) { return a && a.appointment_time && a.status !== 'Cancelled'; })
+            .filter(function(a) {
+                return a && a.appointment_time && !is_cancelled(a)
+                    && !(exclude_name && a.name === exclude_name);
+            })
             .map(function(a) {
                 var s = time_str_to_minutes(a.appointment_time);
                 return { start: s, end: s + appt_duration(a) };
@@ -879,20 +904,20 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // Booked intervals taken from the appointments already loaded for the calendar.
-    function local_booked_intervals(practitioner, date) {
+    function local_booked_intervals(practitioner, date, exclude_name) {
         return appts_to_intervals((loaded_appts || []).filter(function(a) {
             return a.practitioner === practitioner && a.appointment_date === date;
-        }));
+        }), exclude_name);
     }
 
     // The practitioner's non-cancelled appointments on a date, as intervals.
     // Calls back with null if it couldn't be loaded (caller fails closed).
-    function fetch_booked_intervals(practitioner, date, cb) {
+    function fetch_booked_intervals(practitioner, date, cb, exclude_name) {
         frappe.call({
             method: 'frappe.client.get_list',
             args: {
                 doctype: 'Patient Appointment',
-                fields: ['name', 'appointment_time', 'duration', 'status'],
+                fields: ['name', 'appointment_time', 'duration', 'status', 'workflow_state'],
                 filters: [
                     ['practitioner', '=', practitioner],
                     ['appointment_date', '=', date],
@@ -900,12 +925,12 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 ],
                 limit_page_length: 500
             },
-            callback: function(r) { cb(appts_to_intervals(r.message)); },
+            callback: function(r) { cb(appts_to_intervals(r.message, exclude_name)); },
             error: function() { cb(null); }
         });
     }
 
-    function parse_availability_response(msg) {
+    function parse_availability_response(msg, exclude_name) {
         if (!msg) return [];
         var groups = Array.isArray(msg) ? msg : (msg.slot_details || msg.slots || []);
         if (!Array.isArray(groups)) return [];
@@ -919,7 +944,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 
             // Appointments Healthcare attaches to this schedule/service unit
             // (covers bookings made by other practitioners in the same room).
-            var group_booked = appts_to_intervals(g.appointments);
+            var group_booked = appts_to_intervals(g.appointments, exclude_name);
 
             avail.forEach(function(s) {
                 var from = (typeof s === 'string') ? s : (s.from_time || s.time || s.from);
@@ -991,9 +1016,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             },
             callback: function(r) {
                 if (active_load_key !== key) return; // stale
-                var appts = r.message || [];
+                var all_appts = r.message || [];
+                // Cancelled appointments are counted in the stats but never drawn.
+                var appts = all_appts.filter(function(a) { return !is_cancelled(a); });
                 loaded_appts = appts;
-                render_stats(appts, stats);
+                render_stats(all_appts, stats);
 
                 fetch_duty_for_many(ids, function() {
                     if (active_load_key !== key) return; // stale
@@ -1044,16 +1071,18 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Stats bar ──────────────────────────────────────────────
-    function render_stats(appts, wrap) {
-        var total     = appts.length;
-        var open      = appts.filter(function(a) { return a.status === 'Open' || a.status === 'Scheduled'; }).length;
-        var closed    = appts.filter(function(a) { return a.status === 'Closed'; }).length;
-        var cancelled = appts.filter(function(a) { return a.status === 'Cancelled'; }).length;
+    // `all_appts` includes cancelled ones; Total counts only what is on the calendar.
+    function render_stats(all_appts, wrap) {
+        var active    = all_appts.filter(function(a) { return !is_cancelled(a); });
+        var total     = active.length;
+        var open      = active.filter(function(a) { return a.status === 'Open' || a.status === 'Scheduled'; }).length;
+        var closed    = active.filter(function(a) { return a.status === 'Closed'; }).length;
+        var cancelled = all_appts.length - active.length;
         wrap.innerHTML =
             '<div class="cal-stat s-total"><div class="cal-stat-num">' + total     + '</div><div class="cal-stat-lbl">Total</div></div>' +
             '<div class="cal-stat s-open"><div class="cal-stat-num">'  + open      + '</div><div class="cal-stat-lbl">Upcoming</div></div>' +
             '<div class="cal-stat s-done"><div class="cal-stat-num">'  + closed    + '</div><div class="cal-stat-lbl">Completed</div></div>' +
-            '<div class="cal-stat s-cancel"><div class="cal-stat-num">'+ cancelled + '</div><div class="cal-stat-lbl">Cancelled</div></div>';
+            '<div class="cal-stat s-cancel"><div class="cal-stat-num">'+ cancelled + '</div><div class="cal-stat-lbl">Cancelled (hidden)</div></div>';
     }
 
     // ── Calendar grid ──────────────────────────────────────────
@@ -1082,6 +1111,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         var by_lane = {};
         var allday  = {};
         appts.forEach(function(a) {
+            if (is_cancelled(a)) return; // never drawn
             var d   = a.appointment_date;
             var geo = appt_geometry(a);
             if (!geo) {
@@ -1093,7 +1123,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             if (!by_lane[k]) by_lane[k] = [];
             by_lane[k].push({ a: a, geo: geo });
         });
-        // Overlap layout now only matters inside one lane (double bookings).
+        // Overlap layout only matters inside one lane (double bookings).
         Object.keys(by_lane).forEach(function(k) { layout_overlaps(by_lane[k]); });
 
         var html = '';
@@ -1142,7 +1172,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         : '';
                     var who = a.patient_name || a.patient || '';
                     var wf_symbol = workflow_state_symbol(a.workflow_state);
-                    html += '<div class="cal-allday-block" style="background:' + c.bg + ';color:' + c.fg + ';border-left:3px solid ' + c.bd + '"'
+                    html += '<div class="cal-allday-block" data-name="' + esc(a.name) + '"'
+                        + ' style="background:' + c.bg + ';color:' + c.fg + ';border-left:3px solid ' + c.bd + '"'
                         + ' title="' + esc(t_lbl + who + ' \u2022 ' + (a.practitioner_name || a.practitioner || '')
                             + (a.workflow_state ? ' \u2022 ' + a.workflow_state : '')) + '">'
                         + (wf_symbol ? '<span class="cal-allday-wf-badge" title="' + esc(a.workflow_state) + '">' + esc(wf_symbol) + '</span>' : '')
@@ -1241,8 +1272,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             }
         }
 
-        // Click an existing appointment → view details
-        wrap.querySelectorAll('.cal-appt[data-name]').forEach(function(el) {
+        // Click an existing appointment (timed or all-day) → view details
+        wrap.querySelectorAll('.cal-appt[data-name], .cal-allday-block[data-name]').forEach(function(el) {
             el.addEventListener('click', function(e) {
                 e.stopPropagation();
                 var a = appts.find(function(x) { return x.name === el.dataset.name; });
@@ -1259,7 +1290,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 if (!is_day_working(prac, d)) {
                     frappe.msgprint({
                         title: 'Not Available',
-                        message: name_of(prac) + ' is not scheduled to work on ' + frappe.datetime.str_to_user(d) + '.',
+                        message: esc(name_of(prac)) + ' is not scheduled to work on ' + frappe.datetime.str_to_user(d) + '.',
                         indicator: 'orange'
                     });
                     return;
@@ -1271,9 +1302,17 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Availability dialog: Practitioner + Date + "Check Availability" ──────
-    function open_slot_picker(date, practitioner) {
+    // Used both for new bookings and for rescheduling. opts (all optional):
+    //   title        dialog title
+    //   intro        text shown before the first check
+    //   exclude_name appointment being rescheduled (its own slot counts as free)
+    //   on_pick(p)   called with { appointment_date, appointment_time, practitioner,
+    //                duration, service_unit } when a slot is chosen; defaults to
+    //                opening the booking dialog.
+    function open_slot_picker(date, practitioner, opts) {
+        opts = opts || {};
         var picker = new frappe.ui.Dialog({
-            title: 'Check Availability',
+            title: opts.title || 'Check Availability',
             fields: [
                 {
                     fieldtype: 'Link', fieldname: 'practitioner', label: 'Healthcare Practitioner',
@@ -1295,7 +1334,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         });
 
         picker.fields_dict.slot_list.$wrapper.html(
-            '<div class="cal-empty" style="padding:16px 0;">Pick a practitioner and date, then click Check Availability.</div>'
+            '<div class="cal-empty" style="padding:16px 0;">'
+            + esc(opts.intro || 'Pick a practitioner and date, then click Check Availability.')
+            + '</div>'
         );
         picker.show();
 
@@ -1360,27 +1401,27 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     picker.fields_dict.slot_list.$wrapper.html(html);
 
                     picker.fields_dict.slot_list.$wrapper.find('.cal-slot-pick').on('click', function() {
-                        var time_str = $(this).data('time');
-                        var slot_duration = parseInt($(this).data('duration'), 10) || 15;
-                        var slot_unit = $(this).data('unit');
-                        picker.hide();
-                        open_booking_dialog({
+                        var pick = {
                             appointment_date: dt,
-                            appointment_time: time_str,
+                            appointment_time: $(this).attr('data-time'),
                             practitioner: prac,
-                            duration: slot_duration,
-                            service_unit: slot_unit || duty.branch
-                        });
+                            duration: parseInt($(this).attr('data-duration'), 10) || 15,
+                            service_unit: $(this).attr('data-unit') || duty.branch
+                        };
+                        picker.hide();
+                        if (opts.on_pick) opts.on_pick(pick);
+                        else open_booking_dialog(pick);
                     });
-                });
+                }, opts.exclude_name);
             });
         }
     }
 
     // ── Pre-insert availability check ────────────────────────────
     // Duty Assignment for that practitioner/date (from duty_cache) plus clashes
-    // with that practitioner's existing appointments.
-    function check_slot_availability(practitioner, date, time_str, duration, callback) {
+    // with that practitioner's existing appointments. `exclude_name` (optional)
+    // is an appointment being rescheduled, so it doesn't clash with itself.
+    function check_slot_availability(practitioner, date, time_str, duration, callback, exclude_name) {
         if (!is_slot_bookable(practitioner, date, time_str, duration)) {
             callback(false, (practitioner || 'This practitioner') + ' is not scheduled to work on ' + frappe.datetime.str_to_user(date) + '.');
             return;
@@ -1389,7 +1430,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             method: 'frappe.client.get_list',
             args: {
                 doctype: 'Patient Appointment',
-                fields: ['name', 'appointment_time', 'duration'],
+                fields: ['name', 'appointment_time', 'duration', 'status', 'workflow_state'],
                 filters: [
                     ['practitioner', '=', practitioner],
                     ['appointment_date', '=', date],
@@ -1398,7 +1439,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 limit_page_length: 200
             },
             callback: function(r) {
-                var existing = r.message || [];
+                var existing = (r.message || []).filter(function(a) {
+                    return !is_cancelled(a) && !(exclude_name && a.name === exclude_name);
+                });
                 var req_start = time_str_to_minutes(time_str);
                 var req_end   = req_start + (duration || 15);
                 var clash = existing.find(function(a) {
@@ -1637,6 +1680,85 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         run_availability_check(true);
     }
 
+    // ── Reschedule ──────────────────────────────────────────────
+    // Same slot picker as booking (duty + real availability), with the
+    // appointment's own current slot treated as free. The appointment keeps
+    // its own duration; the chosen time is re-checked for clashes before saving.
+    function can_reschedule(a) {
+        if (!a || is_cancelled(a) || a.status === 'Closed') return false;
+        return String(a.workflow_state || '').trim().toLowerCase() !== 'completed appt';
+    }
+
+    function open_reschedule(a) {
+        var who = a.patient_name || a.patient || a.name;
+        open_slot_picker(a.appointment_date, a.practitioner, {
+            title: 'Reschedule \u2014 ' + who,
+            exclude_name: a.name,
+            intro: 'Currently ' + frappe.datetime.str_to_user(a.appointment_date) + ', '
+                + fmt_modal_time(a) + ' with ' + (a.practitioner_name || a.practitioner || '')
+                + '. Pick the new practitioner and date, then click Check Availability.',
+            on_pick: function(pick) { confirm_reschedule(a, pick); }
+        });
+    }
+
+    function confirm_reschedule(a, pick) {
+        var dur   = appt_duration(a);
+        var start = time_str_to_minutes(pick.appointment_time);
+        var who   = a.patient_name || a.patient || a.name;
+
+        check_slot_availability(pick.practitioner, pick.appointment_date, pick.appointment_time, dur, function(ok, msg) {
+            if (!ok) {
+                frappe.msgprint({ title: 'Cannot reschedule', message: esc(msg), indicator: 'red' });
+                return;
+            }
+            var prac_changed = pick.practitioner !== a.practitioner;
+            frappe.confirm(
+                'Move <b>' + esc(who) + '</b> to <b>' + esc(frappe.datetime.str_to_user(pick.appointment_date))
+                + ', ' + format_time_label(start) + ' \u2013 ' + format_time_label(start + dur) + '</b>'
+                + (prac_changed ? ' with <b>' + esc(pick.practitioner) + '</b>' : '') + '?',
+                function() { save_reschedule(a, pick); }
+            );
+        }, a.name);
+    }
+
+    function save_reschedule(a, pick) {
+        var changes = {
+            appointment_date: pick.appointment_date,
+            appointment_time: pick.appointment_time
+        };
+        if (pick.service_unit) changes.service_unit = pick.service_unit;
+
+        function go() {
+            frappe.call({
+                method: 'frappe.client.set_value',
+                args: { doctype: 'Patient Appointment', name: a.name, fieldname: changes },
+                freeze: true,
+                freeze_message: 'Rescheduling…',
+                callback: function(r) {
+                    if (!r.message) return;
+                    frappe.show_alert({
+                        message: 'Appointment ' + a.name + ' moved to '
+                            + frappe.datetime.str_to_user(pick.appointment_date) + ' '
+                            + format_time_label(time_str_to_minutes(pick.appointment_time)),
+                        indicator: 'green'
+                    });
+                    load_schedule();
+                }
+            });
+        }
+
+        if (pick.practitioner && pick.practitioner !== a.practitioner) {
+            changes.practitioner = pick.practitioner;
+            frappe.db.get_value('Healthcare Practitioner', pick.practitioner, 'department').then(function(r) {
+                var dep = r && r.message && r.message.department;
+                if (dep) changes.department = dep;
+                go();
+            });
+        } else {
+            go();
+        }
+    }
+
     // ── Workflow engine helpers ───────────────────────────────────
     // Patient Appointment has a real Frappe Workflow attached (its
     // workflow_state field starts at the workflow's own default state on
@@ -1671,14 +1793,75 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         });
     }
 
+    // Every state of the active Patient Appointment workflow, in the order
+    // they are listed on the Workflow document. Tries the workflow that
+    // Frappe already loads with the doctype's meta first (works for users
+    // without read access to the Workflow doctype), then the server.
+    // Calls back with an array of state names, or null if unknown.
+    var wf_states_cache = null;
+    function get_workflow_states(callback) {
+        if (wf_states_cache) { callback(wf_states_cache); return; }
+
+        var finished = false;
+        function finish(list) {
+            if (finished) return;
+            finished = true;
+            if (list && list.length) wf_states_cache = list;
+            callback(list && list.length ? list : null);
+        }
+        function states_of(wf) {
+            var seen = {}, out = [];
+            ((wf && wf.states) || []).forEach(function(s) {
+                if (s.state && !seen[s.state]) { seen[s.state] = true; out.push(s.state); }
+            });
+            return out;
+        }
+        function from_server() {
+            frappe.call({
+                method: 'frappe.client.get_list',
+                args: {
+                    doctype: 'Workflow',
+                    fields: ['name'],
+                    filters: [['document_type', '=', 'Patient Appointment'], ['is_active', '=', 1]],
+                    limit_page_length: 1
+                },
+                silent: true,
+                callback: function(r) {
+                    var w = (r.message || [])[0];
+                    if (!w) { finish(null); return; }
+                    frappe.call({
+                        method: 'frappe.client.get',
+                        args: { doctype: 'Workflow', name: w.name },
+                        silent: true,
+                        callback: function(dr) { finish(states_of(dr.message)); },
+                        error: function() { finish(null); }
+                    });
+                },
+                error: function() { finish(null); }
+            });
+        }
+
+        try {
+            frappe.model.with_doctype('Patient Appointment', function() {
+                var wf = null;
+                try {
+                    frappe.workflow.setup('Patient Appointment');
+                    wf = frappe.workflow.workflows['Patient Appointment'];
+                } catch (e) { wf = null; }
+                var list = states_of(wf);
+                if (list.length) finish(list); else from_server();
+            });
+        } catch (e) {
+            from_server();
+        }
+    }
+
     // ── Detail modal ───────────────────────────────────────────
-    // The status buttons are built from whatever the workflow engine says is
-    // actually reachable from the appointment's current state for the current
-    // user (see get_workflow_transitions above) — not a hardcoded list — so
-    // this keeps working whatever the real Patient Appointment workflow
-    // allows (Pending → In Clinic → Completed Appt, or → Did Not Attend /
-    // Cancelled, etc.), and naturally hides an action a role isn't permitted
-    // to take.
+    // The workflow row shows EVERY state of the workflow as a button, in one
+    // row. The engine (get_workflow_transitions) decides which of them are
+    // reachable from the current state for the current user: those are
+    // coloured and clickable; the current state is ringed; the rest are dull
+    // and disabled.
     function show_modal(a) {
         var c = color_for(a.practitioner);
         var bg = document.createElement('div');
@@ -1686,7 +1869,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         bg.innerHTML =
             '<div class="cal-modal">' +
             '<h3 style="border-left:4px solid ' + c.bd + ';padding-left:10px;">' + esc(a.patient_name || a.patient) + '</h3>' +
-            modal_row('ID',           '<a href="/app/patient-appointment/' + esc(a.name) + '" target="_blank">' + esc(a.name) + '</a>') +
+            modal_row('ID',           '<a href="/app/patient-appointment/' + encodeURIComponent(a.name) + '" target="_blank">' + esc(a.name) + '</a>') +
             modal_row('Patient ID',   esc(a.patient || '—')) +
             modal_row('Status',       esc(a.status || '—')) +
             modal_row('Workflow State', esc(a.workflow_state || '—')) +
@@ -1699,15 +1882,29 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             modal_row('Service Unit', esc(a.service_unit || '—')) +
             '<div class="cal-modal-desc"><div class="k">Description</div>'
                 + '<div class="v">' + esc(a.custom_appt_description || '—') + '</div></div>' +
-            '<div class="cal-modal-actions" id="cal-modal-wf-actions">'
-                + '<span style="font-size:11px;color:var(--text-muted);">Loading status actions…</span>'
+            '<div class="cal-wf-title">Workflow status</div>' +
+            '<div class="cal-wf-row" id="cal-modal-wf-actions">'
+                + '<span class="cal-wf-note">Loading status actions…</span>'
                 + '</div>' +
+            '<div class="cal-wf-note" id="cal-modal-wf-note"></div>' +
             '<div class="cal-modal-actions">' +
             '<button class="btn-cal-ghost" id="mc">Close</button>' +
+            '<button class="btn-cal-ghost" id="mr"' + (can_reschedule(a) ? '' : ' disabled title="This appointment can no longer be rescheduled"') + '>Reschedule</button>' +
+            '<button class="btn-cal-ghost" id="mp"' + (a.patient ? '' : ' disabled') + '>Open Patient</button>' +
             '<button class="btn-cal-primary" id="mo">Open Record</button>' +
             '</div></div>';
         document.body.appendChild(bg);
         bg.querySelector('#mc').onclick = function() { bg.remove(); };
+        bg.querySelector('#mr').onclick = function() {
+            if (!can_reschedule(a)) return;
+            bg.remove();
+            open_reschedule(a);
+        };
+        bg.querySelector('#mp').onclick = function() {
+            if (!a.patient) return;
+            frappe.set_route('Form', 'Patient', a.patient);
+            bg.remove();
+        };
         bg.querySelector('#mo').onclick = function() {
             frappe.set_route('Form', 'Patient Appointment', a.name);
             bg.remove();
@@ -1718,43 +1915,111 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     function load_workflow_action_buttons(a, bg) {
-        var box = bg.querySelector('#cal-modal-wf-actions');
-        var doc = Object.assign({ doctype: 'Patient Appointment' }, a);
+        var box  = bg.querySelector('#cal-modal-wf-actions');
+        var note = bg.querySelector('#cal-modal-wf-note');
+        var doc  = Object.assign({ doctype: 'Patient Appointment' }, a);
 
-        get_workflow_transitions(doc, function(transitions) {
+        var pending = 2, states = null, transitions = null;
+        function step() {
+            if (--pending > 0) return;
             if (!bg.isConnected) return; // modal was closed while this was loading
-            if (transitions === null) {
-                box.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">Could not load status actions.</span>';
-                return;
+            render_workflow_row(a, doc, bg, box, note, states, transitions);
+        }
+        get_workflow_states(function(s) { states = s; step(); });
+        get_workflow_transitions(doc, function(t) { transitions = t; step(); });
+    }
+
+    function render_workflow_row(a, doc, bg, box, note, states, transitions) {
+        if (!states && transitions === null) {
+            box.innerHTML = '<span class="cal-wf-note">Could not load status actions.</span>';
+            return;
+        }
+
+        // First action leading to each reachable state.
+        var action_for = {};
+        (transitions || []).forEach(function(t) {
+            if (t.next_state && !action_for[t.next_state]) action_for[t.next_state] = t;
+        });
+
+        // All states, in workflow order; make sure current + reachable ones are included.
+        var order = (states || []).slice();
+        if (a.workflow_state && order.indexOf(a.workflow_state) === -1) order.unshift(a.workflow_state);
+        Object.keys(action_for).forEach(function(s) { if (order.indexOf(s) === -1) order.push(s); });
+
+        if (!order.length) {
+            box.innerHTML = '<span class="cal-wf-note">No workflow states found.</span>';
+            return;
+        }
+
+        box.innerHTML = order.map(function(state) {
+            var symbol  = workflow_state_symbol(state);
+            var wc      = color_for_workflow_symbol(symbol);
+            var current = state === a.workflow_state;
+            var t       = action_for[state];
+            var cls, style, title, disabled;
+
+            if (current) {
+                cls = ' is-current';
+                style = 'background:linear-gradient(135deg,' + wc.from + ',' + wc.to + ');'
+                    + 'box-shadow:0 0 0 2px var(--card-bg),0 0 0 4px ' + wc.from + ';';
+                title = 'Current state';
+                disabled = true;
+            } else if (t) {
+                cls = '';
+                style = 'background:linear-gradient(135deg,' + wc.from + ',' + wc.to + ');';
+                title = t.action ? ('Action: ' + t.action) : '';
+                disabled = false;
+            } else {
+                cls = ' is-dull';
+                style = '';
+                title = 'Not available from ' + (a.workflow_state || 'the current state');
+                disabled = true;
             }
-            if (!transitions.length) {
-                box.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">No status actions available to you right now.</span>';
-                return;
-            }
-            box.innerHTML = transitions.map(function(t, i) {
-                var symbol = workflow_state_symbol(t.next_state);
-                var wc = color_for_workflow_symbol(symbol);
-                return '<button type="button" class="btn-cal-state" data-idx="' + i + '"'
-                    + ' style="background:linear-gradient(135deg,' + wc.from + ',' + wc.to + ');">'
-                    + (symbol ? '<span class="btn-cal-state-chip">' + esc(symbol) + '</span>' : '')
-                    + 'Move to ' + esc(t.next_state) + '</button>';
-            }).join('');
-            box.querySelectorAll('button[data-idx]').forEach(function(btn) {
-                btn.addEventListener('click', function() {
-                    var t = transitions[parseInt(btn.getAttribute('data-idx'), 10)];
-                    box.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
-                    apply_workflow_action(doc, t.action, function(new_doc) {
-                        if (!new_doc) {
-                            frappe.msgprint({ message: 'Could not update the status. Please try again.', indicator: 'red' });
-                            box.querySelectorAll('button').forEach(function(b) { b.disabled = false; });
-                            return;
-                        }
-                        a.workflow_state = new_doc.workflow_state;
-                        frappe.show_alert({ message: 'Status updated to ' + a.workflow_state, indicator: 'green' });
-                        bg.remove();
-                        show_modal(a);   // reopen with the action list refreshed
-                        load_schedule(); // keep the underlying list in sync
-                    });
+
+            return '<button type="button" class="btn-cal-state' + cls + '"'
+                + ' data-state="' + esc(state) + '"'
+                + (disabled ? ' disabled' : '')
+                + (style ? ' style="' + style + '"' : '')
+                + (title ? ' title="' + esc(title) + '"' : '') + '>'
+                + (symbol ? '<span class="btn-cal-state-chip">' + esc(symbol) + '</span>' : '')
+                + esc(state) + (current ? ' \u2713' : '')
+                + '</button>';
+        }).join('');
+
+        if (transitions === null) {
+            note.textContent = 'Could not check which status changes are allowed right now.';
+        } else if (!Object.keys(action_for).length) {
+            note.textContent = 'No status changes are available to you from the current state.';
+        } else {
+            note.textContent = '';
+        }
+
+        // Keep the current state in view if the row scrolls sideways.
+        var cur_btn = box.querySelector('.btn-cal-state.is-current');
+        if (cur_btn && cur_btn.scrollIntoView) cur_btn.scrollIntoView({ block: 'nearest', inline: 'center' });
+
+        box.querySelectorAll('.btn-cal-state:not([disabled])').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var t = action_for[btn.getAttribute('data-state')];
+                if (!t) return;
+                var all = box.querySelectorAll('.btn-cal-state');
+                var was_disabled = [];
+                all.forEach(function(b, i) { was_disabled[i] = b.disabled; b.disabled = true; });
+                btn.classList.add('is-busy');
+
+                apply_workflow_action(doc, t.action, function(new_doc) {
+                    if (!new_doc) {
+                        frappe.msgprint({ message: 'Could not update the status. Please try again.', indicator: 'red' });
+                        all.forEach(function(b, i) { b.disabled = was_disabled[i]; });
+                        btn.classList.remove('is-busy');
+                        return;
+                    }
+                    a.workflow_state = new_doc.workflow_state;
+                    if (new_doc.status) a.status = new_doc.status;
+                    frappe.show_alert({ message: 'Status updated to ' + a.workflow_state, indicator: 'green' });
+                    bg.remove();
+                    if (!is_cancelled(a)) show_modal(a); // reopen with the row refreshed
+                    load_schedule();                     // keep the calendar in sync (cancelled ones disappear)
                 });
             });
         });
