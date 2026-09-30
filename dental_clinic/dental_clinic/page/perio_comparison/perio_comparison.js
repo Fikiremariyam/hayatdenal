@@ -15,6 +15,11 @@ frappe.pages["perio_comparison"].on_page_load = function (wrapper) {
         bleeding_fraction: "bleeding_fraction",// Data
     };
 
+    // ── Layout constants (tooth diagram is aligned to the grid columns) ────
+    const COL_W = 34;              // one site column (M / B / D)
+    const SLOT_W = COL_W * 3;      // one tooth = 3 site columns
+    const LABEL_W = 80 + 22;       // row-label columns on the left of the grid
+
     // ── Inject CSS ─────────────────────────────────────────────────────────
     frappe.dom.set_style(`
 .pe-root { padding: 16px; font-family: -apple-system, "Segoe UI", Arial, sans-serif; font-size: 13px; color: #222; max-width: 1180px; }
@@ -47,25 +52,24 @@ frappe.pages["perio_comparison"].on_page_load = function (wrapper) {
 .pe-section-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
 .pe-section-name { font-size: 12px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: #1B4F8A; }
 .pe-section-rl { font-size: 10px; color: #999; }
-.pe-diagram-wrap { overflow-x: auto; margin-bottom: 4px; }
-.pe-diagram-wrap svg { display: block; }
-.pe-tooth-shape { stroke: #b8c4d0; stroke-width: 1; cursor: pointer; }
-.pe-tooth-shape:hover { stroke: #1B4F8A; stroke-width: 1.6; }
+.pe-chart-hint { font-size: 11px; color: #888; margin-bottom: 12px; }
+.pe-grid-wrap { overflow-x: auto; margin-bottom: 18px; }
+.pe-grid-wrap svg { display: block; }
+.pe-tooth-click { cursor: context-menu; }
+.pe-tooth-shape { stroke: #8a99a8; stroke-width: 1.2; }
+.pe-tooth-click:hover .pe-tooth-shape { stroke: #1B4F8A; stroke-width: 1.8; }
 .pe-tooth-shape.missing { fill: #e9ecef; stroke: #cbd3db; stroke-dasharray: 2,2; }
-.pe-tooth-num { font-size: 8px; font-weight: 700; fill: #555; text-anchor: middle; pointer-events: none; }
-.pe-tooth-x { font-size: 12px; font-weight: 700; fill: #b33; text-anchor: middle; pointer-events: none; }
+.pe-tooth-num { font-size: 10px; font-weight: 700; fill: #555; text-anchor: middle; pointer-events: none; }
+.pe-tooth-x { font-size: 16px; font-weight: 700; fill: #b33; text-anchor: middle; pointer-events: none; }
 
 /* Data grid */
-.pe-grid-wrap { overflow-x: auto; margin-bottom: 18px; }
 .pe-grid { border-collapse: collapse; font-size: 11px; table-layout: fixed; width: max-content; }
 .pe-grid th, .pe-grid td { border: 1px solid #e3e9f0; padding: 0; text-align: center; }
 .pe-grid thead th { background: #eef2f7; color: #555; font-size: 9px; font-weight: 700; padding: 4px 2px; }
-.pe-grid thead th:first-child { min-width: 0; text-align: left; padding-left: 6px; }
-.pe-site-label { background: #f5f7fa !important; color: #a7b1bb !important; font-size: 7.5px !important; font-weight: 700 !important; padding: 2px 0 !important; }
-.pe-row-group { background: #eef2f7; color: #1B4F8A; font-size: 10px; font-weight: 700; text-align: left; padding: 4px 6px; white-space: nowrap; vertical-align: middle; min-width: 78px; }
+.pe-site-label { background: #f5f7fa !important; color: #a7b1bb !important; font-size: 8px !important; font-weight: 700 !important; padding: 2px 0 !important; }
+.pe-row-group { background: #eef2f7; color: #1B4F8A; font-size: 10px; font-weight: 700; text-align: left; padding: 4px 6px; white-space: nowrap; vertical-align: middle; }
 .pe-row-unit { display: block; font-size: 8.5px; font-weight: 500; color: #888; text-transform: none; letter-spacing: 0; }
-.pe-row-site { background: #f5f7fa; color: #999; font-size: 9px; font-weight: 600; text-align: center; padding: 4px 2px; width: 18px; }
-.pe-grid tbody th { background: #f5f7fa; color: #555; font-size: 10px; font-weight: 600; text-align: left; padding: 4px 6px; white-space: nowrap; }
+.pe-row-site { background: #f5f7fa; color: #999; font-size: 9px; font-weight: 600; text-align: center; padding: 4px 2px; }
 .pe-grid td { padding: 0; overflow: hidden; }
 .pe-cell-input { display: block; width: 100%; height: 38px; box-sizing: border-box; border: none; text-align: center; font-size: 13px; font-weight: 700; background: transparent; color: #222; }
 .pe-cell-input:focus { outline: 2px solid #1B4F8A; outline-offset: -2px; background: #eef4fb; }
@@ -79,10 +83,17 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
 .pe-cell-input.pd-h { color: #1a7a1a; }
 .pe-cell-input.pd-w { color: #b8860b; }
 .pe-cell-input.pd-d { color: #cc0000; }
-.pe-bool-toggle { display: flex; align-items: center; justify-content: center; gap: 5px; height: 38px; cursor: pointer; font-size: 10px; font-weight: 700; color: #99a3ad; user-select: none; }
-.pe-bool-toggle.is-yes { color: #cc0000; }
-.pe-bool-input { cursor: pointer; width: 13px; height: 13px; accent-color: #1B4F8A; }
-.pe-bool-input:disabled { cursor: not-allowed; }
+
+/* Click-to-set flag cells (Furcation / Plaque / Bleeding / Pus) */
+.pe-flag-cell { cursor: pointer; user-select: none; }
+.pe-flag-cell:hover { background: #eef4fb !important; }
+.pe-flag { display: flex; align-items: center; justify-content: center; height: 30px; font-size: 12px; font-weight: 700; color: #fff; }
+.pe-flag-cell.is-set[data-field="bleeding"] { background: #e53935 !important; }
+.pe-flag-cell.is-set[data-field="plaque"] { background: #f5c518 !important; }
+.pe-flag-cell.is-set[data-field="plaque"] .pe-flag { color: #222; }
+.pe-flag-cell.is-set[data-field="pus"] { background: #f59e0b !important; }
+.pe-flag-cell.is-set[data-field="furcation"] { background: #8e44ad !important; }
+.pe-flag-cell.disabled { background: #f0f2f5 !important; cursor: not-allowed; }
 
 /* 4-surface triangular charts */
 .pe-sc-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
@@ -94,12 +105,11 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
 .pe-sc-arch-lbl { font-size: 9px; font-weight: 700; color: #99a3ad; text-transform: uppercase; letter-spacing: .5px; text-align: center; margin: 6px 0 3px; }
 .pe-sc-tooth { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .pe-sc-arch.lower .pe-sc-tooth { flex-direction: column-reverse; }
-.pe-sc-num { font-size: 8.5px; font-weight: 700; color: #555; cursor: pointer; padding: 1px 3px; border-radius: 3px; }
+.pe-sc-num { font-size: 8.5px; font-weight: 700; color: #555; cursor: context-menu; padding: 1px 3px; border-radius: 3px; }
 .pe-sc-num:hover { background: #eef2f7; color: #1B4F8A; }
 .pe-sc-tooth svg { display: block; }
 .pe-sc-surf { cursor: pointer; stroke: #b8c4d0; stroke-width: 1; transition: opacity .1s; }
 .pe-sc-surf:hover { opacity: .7; stroke: #1B4F8A; stroke-width: 1.5; }
-.pe-sc-txt { font-size: 9px; font-weight: 700; text-anchor: middle; pointer-events: none; fill: #222; }
 .pe-sc-mid { width: 2px; align-self: stretch; background: #1B4F8A; opacity: .35; margin: 0 5px; }
 .pe-sc-divider { height: 1px; background: #e3e9f0; margin: 8px 0; }
 
@@ -109,13 +119,6 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
 .pe-score-lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; opacity: .92; }
 .pe-score-big { font-size: 24px; font-weight: 800; line-height: 1.15; }
 .pe-score-sub { font-size: 11px; opacity: .95; }
-
-/* Value palette */
-.pe-palette { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
-.pe-palette-lbl { font-size: 10.5px; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: .4px; margin-right: 4px; }
-.pe-pal-btn { min-width: 30px; height: 28px; border: 1.5px solid #d1d8dd; background: #fff; border-radius: 5px; font-weight: 700; font-size: 12px; cursor: pointer; color: #333; }
-.pe-pal-btn:hover { border-color: #1B4F8A; }
-.pe-pal-btn.active { border-color: #1B4F8A; background: #1B4F8A; color: #fff; }
 .pe-mini-btn { height: 28px; padding: 0 10px; border: 1px solid #d1d8dd; background: #fff; border-radius: 5px; font-size: 11.5px; font-weight: 600; cursor: pointer; color: #444; }
 .pe-mini-btn:hover { border-color: #1B4F8A; color: #1B4F8A; }
 
@@ -159,7 +162,7 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
         return (frappe.user && frappe.user.full_name) ? frappe.user.full_name(user) : user;
     }
     function emptySurfaceData() {
-        return { plaque: {}, bleeding: {}, pd: {}, rec: {} };
+        return { plaque: {}, bleeding: {} };
     }
 
     // ── State ──────────────────────────────────────────────────────────────
@@ -168,7 +171,6 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
     let missingTeeth = new Set();
     let surfaceData = emptySurfaceData();
     let assessedByUser = frappe.session.user;           // user who creates the exam
-    let selectedVal = { pd: 3, rec: 1 };                 // value brush for PD / recession
     let currentView = "chart";
 
     // ── Mount HTML template ────────────────────────────────────────────────
@@ -193,13 +195,6 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
         </select>
       </div>
     </div>
-  </div>
-
-  <!-- View toggle -->
-  <div class="pe-tabs">
-    <button class="pe-tab active" data-view="chart">📋 Perio Chart</button>
-    <button class="pe-tab" data-view="plaque">🦠 Plaque &amp; Bleeding</button>
-    <button class="pe-tab" data-view="pocket">📏 Pocket Depth &amp; Recession</button>
   </div>
 
   <!-- Exam header -->
@@ -251,53 +246,71 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
     </div>
   </div>
 
+  <!-- View toggle (just above the charts) -->
+  <div class="pe-tabs">
+    <button class="pe-tab active" data-view="chart">📋 Perio Chart</button>
+    <button class="pe-tab" data-view="plaque">🦠 Plaque &amp; Bleeding</button>
+  </div>
+
   <!-- ═════════ VIEW 1: PERIO CHART (grids) ═════════ -->
   <div class="pe-view active" data-view="chart">
     <div class="pe-card">
+      <div class="pe-chart-hint">Right-click a tooth to mark it missing / present · click a Furcation, Plaque, Bleeding or Pus cell to set it to 1 (click again to clear)</div>
 
       <div class="pe-section">
         <div class="pe-section-head">
           <span class="pe-section-name">Buccal</span>
-          <span class="pe-section-rl">(upper arch — click a tooth to mark it missing · M / B / D columns per tooth)</span>
+          <span class="pe-section-rl">(upper arch)</span>
         </div>
-        <div id="pe-diagram-buccal-upper" class="pe-diagram-wrap"></div>
-        <div class="pe-grid-wrap"><table class="pe-grid" id="pe-grid-buccal-upper"></table></div>
+        <div class="pe-grid-wrap">
+          <div id="pe-diagram-buccal-upper"></div>
+          <table class="pe-grid" id="pe-grid-buccal-upper"></table>
+        </div>
       </div>
 
       <div class="pe-section">
         <div class="pe-section-head">
           <span class="pe-section-name">Palatal</span>
-          <span class="pe-section-rl">(upper arch — click a tooth to mark it missing · M / B / D columns per tooth)</span>
+          <span class="pe-section-rl">(upper arch)</span>
         </div>
-        <div id="pe-diagram-palatal" class="pe-diagram-wrap"></div>
-        <div class="pe-grid-wrap"><table class="pe-grid" id="pe-grid-palatal"></table></div>
+        <div class="pe-grid-wrap">
+          <div id="pe-diagram-palatal"></div>
+          <table class="pe-grid" id="pe-grid-palatal"></table>
+        </div>
       </div>
 
       <div class="pe-section">
         <div class="pe-section-head">
           <span class="pe-section-name">Lingual</span>
-          <span class="pe-section-rl">(lower arch — click a tooth to mark it missing · M / B / D columns per tooth)</span>
+          <span class="pe-section-rl">(lower arch)</span>
         </div>
-        <div id="pe-diagram-lingual" class="pe-diagram-wrap"></div>
-        <div class="pe-grid-wrap"><table class="pe-grid" id="pe-grid-lingual"></table></div>
+        <div class="pe-grid-wrap">
+          <div id="pe-diagram-lingual"></div>
+          <table class="pe-grid" id="pe-grid-lingual"></table>
+        </div>
       </div>
 
       <div class="pe-section">
         <div class="pe-section-head">
           <span class="pe-section-name">Buccal</span>
-          <span class="pe-section-rl">(lower arch — click a tooth to mark it missing · M / B / D columns per tooth)</span>
+          <span class="pe-section-rl">(lower arch)</span>
         </div>
-        <div id="pe-diagram-buccal-lower" class="pe-diagram-wrap"></div>
-        <div class="pe-grid-wrap"><table class="pe-grid" id="pe-grid-buccal-lower"></table></div>
+        <div class="pe-grid-wrap">
+          <div id="pe-diagram-buccal-lower"></div>
+          <table class="pe-grid" id="pe-grid-buccal-lower"></table>
+        </div>
       </div>
 
       <div class="pe-legend">
         <div class="pe-legend-item"><span class="pe-swatch" style="background:#1a7a1a;"></span>PD 1–3mm — Healthy</div>
         <div class="pe-legend-item"><span class="pe-swatch" style="background:#b8860b;"></span>PD 4–5mm — Monitor</div>
         <div class="pe-legend-item"><span class="pe-swatch" style="background:#cc0000;"></span>PD ≥ 6mm — Disease</div>
-        <div class="pe-legend-item"><span class="pe-swatch" style="background:#e9ecef;border:1px dashed #cbd3db;"></span>Missing tooth</div>
-        <div class="pe-legend-item"><span class="pe-swatch" style="background:#ccc;"></span>M / B / D = Mesial / Buccal-Mid / Distal site</div>
-        <div class="pe-legend-item"><span class="pe-swatch" style="background:#ccc;"></span>Furcation / Plaque / Bleeding / Pus = Yes-No per tooth (Buccal only)</div>
+        <div class="pe-legend-item"><span class="pe-swatch" style="background:#e9ecef;border:1px dashed #cbd3db;"></span>Missing tooth (right-click)</div>
+        <div class="pe-legend-item"><span class="pe-swatch" style="background:#8e44ad;"></span>Furcation</div>
+        <div class="pe-legend-item"><span class="pe-swatch" style="background:#f5c518;"></span>Plaque</div>
+        <div class="pe-legend-item"><span class="pe-swatch" style="background:#e53935;"></span>Bleeding</div>
+        <div class="pe-legend-item"><span class="pe-swatch" style="background:#f59e0b;"></span>Pus</div>
+        <div class="pe-legend-item"><span class="pe-swatch" style="background:#ccc;"></span>M / B / D = Mesial / Mid / Distal site</div>
       </div>
     </div>
   </div>
@@ -307,7 +320,7 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
     <div class="pe-card">
       <div class="pe-sc-head">
         <span class="pe-section-name">🟡 Plaque</span>
-        <span class="pe-sc-hint">Click a surface to mark plaque · click a tooth number to mark it missing</span>
+        <span class="pe-sc-hint">Click a surface to mark plaque · right-click a tooth to mark it missing</span>
         <div class="pe-sc-actions">
           <button class="pe-mini-btn pe-sc-all" data-ds="plaque">Mark all</button>
           <button class="pe-mini-btn pe-sc-clear" data-ds="plaque">Clear</button>
@@ -328,46 +341,6 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
       </div>
       <div class="pe-score-row" id="pe-score-bleeding"></div>
       <div id="pe-sc-bleeding" class="pe-sc-wrap"></div>
-    </div>
-  </div>
-
-  <!-- ═════════ VIEW 3: POCKET DEPTH & RECESSION ═════════ -->
-  <div class="pe-view" data-view="pocket">
-    <div class="pe-card">
-      <div class="pe-sc-head">
-        <span class="pe-section-name">📏 Pocket Depth (mm)</span>
-        <span class="pe-sc-hint">Pick a value, then click surfaces · click the same value again to remove it</span>
-        <div class="pe-sc-actions">
-          <button class="pe-mini-btn pe-sc-clear" data-ds="pd">Clear</button>
-        </div>
-      </div>
-      <div class="pe-palette" id="pe-pal-pd"></div>
-      <div class="pe-score-row" id="pe-score-pd"></div>
-      <div id="pe-sc-pd" class="pe-sc-wrap"></div>
-      <div class="pe-legend" style="margin-top:10px">
-        <div class="pe-legend-item"><span class="pe-swatch" style="background:#c8f0c8;"></span>1–3 mm</div>
-        <div class="pe-legend-item"><span class="pe-swatch" style="background:#ffe29a;"></span>4–5 mm</div>
-        <div class="pe-legend-item"><span class="pe-swatch" style="background:#ffb3b3;"></span>≥ 6 mm</div>
-      </div>
-    </div>
-
-    <div class="pe-card">
-      <div class="pe-sc-head">
-        <span class="pe-section-name">📉 Recession (mm)</span>
-        <span class="pe-sc-hint">Pick a value, then click surfaces · click the same value again to remove it</span>
-        <div class="pe-sc-actions">
-          <button class="pe-mini-btn pe-sc-clear" data-ds="rec">Clear</button>
-        </div>
-      </div>
-      <div class="pe-palette" id="pe-pal-rec"></div>
-      <div class="pe-score-row" id="pe-score-rec"></div>
-      <div id="pe-sc-rec" class="pe-sc-wrap"></div>
-      <div class="pe-legend" style="margin-top:10px">
-        <div class="pe-legend-item"><span class="pe-swatch" style="background:#eef2f7;"></span>0 mm</div>
-        <div class="pe-legend-item"><span class="pe-swatch" style="background:#cfe3ff;"></span>1–2 mm</div>
-        <div class="pe-legend-item"><span class="pe-swatch" style="background:#8fbaf5;"></span>3–4 mm</div>
-        <div class="pe-legend-item"><span class="pe-swatch" style="background:#4a86d8;"></span>≥ 5 mm</div>
-      </div>
     </div>
   </div>
 
@@ -508,18 +481,14 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
         if (includeMobility) {
             groups.push({ field: "mobility", type: "Mobility", unit: "0–3", rows: MOBILITY_ROWS, max: 3 });
         }
-        const boolGroups = includeMobility ? BOOL_ROWS : [];
+        const width = LABEL_W + teeth.length * SLOT_W;
 
-        let colgroup = `<colgroup><col style="width:80px"><col style="width:22px">`;
-        teeth.forEach(() => SITES.forEach(() => (colgroup += `<col style="width:34px">`)));
-        colgroup += `</colgroup>`;
+        let html = `<colgroup><col style="width:80px"><col style="width:22px">`;
+        teeth.forEach(() => SITES.forEach(() => (html += `<col style="width:${COL_W}px">`)));
+        html += `</colgroup>`;
 
-        let html = `${colgroup}<thead><tr><th colspan="2" rowspan="2">Tooth</th>`;
-        teeth.forEach((tn, idx) => {
-            const alt = idx % 2 === 1 ? " pe-tooth-alt" : "";
-            html += `<th class="pe-tooth-start${alt}" colspan="3">${quadrantLabel(tn)}</th>`;
-        });
-        html += `</tr><tr>`;
+        // Header: site letters only (tooth labels sit under the tooth drawings above)
+        html += `<thead><tr><th colspan="2">Site</th>`;
         teeth.forEach((tn, idx) => {
             const alt = idx % 2 === 1 ? " pe-tooth-alt" : "";
             SITES.forEach((s, sIdx) => {
@@ -529,6 +498,7 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
         });
         html += `</tr></thead><tbody>`;
 
+        // Numeric rows
         groups.forEach((g) => {
             for (let i = 1; i <= g.rows; i++) {
                 html += `<tr>`;
@@ -546,21 +516,22 @@ class="pe-cell-input" data-field="${g.field}-${i}" data-site="${s}" data-surface
             }
         });
 
-        boolGroups.forEach((g) => {
+        // Click-to-set rows: 3 cells per tooth (M / B / D), value 1 when set
+        BOOL_ROWS.forEach((g) => {
             html += `<tr><th class="pe-row-group">${g.label}</th><th class="pe-row-site"></th>`;
             teeth.forEach((tn, idx) => {
                 const alt = idx % 2 === 1 ? " pe-tooth-alt" : "";
-                html += `<td class="pe-cell-td pe-tooth-start${alt}" colspan="3">
-<label class="pe-bool-toggle">
-<input type="checkbox" class="pe-bool-input" data-field="${g.field}" data-surface="${surface}" data-tooth="${tn}" />
-<span class="pe-bool-text">No</span>
-</label></td>`;
+                SITES.forEach((s, sIdx) => {
+                    const start = sIdx === 0 ? " pe-tooth-start" : "";
+                    html += `<td class="pe-cell-td pe-flag-cell${start}${alt}" data-field="${g.field}" data-site="${s}"
+data-surface="${surface}" data-tooth="${tn}" title="${quadrantLabel(tn)} · ${SITE_LABELS[s]} · ${g.label}"><span class="pe-flag"></span></td>`;
+                });
             });
             html += `</tr>`;
         });
 
         html += `</tbody>`;
-        $(`#${elId}`).html(html);
+        $(`#${elId}`).css("width", width + "px").html(html);
     }
     buildGrid("pe-grid-buccal-upper", UPPER_TEETH, "Buccal", true);
     buildGrid("pe-grid-palatal", UPPER_TEETH, "Palatal", false);
@@ -574,13 +545,23 @@ class="pe-cell-input" data-field="${g.field}-${i}" data-site="${s}" data-surface
         if (band) $(this).addClass(band);
     });
 
-    $(document).on("change", ".pe-bool-input", function () {
-        const checked = $(this).prop("checked");
-        $(this).siblings(".pe-bool-text").text(checked ? "Yes" : "No");
-        $(this).closest(".pe-bool-toggle").toggleClass("is-yes", checked);
+    // ── Flag cells ─────────────────────────────────────────────────────────
+    function flagCell(surface, tn, field, site) {
+        return $(`.pe-flag-cell[data-field="${field}"][data-site="${site}"][data-surface="${surface}"][data-tooth="${tn}"]`);
+    }
+    function setFlag($td, on) {
+        $td.toggleClass("is-set", !!on).find(".pe-flag").text(on ? "1" : "");
+    }
+    function clearAllFlags() {
+        $(".pe-flag-cell").removeClass("is-set disabled").find(".pe-flag").text("");
+    }
+    $(document).on("click", ".pe-flag-cell", function () {
+        const $td = $(this);
+        if ($td.hasClass("disabled")) return;
+        setFlag($td, !$td.hasClass("is-set"));
     });
 
-    // ── Tooth outline diagrams (grid view) ─────────────────────────────────
+    // ── Tooth drawings above each grid (aligned to the tooth columns) ─────
     function toothShapePath(x, y, w, h) {
         const cx = x + w / 2;
         return `M ${x} ${y + h * 0.32}
@@ -591,34 +572,46 @@ C ${cx - w * 0.08} ${y + h} ${cx - w * 0.16} ${y + h * 0.92} ${cx - w * 0.22} ${
 C ${cx - w * 0.3} ${y + h * 0.68} ${x} ${y + h * 0.58} ${x} ${y + h * 0.32}
 Z`;
     }
-    function toothCellSVG(tn, x, y, w, h) {
+    function toothCellSVG(tn, slotX, slotH, x, y, w, h) {
         const isMissing = missingTeeth.has(tn);
         const cls = "pe-tooth-shape" + (isMissing ? " missing" : "");
-        let s = `<g class="pe-tooth-click" data-tooth="${tn}" style="cursor:pointer;">`;
+        let s = `<g class="pe-tooth-click" data-tooth="${tn}">`;
+        // invisible hit area covering the whole tooth column, so right-click is easy
+        s += `<rect x="${slotX}" y="0" width="${SLOT_W}" height="${slotH}" fill="transparent"></rect>`;
         s += `<path class="${cls}" d="${toothShapePath(x, y, w, h)}" fill="${isMissing ? "#e9ecef" : "#fff"}"></path>`;
-        s += `<text class="pe-tooth-num" x="${x + w / 2}" y="${y - 3}">${quadrantLabel(tn)}</text>`;
-        if (isMissing) s += `<text class="pe-tooth-x" x="${x + w / 2}" y="${y + h / 2 + 4}">✕</text>`;
+        if (isMissing) s += `<text class="pe-tooth-x" x="${x + w / 2}" y="${y + h * 0.45 + 5}">✕</text>`;
+        // label BELOW the tooth
+        s += `<text class="pe-tooth-num" x="${x + w / 2}" y="${y + h + 13}">${quadrantLabel(tn)}</text>`;
+        s += `<title>${quadrantLabel(tn)} · right-click to mark ${isMissing ? "present" : "missing"}</title>`;
         s += `</g>`;
         return s;
     }
     function renderArchDiagram(elId, teeth) {
-        const toothW = 30, toothH = 30, gap = 3, padX = 8, padY = 12;
-        const svgW = teeth.length * toothW + (teeth.length - 1) * gap + padX * 2;
-        const svgH = padY + toothH + 4;
+        const toothW = 34, toothH = 46, padTop = 4;
+        const svgW = LABEL_W + teeth.length * SLOT_W;
+        const svgH = padTop + toothH + 18;
         let svg = `<svg viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">`;
-        let x = padX;
-        teeth.forEach((tn) => { svg += toothCellSVG(tn, x, padY, toothW, toothH); x += toothW + gap; });
+        teeth.forEach((tn, i) => {
+            const slotX = LABEL_W + i * SLOT_W;
+            svg += toothCellSVG(tn, slotX, svgH, slotX + (SLOT_W - toothW) / 2, padTop, toothW, toothH);
+        });
+        const midX = LABEL_W + 8 * SLOT_W;
+        svg += `<line x1="${midX}" y1="0" x2="${midX}" y2="${svgH}" stroke="#1B4F8A" stroke-opacity=".35" stroke-width="2" pointer-events="none"/>`;
         svg += `</svg>`;
         $(`#${elId}`).html(svg);
     }
 
+    // ── Missing teeth: RIGHT-CLICK toggles ────────────────────────────────
     function toggleMissing(tn) {
+        if (!tn) return;
         if (missingTeeth.has(tn)) missingTeeth.delete(tn);
         else missingTeeth.add(tn);
         renderDiagrams();
     }
-    $(document).on("click", ".pe-tooth-click", function () { toggleMissing(parseInt($(this).data("tooth"))); });
-    $(document).on("click", ".pe-sc-num", function () { toggleMissing(parseInt($(this).data("tooth"))); });
+    $(document).on("contextmenu", ".pe-tooth-click, .pe-sc-tooth", function (e) {
+        e.preventDefault();
+        toggleMissing(parseInt($(this).attr("data-tooth")));
+    });
 
     function applyMissingStateToGrids() {
         $(".pe-cell-input").each(function () {
@@ -626,14 +619,10 @@ Z`;
             $(this).prop("disabled", disabled);
             if (disabled) $(this).val("").removeClass("pd-h pd-w pd-d");
         });
-        $(".pe-bool-input").each(function () {
+        $(".pe-flag-cell").each(function () {
             const disabled = missingTeeth.has(parseInt($(this).data("tooth")));
-            $(this).prop("disabled", disabled);
-            if (disabled) {
-                $(this).prop("checked", false);
-                $(this).siblings(".pe-bool-text").text("No");
-                $(this).closest(".pe-bool-toggle").removeClass("is-yes");
-            }
+            $(this).toggleClass("disabled", disabled);
+            if (disabled) setFlag($(this), false);
         });
     }
     function refreshTeethCounts() {
@@ -653,8 +642,7 @@ Z`;
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    //  VIEWS 2 & 3 — 4-SURFACE TRIANGULAR CHARTS
-    //  Each tooth = square split into 4 triangles:
+    //  VIEW 2 — 4-SURFACE TRIANGULAR CHARTS (Plaque & Bleeding)
     //    Upper arch: top = Buccal, bottom = Palatal
     //    Lower arch: top = Lingual, bottom = Buccal
     //    Mesial always faces the midline, Distal faces away.
@@ -674,22 +662,8 @@ Z`;
     }
     function fillFor(ds, v) {
         const has = v !== undefined && v !== null;
-        if (ds === "plaque") return has ? "#f5c518" : "#fff";
-        if (ds === "bleeding") return has ? "#e53935" : "#fff";
-        if (ds === "pd") {
-            if (!has) return "#fff";
-            if (v <= 3) return "#c8f0c8";
-            if (v <= 5) return "#ffe29a";
-            return "#ffb3b3";
-        }
-        if (ds === "rec") {
-            if (!has) return "#fff";
-            if (v === 0) return "#eef2f7";
-            if (v <= 2) return "#cfe3ff";
-            if (v <= 4) return "#8fbaf5";
-            return "#4a86d8";
-        }
-        return "#fff";
+        if (!has) return "#fff";
+        return ds === "plaque" ? "#f5c518" : "#e53935";
     }
 
     function surfaceToothSVG(tn, ds, isUpper) {
@@ -699,7 +673,7 @@ Z`;
                 <rect x="0.5" y="0.5" width="${SZ - 1}" height="${SZ - 1}" fill="#e9ecef" stroke="#cbd3db" stroke-dasharray="2,2"/>
                 <line x1="6" y1="6" x2="${SZ - 6}" y2="${SZ - 6}" stroke="#b33" stroke-width="2" stroke-linecap="round" opacity=".6"/>
                 <line x1="${SZ - 6}" y1="6" x2="6" y2="${SZ - 6}" stroke="#b33" stroke-width="2" stroke-linecap="round" opacity=".6"/>
-                <title>${quadrantLabel(tn)} · Missing</title>
+                <title>${quadrantLabel(tn)} · Missing (right-click to restore)</title>
             </svg>`;
         }
         const viewerLeft = tn <= 8 || tn >= 25;   // UR / LR teeth sit on the viewer's left
@@ -715,8 +689,6 @@ Z`;
             bottom: `${SZ},${SZ} 0,${SZ} ${C},${C}`,
             left: `0,${SZ} 0,0 ${C},${C}`,
         };
-        const txt = { top: [C, 11], right: [33, C + 3], bottom: [C, 36], left: [7, C + 3] };
-        const numeric = ds === "pd" || ds === "rec";
 
         let inner = "";
         ["top", "right", "bottom", "left"].forEach((p) => {
@@ -725,9 +697,8 @@ Z`;
             const has = v !== undefined && v !== null;
             inner += `<polygon class="pe-sc-surf" data-ds="${ds}" data-tooth="${tn}" data-surf="${surf}"
                 points="${polys[p]}" fill="${fillFor(ds, v)}">
-                <title>${quadrantLabel(tn)} · ${surfName(surf, isUpper)}${has ? (numeric ? ": " + v + " mm" : ": Yes") : ""}</title>
+                <title>${quadrantLabel(tn)} · ${surfName(surf, isUpper)}${has ? ": Yes" : ""}</title>
             </polygon>`;
-            if (numeric && has) inner += `<text class="pe-sc-txt" x="${txt[p][0]}" y="${txt[p][1]}">${v}</text>`;
         });
 
         return `<svg viewBox="0 0 ${SZ} ${SZ}" width="${SZ}" height="${SZ}" xmlns="http://www.w3.org/2000/svg">
@@ -739,8 +710,8 @@ Z`;
     function archCells(teeth, ds, isUpper) {
         return teeth.map((tn, i) =>
             (i === 8 ? `<div class="pe-sc-mid"></div>` : "") +
-            `<div class="pe-sc-tooth">
-                <div class="pe-sc-num" data-tooth="${tn}" title="Click to mark missing / present">${quadrantLabel(tn)}</div>
+            `<div class="pe-sc-tooth" data-tooth="${tn}">
+                <div class="pe-sc-num" title="Right-click to mark missing / present">${quadrantLabel(tn)}</div>
                 ${surfaceToothSVG(tn, ds, isUpper)}
             </div>`
         ).join("");
@@ -773,27 +744,11 @@ Z`;
         const total = teeth.length * 4;
         return { surfaces, total, pct: pct(surfaces, total), teethWith, teethTotal: teeth.length, teethPct: pct(teethWith, teeth.length) };
     }
-    function valueStats(ds) {
-        const teeth = presentTeeth();
-        const vals = [];
-        teeth.forEach((tn) => Object.values(surfaceData[ds][tn] || {}).forEach((v) => vals.push(v)));
-        const total = teeth.length * 4;
-        const recorded = vals.length;
-        const mean = recorded ? Math.round((vals.reduce((a, b) => a + b, 0) / recorded) * 10) / 10 : 0;
-        return {
-            vals, total, recorded, mean,
-            max: recorded ? Math.max(...vals) : 0,
-            ge4: vals.filter((v) => v >= 4).length,
-            ge6: vals.filter((v) => v >= 6).length,
-            pos: vals.filter((v) => v > 0).length,
-        };
-    }
 
     const GRAD = {
         green: ["#16a34a", "#22c55e"],
         amber: ["#d97706", "#f59e0b"],
         red: ["#dc2626", "#f43f5e"],
-        blue: ["#1B4F8A", "#3b82f6"],
         slate: ["#475569", "#64748b"],
     };
     function levelColor(p) {
@@ -819,90 +774,31 @@ Z`;
                 scoreCard("Present teeth", `${s.teethTotal}`, `${s.total} surfaces charted (4 per tooth)`, GRAD.slate)
             );
         });
-
-        const pd = valueStats("pd");
-        const pd4 = pct(pd.ge4, pd.recorded), pd6 = pct(pd.ge6, pd.recorded);
-        $("#pe-score-pd").html(
-            scoreCard("Mean pocket depth", `${pd.mean} mm`, `${pd.recorded} / ${pd.total} surfaces recorded`, GRAD.blue) +
-            scoreCard("Sites ≥ 4 mm", `${pd.ge4} / ${pd.recorded}`, `${pd4}% of recorded sites`, levelColor(pd4)) +
-            scoreCard("Sites ≥ 6 mm", `${pd.ge6} / ${pd.recorded}`, `${pd6}% of recorded sites`, pd.ge6 ? GRAD.red : GRAD.green)
-        );
-
-        const rc = valueStats("rec");
-        const rcp = pct(rc.pos, rc.recorded);
-        $("#pe-score-rec").html(
-            scoreCard("Mean recession", `${rc.mean} mm`, `${rc.recorded} / ${rc.total} surfaces recorded`, GRAD.blue) +
-            scoreCard("Sites with recession", `${rc.pos} / ${rc.recorded}`, `${rcp}% of recorded sites`, levelColor(rcp)) +
-            scoreCard("Max recession", `${rc.max} mm`, "deepest recorded site", rc.max >= 5 ? GRAD.red : rc.max >= 3 ? GRAD.amber : GRAD.green)
-        );
-    }
-
-    function renderPalettes() {
-        const build = (ds, values, label) => {
-            let html = `<span class="pe-palette-lbl">${label}</span>`;
-            values.forEach((v) => {
-                html += `<button class="pe-pal-btn${selectedVal[ds] === v ? " active" : ""}" data-ds="${ds}" data-val="${v}">${v}</button>`;
-            });
-            html += `<button class="pe-pal-btn${selectedVal[ds] === "clear" ? " active" : ""}" data-ds="${ds}" data-val="clear" title="Eraser">✕</button>`;
-            $(`#pe-pal-${ds}`).html(html);
-        };
-        build("pd", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "Value (mm)");
-        build("rec", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "Value (mm)");
     }
 
     function renderSurfaceCharts() {
-        ["plaque", "bleeding", "pd", "rec"].forEach((ds) => $(`#pe-sc-${ds}`).html(surfaceChartHTML(ds)));
+        ["plaque", "bleeding"].forEach((ds) => $(`#pe-sc-${ds}`).html(surfaceChartHTML(ds)));
         renderScores();
-        renderPalettes();
     }
 
-    /** Keep the per-tooth Plaque / Bleeding Yes-No in the grid in sync with the surface chart. */
-    function syncBool(ds, tn) {
-        if (ds !== "plaque" && ds !== "bleeding") return;
-        const any = Object.keys(surfaceData[ds][tn] || {}).length > 0;
-        const $cb = $(`.pe-bool-input[data-field="${ds}"][data-tooth="${tn}"]`);
-        if ($cb.length && !$cb.prop("disabled")) $cb.prop("checked", any).trigger("change");
-    }
-
-    // Surface click
+    // Surface click (left click marks / unmarks)
     $(document).on("click", ".pe-sc-surf", function () {
         const ds = String($(this).attr("data-ds"));
         const tn = parseInt($(this).attr("data-tooth"));
         const surf = String($(this).attr("data-surf"));
-        const cur = getSurf(ds, tn, surf);
-
-        if (ds === "plaque" || ds === "bleeding") {
-            setSurf(ds, tn, surf, cur ? null : 1);
-            syncBool(ds, tn);
-        } else {
-            const sel = selectedVal[ds];
-            if (sel === "clear" || cur === sel) setSurf(ds, tn, surf, null);
-            else setSurf(ds, tn, surf, sel);
-        }
+        setSurf(ds, tn, surf, getSurf(ds, tn, surf) ? null : 1);
         renderSurfaceCharts();
-    });
-
-    // Palette pick
-    $(document).on("click", ".pe-pal-btn", function () {
-        const ds = String($(this).attr("data-ds"));
-        const v = $(this).attr("data-val");
-        selectedVal[ds] = v === "clear" ? "clear" : parseInt(v);
-        renderPalettes();
     });
 
     // Mark all / Clear
     $(document).on("click", ".pe-sc-all", function () {
         const ds = String($(this).attr("data-ds"));
-        presentTeeth().forEach((tn) => {
-            SURFACES.forEach((s) => setSurf(ds, tn, s, 1));
-            syncBool(ds, tn);
-        });
+        presentTeeth().forEach((tn) => SURFACES.forEach((s) => setSurf(ds, tn, s, 1)));
         renderSurfaceCharts();
     });
     $(document).on("click", ".pe-sc-clear", function () {
         const ds = String($(this).attr("data-ds"));
         surfaceData[ds] = {};
-        ALL_TEETH.forEach((tn) => syncBool(ds, tn));
         renderSurfaceCharts();
     });
 
@@ -978,9 +874,7 @@ Z`;
         $("#pe-other-findings").val("");
         $("#pe-recommendation").val("");
         $(".pe-cell-input").val("").prop("disabled", false).removeClass("pd-h pd-w pd-d");
-        $(".pe-bool-input").prop("checked", false).prop("disabled", false);
-        $(".pe-bool-text").text("No");
-        $(".pe-bool-toggle").removeClass("is-yes");
+        clearAllFlags();
         renderDiagrams();
         $("#pe-save-msg").text("");
     }
@@ -1013,7 +907,7 @@ Z`;
                     (doc.missing_teeth || "").split(",").map((s) => parseInt(s.trim())).filter((n) => n),
                 );
 
-                // 4-surface charts
+                // 4-surface charts (plaque & bleeding)
                 surfaceData = emptySurfaceData();
                 if (doc[F.surface_chart]) {
                     try {
@@ -1024,9 +918,7 @@ Z`;
 
                 // Grid values
                 $(".pe-cell-input").val("").removeClass("pd-h pd-w pd-d");
-                $(".pe-bool-input").prop("checked", false);
-                $(".pe-bool-text").text("No");
-                $(".pe-bool-toggle").removeClass("is-yes");
+                clearAllFlags();
                 (doc.perio_measurements || []).forEach((row) => {
                     const fieldMap = [];
                     for (let i = 1; i <= RECESSION_ROWS; i++) SITES.forEach((s) => fieldMap.push([`recession_${i}_s${s}`, `recession-${i}`, s, false]));
@@ -1043,10 +935,20 @@ Z`;
                             }
                         }
                     });
+
+                    // Flag cells: per-site fields (plaque_s1 … pus_s3)
                     BOOL_ROWS.forEach(({ field }) => {
-                        if (row[field] === undefined || row[field] === null) return;
-                        const $cb = $(`.pe-bool-input[data-field="${field}"][data-surface="${row.surface}"][data-tooth="${row.tooth_number}"]`);
-                        if ($cb.length) $cb.prop("checked", !!parseInt(row[field])).trigger("change");
+                        let anySite = false;
+                        SITES.forEach((s) => {
+                            if (parseInt(row[`${field}_s${s}`])) {
+                                setFlag(flagCell(row.surface, row.tooth_number, field, s), true);
+                                anySite = true;
+                            }
+                        });
+                        // Older exams stored one Yes/No per tooth → show it on the middle site
+                        if (!anySite && parseInt(row[field])) {
+                            setFlag(flagCell(row.surface, row.tooth_number, field, 2), true);
+                        }
                     });
                 });
 
@@ -1074,17 +976,24 @@ Z`;
                 for (let i = 1; i <= POCKET_DEPTH_ROWS; i++) SITES.forEach((s) => (row[`pocket_depth_${i}_s${s}`] = getVal(`pocket_depth-${i}`, s)));
                 if (includeMobility) {
                     for (let i = 1; i <= MOBILITY_ROWS; i++) SITES.forEach((s) => (row[`mobility_${i}_s${s}`] = getVal(`mobility-${i}`, s)));
-                    BOOL_ROWS.forEach(({ field }) => {
-                        row[field] = $(`.pe-bool-input[data-field="${field}"][data-surface="${surface}"][data-tooth="${tn}"]`).prop("checked") ? 1 : 0;
-                    });
                 }
-                const boolNames = BOOL_ROWS.map((b) => b.field);
-                const hasAny = Object.keys(row).some((k) => {
-                    if (k === "tooth_number" || k === "surface") return false;
-                    if (boolNames.includes(k)) return row[k] === 1;
-                    return row[k] !== null;
+
+                let anyFlag = false;
+                BOOL_ROWS.forEach(({ field }) => {
+                    let any = 0;
+                    SITES.forEach((s) => {
+                        const on = flagCell(surface, tn, field, s).hasClass("is-set") ? 1 : 0;
+                        row[`${field}_s${s}`] = on;
+                        if (on) any = 1;
+                    });
+                    row[field] = any;   // per-tooth summary (kept for existing reports)
+                    if (any) anyFlag = true;
                 });
-                if (hasAny) measurements.push(row);
+
+                const hasNumber = Object.keys(row).some((k) =>
+                    (k.startsWith("recession_") || k.startsWith("pocket_depth_") || k.startsWith("mobility_")) && row[k] !== null
+                );
+                if (hasNumber || anyFlag) measurements.push(row);
             });
         }
         collectSurface("Buccal", UPPER_TEETH, true);
