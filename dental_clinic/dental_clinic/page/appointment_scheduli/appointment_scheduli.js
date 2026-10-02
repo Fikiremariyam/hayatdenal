@@ -107,6 +107,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-filter-bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--card-bg); border-bottom: 1px solid var(--border-color); flex-wrap: wrap; }
             .cal-filter-group { display: flex; align-items: center; gap: 6px; }
             .cal-filter-lbl { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+            .cal-date-wrap { position: relative; display: inline-block; }
+            .cal-date-text { width: 104px; cursor: pointer; }
+            .cal-date-native { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; }
             .cal-filter-input { font-size: 12px; padding: 5px 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--card-bg); color: var(--text-color); }
             .cal-filter-sep { width: 1px; height: 24px; background: var(--border-color); margin: 0 4px; }
             .cal-filter-link-wrap { min-width: 220px; }
@@ -259,11 +262,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             <div class="cal-filter-bar">
                 <div class="cal-filter-group">
                     <span class="cal-filter-lbl">From</span>
-                    <input type="date" class="cal-filter-input" id="filter-from" value="${from_date}">
+                    <span class="cal-date-wrap"><input type="text" class="cal-filter-input cal-date-text" id="filter-from-text" data-for="filter-from" placeholder="dd/mm/yyyy" autocomplete="off"><input type="date" class="cal-date-native" id="filter-from" value="${from_date}" tabindex="-1"></span>
                 </div>
                 <div class="cal-filter-group">
                     <span class="cal-filter-lbl">To</span>
-                    <input type="date" class="cal-filter-input" id="filter-to" value="${to_date}">
+                    <span class="cal-date-wrap"><input type="text" class="cal-filter-input cal-date-text" id="filter-to-text" data-for="filter-to" placeholder="dd/mm/yyyy" autocomplete="off"><input type="date" class="cal-date-native" id="filter-to" value="${to_date}" tabindex="-1"></span>
                 </div>
                 <div class="cal-filter-sep"></div>
                 <div class="cal-filter-group">
@@ -533,6 +536,27 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     });
 
     // ── Wire date inputs ───────────────────────────────────────
+    // Visible boxes show / accept dd/mm/yyyy; the hidden native inputs keep yyyy-mm-dd.
+    document.querySelectorAll('.cal-date-text').forEach(function(txt) {
+        var nat = document.getElementById(txt.dataset.for);
+        txt.addEventListener('click', function() {
+            try { if (nat.showPicker) nat.showPicker(); } catch (e) { /* typing still works */ }
+        });
+        txt.addEventListener('change', function() {
+            var iso = parse_ddmmyyyy(txt.value);
+            if (!iso) {
+                frappe.show_alert({ message: 'Please enter the date as dd/mm/yyyy', indicator: 'orange' });
+                txt.value = fmt_ddmmyyyy(nat.value);
+                return;
+            }
+            nat.value = iso;
+            nat.dispatchEvent(new Event('change'));
+        });
+        txt.addEventListener('keydown', function(e) { if (e.key === 'Enter') txt.blur(); });
+        nat.addEventListener('change', function() { txt.value = fmt_ddmmyyyy(nat.value); });
+    });
+    sync_date_text();
+
     document.getElementById('filter-from').addEventListener('change', function() {
         from_date = this.value || frappe.datetime.get_today();
         if (view_mode === 'day') {
@@ -555,6 +579,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         to_date   = (view_mode === 'day') ? from_date : frappe.datetime.add_days(from_date, 6);
         document.getElementById('filter-from').value = from_date;
         document.getElementById('filter-to').value   = to_date;
+        sync_date_text();
         clear_selection();
     });
 
@@ -627,7 +652,35 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         var parts = d.split('-');
         var dt = new Date(parts[0], parts[1]-1, parts[2]);
         var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-        return days[dt.getDay()] + ' ' + (dt.getMonth()+1) + '/' + dt.getDate();
+        return days[dt.getDay()] + ' ' + pad2(dt.getDate()) + '/' + pad2(dt.getMonth() + 1);   // Fri 02/10
+    }
+
+    function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+    // "2026-10-02" -> "02/10/2026"
+    function fmt_ddmmyyyy(d) {
+        if (!d) return '';
+        var p = String(d).slice(0, 10).split('-');
+        return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : String(d);
+    }
+
+    // "02/10/2026" (or 2/10/26, 02-10-2026, 02.10.2026) -> "2026-10-02"; null if invalid
+    function parse_ddmmyyyy(txt) {
+        var m = String(txt || '').trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2}|\d{4})$/);
+        if (!m) return null;
+        var d = +m[1], mo = +m[2], y = +m[3];
+        if (y < 100) y += 2000;
+        var dt = new Date(y, mo - 1, d);
+        if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+        return y + '-' + pad2(mo) + '-' + pad2(d);
+    }
+
+    // Show the hidden native date values as dd/mm/yyyy in the visible boxes
+    function sync_date_text() {
+        ['filter-from', 'filter-to'].forEach(function(id) {
+            var nat = document.getElementById(id), txt = document.getElementById(id + '-text');
+            if (nat && txt && document.activeElement !== txt) txt.value = fmt_ddmmyyyy(nat.value);
+        });
     }
 
     function time_str_to_minutes(t) {
@@ -974,6 +1027,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 
     // ── Load data ──────────────────────────────────────────────
     function load_schedule() {
+        sync_date_text();
         var wrap  = document.getElementById('cal-wrap');
         var stats = document.getElementById('cal-stats');
         var lbl   = document.getElementById('cal-range-lbl');
@@ -989,8 +1043,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 
         var f = from_date, t = to_date;
         if (lbl) {
-            lbl.textContent = frappe.datetime.str_to_user(f)
-                + (f !== t ? ' \u2013 ' + frappe.datetime.str_to_user(t) : '');
+            lbl.textContent = fmt_ddmmyyyy(f)
+                + (f !== t ? ' \u2013 ' + fmt_ddmmyyyy(t) : '');
         }
 
         var key = ids.join('|') + '#' + f + '#' + t;
@@ -1290,7 +1344,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 if (!is_day_working(prac, d)) {
                     frappe.msgprint({
                         title: 'Not Available',
-                        message: esc(name_of(prac)) + ' is not scheduled to work on ' + frappe.datetime.str_to_user(d) + '.',
+                        message: esc(name_of(prac)) + ' is not scheduled to work on ' + fmt_ddmmyyyy(d) + '.',
                         indicator: 'orange'
                     });
                     return;
@@ -1357,7 +1411,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 var duty = duty_by_date[dt];
                 if (!duty || !duty.branch) {
                     picker.fields_dict.slot_list.$wrapper.html(
-                        '<div class="cal-avail-box cal-avail-bad">' + esc(prac) + ' is not scheduled to work on ' + frappe.datetime.str_to_user(dt) + '.</div>'
+                        '<div class="cal-avail-box cal-avail-bad">' + esc(prac) + ' is not scheduled to work on ' + fmt_ddmmyyyy(dt) + '.</div>'
                     );
                     return;
                 }
@@ -1371,7 +1425,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     }
                     if (!slots.length) {
                         picker.fields_dict.slot_list.$wrapper.html(
-                            '<div class="cal-avail-box cal-avail-bad">No open slots left for ' + esc(prac) + ' on ' + frappe.datetime.str_to_user(dt) + '.</div>'
+                            '<div class="cal-avail-box cal-avail-bad">No open slots left for ' + esc(prac) + ' on ' + fmt_ddmmyyyy(dt) + '.</div>'
                         );
                         return;
                     }
@@ -1423,7 +1477,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     // is an appointment being rescheduled, so it doesn't clash with itself.
     function check_slot_availability(practitioner, date, time_str, duration, callback, exclude_name) {
         if (!is_slot_bookable(practitioner, date, time_str, duration)) {
-            callback(false, (practitioner || 'This practitioner') + ' is not scheduled to work on ' + frappe.datetime.str_to_user(date) + '.');
+            callback(false, (practitioner || 'This practitioner') + ' is not scheduled to work on ' + fmt_ddmmyyyy(date) + '.');
             return;
         }
         frappe.call({
@@ -1694,7 +1748,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         open_slot_picker(a.appointment_date, a.practitioner, {
             title: 'Reschedule \u2014 ' + who,
             exclude_name: a.name,
-            intro: 'Currently ' + frappe.datetime.str_to_user(a.appointment_date) + ', '
+            intro: 'Currently ' + fmt_ddmmyyyy(a.appointment_date) + ', '
                 + fmt_modal_time(a) + ' with ' + (a.practitioner_name || a.practitioner || '')
                 + '. Pick the new practitioner and date, then click Check Availability.',
             on_pick: function(pick) { confirm_reschedule(a, pick); }
@@ -1713,7 +1767,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             }
             var prac_changed = pick.practitioner !== a.practitioner;
             frappe.confirm(
-                'Move <b>' + esc(who) + '</b> to <b>' + esc(frappe.datetime.str_to_user(pick.appointment_date))
+                'Move <b>' + esc(who) + '</b> to <b>' + esc(fmt_ddmmyyyy(pick.appointment_date))
                 + ', ' + format_time_label(start) + ' \u2013 ' + format_time_label(start + dur) + '</b>'
                 + (prac_changed ? ' with <b>' + esc(pick.practitioner) + '</b>' : '') + '?',
                 function() { save_reschedule(a, pick); }
@@ -1738,7 +1792,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                     if (!r.message) return;
                     frappe.show_alert({
                         message: 'Appointment ' + a.name + ' moved to '
-                            + frappe.datetime.str_to_user(pick.appointment_date) + ' '
+                            + fmt_ddmmyyyy(pick.appointment_date) + ' '
                             + format_time_label(time_str_to_minutes(pick.appointment_time)),
                         indicator: 'green'
                     });

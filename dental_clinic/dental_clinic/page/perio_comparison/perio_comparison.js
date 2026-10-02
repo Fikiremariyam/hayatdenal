@@ -7,7 +7,8 @@ frappe.pages["perio_comparison"].on_page_load = function (wrapper) {
 
     // ── Fieldnames on "Dental Perio Exam" (change here if yours differ) ────
     const F = {
-        practitioner: "practitioner",          // Link → Healthcare Practitioner
+        practitioner: "practitioner",          // Link → Healthcare Practitioner (linked to the creator)
+        practitioner_name: "practitioner_name",// Data → full name of the user who created the exam
         surface_chart: "surface_chart",        // Long Text (JSON of the 4-surface charts)
         plaque_score: "plaque_score",          // Percent
         plaque_fraction: "plaque_fraction",    // Data  e.g. "38/112"
@@ -186,7 +187,7 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
       </div>
       <div class="pe-field">
         <label class="pe-label">Practitioner</label>
-        <div class="pe-practitioner-input"></div>
+        <input id="pe-practitioner" type="text" class="pe-input" readonly />
       </div>
       <div class="pe-field">
         <label class="pe-label">Load Existing Exam</label>
@@ -357,6 +358,10 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
     $("#pe-exam-date").val(frappe.datetime.get_today());
 
     // ── Link controls ──────────────────────────────────────────────────────
+    // Make the Patient link show the patient's NAME instead of the ID
+    frappe.boot.link_title_doctypes = frappe.boot.link_title_doctypes || [];
+    if (!frappe.boot.link_title_doctypes.includes("Patient")) frappe.boot.link_title_doctypes.push("Patient");
+
     const patientCtrl = frappe.ui.form.make_control({
         parent: $(".pe-patient-input"),
         df: {
@@ -369,54 +374,47 @@ th.pe-tooth-alt { background: #e3eaf2 !important; }
         render_input: true,
     });
 
-    const practitionerCtrl = frappe.ui.form.make_control({
-        parent: $(".pe-practitioner-input"),
-        df: {
-            fieldtype: "Link",
-            options: "Healthcare Practitioner",
-            fieldname: "practitioner",
-            placeholder: "Search practitioner...",
-        },
-        only_input: true,
-        render_input: true,
-    });
-
-    function showLinkTitle(ctrl, doctype, name, title) {
-        if (!name || !title) return;
-        if (frappe.utils.add_link_title) frappe.utils.add_link_title(doctype, name, title);
-        if (ctrl.set_formatted_input) ctrl.set_formatted_input(name);
-    }
+    /** Show the patient's name in the Link box (the value stays the patient ID). */
     async function showPatientName(patientId) {
         if (!patientId) return;
         try {
             const r = await frappe.db.get_value("Patient", patientId, "patient_name");
-            showLinkTitle(patientCtrl, "Patient", patientId, r && r.message && r.message.patient_name);
+            const title = r && r.message && r.message.patient_name;
+            if (!title) return;
+            if (frappe.utils.add_link_title) frappe.utils.add_link_title("Patient", patientId, title);
+            if (patientCtrl.set_formatted_input) patientCtrl.set_formatted_input(patientId);
+            // Fallback for Frappe versions that don't render link titles
+            if (patientCtrl.$input && patientCtrl.$input.val() === patientId) patientCtrl.$input.val(title);
         } catch (e) { console.warn("[Perio] could not fetch patient_name:", e); }
     }
-    async function setPractitioner(id) {
-        await Promise.resolve(practitionerCtrl.set_value(id || ""));
-        if (!id) return;
+
+    /** Full name of a User (cached). */
+    const userNameCache = {};
+    async function userFullName(user) {
+        if (!user) return "";
+        if (userNameCache[user]) return userNameCache[user];
+        let name = "";
         try {
-            const r = await frappe.db.get_value("Healthcare Practitioner", id, "practitioner_name");
-            showLinkTitle(practitionerCtrl, "Healthcare Practitioner", id, r && r.message && r.message.practitioner_name);
-        } catch (e) { /* keep ID */ }
+            const r = await frappe.db.get_value("User", user, "full_name");
+            name = r && r.message && r.message.full_name;
+        } catch (e) { /* no read access to User */ }
+        userNameCache[user] = name || fullName(user);
+        return userNameCache[user];
     }
-    /** Default practitioner = the Healthcare Practitioner linked to the logged-in user (if any). */
-    async function prefillPractitioner() {
-        if (practitionerCtrl.get_value()) return;
+
+    /** Practitioner = the user who created the exam (read-only). */
+    let practitionerId = "";   // Healthcare Practitioner linked to that user, if any
+    async function setPractitionerFromUser(user) {
+        $("#pe-practitioner").val(await userFullName(user));
+        practitionerId = "";
         try {
-            const r = await frappe.db.get_value("Healthcare Practitioner", { user_id: frappe.session.user }, "name");
-            const id = r && r.message && r.message.name;
-            if (id) await setPractitioner(id);
+            const r = await frappe.db.get_value("Healthcare Practitioner", { user_id: user }, "name");
+            practitionerId = (r && r.message && r.message.name) || "";
         } catch (e) { /* no linked practitioner */ }
     }
-    practitionerCtrl.$input.on("change", function () {
-        const v = practitionerCtrl.get_value();
-        if (v) setPractitioner(v);
-    });
 
-    function renderAssessedBy() {
-        $("#pe-assessed-by").val(fullName(assessedByUser));
+    async function renderAssessedBy() {
+        $("#pe-assessed-by").val(await userFullName(assessedByUser));
     }
 
     patientCtrl.$input.on("change", function () {
@@ -829,11 +827,14 @@ Z`;
                 order_by: "exam_date desc",
                 limit: 50,
             },
-            callback: function (r) {
+            callback: async function (r) {
                 const exams = r.message || [];
+                const users = [...new Set(exams.map((e) => e.owner || e.assessed_by).filter(Boolean))];
+                await Promise.all(users.map(userFullName));
                 $("#pe-exam-picker").empty().append('<option value="">— New exam —</option>').prop("disabled", false);
                 exams.forEach((e) => {
-                    const by = fullName(e.assessed_by || e.owner);
+                    const u = e.owner || e.assessed_by;
+                    const by = u ? userNameCache[u] || fullName(u) : "";
                     const label = `${frappe.datetime.str_to_user(e.exam_date)}${by ? " · " + by : ""}`;
                     $("#pe-exam-picker").append(`<option value="${e.name}">${label}</option>`);
                 });
@@ -865,8 +866,7 @@ Z`;
         surfaceData = emptySurfaceData();
         assessedByUser = frappe.session.user;
         renderAssessedBy();
-        practitionerCtrl.set_value("");
-        prefillPractitioner();
+        setPractitionerFromUser(assessedByUser);
         $("#pe-exam-date").val(frappe.datetime.get_today());
         $('input[name="pe-periodontitis"][value="Absent"]').prop("checked", true);
         $('input[name="pe-severity"]').prop("checked", false);
@@ -894,7 +894,7 @@ Z`;
                 // Assessed by = the user who created the exam
                 assessedByUser = doc.owner || doc.assessed_by || frappe.session.user;
                 renderAssessedBy();
-                setPractitioner(doc[F.practitioner] || "");
+                setPractitionerFromUser(assessedByUser);
 
                 $("#pe-exam-date").val(doc.exam_date || frappe.datetime.get_today());
                 $(`input[name="pe-periodontitis"][value="${doc.periodontitis || "Absent"}"]`).prop("checked", true);
@@ -1017,7 +1017,8 @@ Z`;
             missing_teeth: Array.from(missingTeeth).sort((a, b) => a - b).join(","),
             perio_measurements: measurements,
         };
-        doc[F.practitioner] = practitionerCtrl.get_value() || "";
+        doc[F.practitioner] = practitionerId || "";
+        doc[F.practitioner_name] = $("#pe-practitioner").val() || "";
         doc[F.surface_chart] = JSON.stringify(cleanSurfaceData());
         doc[F.plaque_score] = plaque.pct;
         doc[F.plaque_fraction] = `${plaque.surfaces}/${plaque.total}`;
@@ -1061,9 +1062,22 @@ Z`;
             fetchExamPicker(selectedPatient);
         } catch (err) {
             console.error("[Perio] save failed:", err);
+            let detail = "";
+            try {
+                const res = err && (err.responseJSON || err);
+                if (res && res._server_messages) {
+                    detail = JSON.parse(res._server_messages)
+                        .map((m) => { try { return JSON.parse(m).message; } catch (e) { return m; } })
+                        .join("<br>");
+                } else if (res && res.exception) {
+                    detail = res.exception;
+                } else if (err && err.message) {
+                    detail = err.message;
+                }
+            } catch (e) { /* ignore */ }
             frappe.msgprint({
                 title: "Save Error",
-                message: "The exam could not be saved. Check DocType permissions and fields.",
+                message: "The exam could not be saved." + (detail ? "<br><br><b>Reason:</b><br>" + detail : ""),
                 indicator: "red",
             });
         } finally {
@@ -1073,7 +1087,7 @@ Z`;
 
     // ── Initial load ───────────────────────────────────────────────────────
     renderAssessedBy();
-    prefillPractitioner();
+    setPractitionerFromUser(assessedByUser);
     if (selectedPatient) {
         Promise.resolve(patientCtrl.set_value(selectedPatient)).then(() => showPatientName(selectedPatient));
         fetchExamPicker(selectedPatient);
