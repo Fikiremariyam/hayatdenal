@@ -31,7 +31,7 @@
   // Sidebar links
   const NAV = [
     { label: "Dashboard", route: "dental-compliance" },
-    { label: "Compliance Suite", route: "compliance-suite", active: true },
+    { label: "Compliance Suite", route: "compliance_suite", active: true },
     { label: "Calendar", route: "List/Event/Calendar/Default" },
     { label: "CPD", route: "List/Staff Training Record" },
     { label: "Online Forms", route: "List/Web Form" },
@@ -269,7 +269,7 @@
         </ul>`);
       $s.on("click", "[data-route]", (e) => {
         const route = e.currentTarget.dataset.route;
-        if (route === "compliance-suite") this.renderGrid();
+        if (route === "compliance_suite") this.renderGrid();
         else frappe.set_route(route.split("/"));
       });
     }
@@ -534,7 +534,20 @@
   // ===========================================================================
   // Frappe page hooks
   // ===========================================================================
-  frappe.pages["compliance-suite"].on_page_load = function (wrapper) {
+  // The Page record is named "compliance_suite" (URL: /app/compliance_suite).
+  // Fall back to other spellings just in case.
+  const pageKey =
+    ["compliance_suite", "compliance-suite"].find((k) => frappe.pages[k]) ||
+    Object.keys(frappe.pages).find((k) => k.toLowerCase().replace(/[-\s]/g, "_") === "compliance_suite") ||
+    frappe.get_route()[0];
+  const pageWrapper = frappe.pages[pageKey];
+
+  if (!pageWrapper) {
+    console.error("Compliance Suite: page wrapper not found. Registered pages:", Object.keys(frappe.pages));
+    return;
+  }
+
+  pageWrapper.on_page_load = function (wrapper) {
     wrapper.compliance_suite = new ComplianceSuite(wrapper);
   };
 })();
