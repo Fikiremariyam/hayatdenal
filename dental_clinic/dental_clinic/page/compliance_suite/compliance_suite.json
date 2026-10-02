@@ -6,9 +6,9 @@
  "modified": "2026-10-02 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "Dental Clinic",
- "name": "compliance-suite",
+ "name": "compliance_suite",
  "owner": "Administrator",
- "page_name": "compliance-suite",
+ "page_name": "compliance_suite",
  "roles": [
   { "role": "System Manager" },
   { "role": "Reception" }
