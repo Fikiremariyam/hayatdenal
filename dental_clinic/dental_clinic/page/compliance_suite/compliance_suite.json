@@ -1,0 +1,20 @@
+{
+ "creation": "2026-10-02 20:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2026-10-02 20:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Dental Clinic",
+ "name": "compliance-suite",
+ "owner": "Administrator",
+ "page_name": "compliance-suite",
+ "roles": [
+  { "role": "System Manager" },
+  { "role": "Reception" }
+  
+ ],
+ "standard": "Yes",
+ "system_page": 0,
+ "title": "Compliance Suite"
+}

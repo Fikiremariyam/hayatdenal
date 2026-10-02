@@ -1,0 +1,82 @@
+/* Compliance Suite page. Everything is prefixed with .cs-page so it can't leak into other screens. */
+
+.cs-page { padding: 8px 4px 40px; }
+
+/* ---------- Search + key ---------- */
+.cs-page .cs-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap; margin-bottom: 28px; }
+.cs-page .cs-search { display: flex; gap: 24px; flex: 1; min-width: 280px; max-width: 700px; }
+.cs-page .cs-q { flex: 1; padding: 10px 16px; border: 1px solid #333; border-radius: 4px; font-size: 14px; background: #fff; }
+.cs-page .cs-search-btn { background: #3a8fd9; color: #fff; border: 0; border-radius: 3px; padding: 0 22px; font-size: 14px; cursor: pointer; }
+.cs-page .cs-search-btn:hover { background: #2f7bbf; }
+
+.cs-page .cs-key { display: grid; grid-template-columns: repeat(2, minmax(150px, auto)); gap: 2px 64px;
+  border: 1px solid #e3e3e3; border-radius: 6px; padding: 10px 18px; font-size: 14px; color: #444; background: #fff; }
+.cs-page .cs-key span { display: flex; align-items: center; gap: 10px; }
+
+.cs-page .cs-i { width: 18px; height: 18px; flex: none; }
+
+/* ---------- Category grid ---------- */
+.cs-page .cs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 28px; }
+.cs-page .cs-card { --c: #999; background: #fff; border: 1px solid #e5e5e5; border-bottom: 5px solid var(--c);
+  border-radius: 4px; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; min-height: 228px;
+  transition: box-shadow .15s, transform .15s; }
+.cs-page .cs-card:hover { box-shadow: 0 6px 18px rgba(0, 0, 0, .08); transform: translateY(-2px); }
+.cs-page .cs-card:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+.cs-page .cs-card-head { background: var(--c); height: 40px; display: flex; align-items: center; justify-content: center; }
+.cs-page .cs-lock { width: 20px; height: 20px; fill: #111; }
+.cs-page .cs-card-title { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center;
+  padding: 24px; font-size: 22px; line-height: 1.5; color: var(--c); }
+.cs-page .cs-card-foot { height: 40px; border-top: 1px solid #f2f2f2; }
+.cs-page .cs-card.locked { cursor: not-allowed; }
+.cs-page .cs-card.locked:hover { transform: none; box-shadow: none; }
+
+/* ---------- Tree toolbar ---------- */
+.cs-page .cs-tree-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.cs-page .cs-back { cursor: pointer; color: #3a8fd9; }
+.cs-page .cs-back:hover { text-decoration: underline; }
+.cs-page .cs-sel-label { color: #666; font-size: 13px; }
+.cs-page .cs-tree-btns { margin-left: auto; display: flex; gap: 8px; }
+
+/* ---------- Tree with dotted connector lines ---------- */
+.cs-page .cs-tree,
+.cs-page .cs-children { list-style: none; margin: 0; }
+.cs-page .cs-tree { padding-left: 8px; }
+.cs-page .cs-children { padding-left: 30px; }
+
+.cs-page .cs-node { position: relative; }
+.cs-page .cs-children > .cs-node::before { content: ""; position: absolute; left: -16px; top: 0; bottom: 0; border-left: 1px dotted #666; }
+.cs-page .cs-children > .cs-node:last-child::before { bottom: auto; height: 19px; }
+.cs-page .cs-children > .cs-node::after { content: ""; position: absolute; left: -16px; top: 19px; width: 14px; border-top: 1px dotted #666; }
+
+.cs-page .cs-row { display: inline-flex; align-items: center; gap: 10px; min-height: 38px; padding: 4px 10px;
+  border-radius: 2px; cursor: pointer; color: #333; font-size: 15px; max-width: 100%; }
+.cs-page .cs-row:hover { background: #f1f7fd; }
+.cs-page .cs-row.selected { background: #eaf4fc; box-shadow: inset 0 0 0 1px #cfe6f7; }
+.cs-page .cs-row:focus-visible { outline: 2px solid #3a8fd9; }
+.cs-page .cs-label { overflow-wrap: anywhere; }
+
+/* Folder caret */
+.cs-page .cs-caret { width: 0; height: 0; border-left: 5px solid #333; border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent; margin-left: -12px; transition: transform .12s; }
+.cs-page .cs-node.open > .cs-row .cs-caret { transform: rotate(90deg); }
+
+/* DC templates: blue highlighted rows like the original */
+.cs-page .cs-row.cs-dc { background: #3a8fd9; color: #fff; }
+.cs-page .cs-row.cs-dc:hover { background: #2f7bbf; }
+
+/* Hover actions */
+.cs-page .cs-actions { display: inline-flex; gap: 4px; margin-left: 12px; opacity: 0; transition: opacity .12s; }
+.cs-page .cs-row:hover .cs-actions,
+.cs-page .cs-row.selected .cs-actions { opacity: 1; }
+.cs-page .cs-act { border: 0; background: transparent; padding: 3px; border-radius: 3px; cursor: pointer; line-height: 0; }
+.cs-page .cs-act svg { width: 16px; height: 16px; fill: #555; }
+.cs-page .cs-act:hover { background: #dde9f5; }
+.cs-page .cs-del:hover svg { fill: #c62828; }
+
+.cs-page .cs-muted { color: #999; font-size: 13px; padding: 8px 10px; list-style: none; }
+
+/* ---------- Search results ---------- */
+.cs-page .cs-results { list-style: none; margin: 0; padding: 0; }
+.cs-page .cs-hit { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+.cs-page .cs-hit:hover { background: #f1f7fd; }
+.cs-page .cs-path { margin-left: auto; color: #888; }
