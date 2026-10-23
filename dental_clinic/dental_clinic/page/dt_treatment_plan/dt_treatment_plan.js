@@ -74,6 +74,7 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
 #dtp-root .sum-tbl tr:last-child td{ border-bottom:none; }
 #dtp-root .sum-tbl tr:hover td{ background:var(--panel2); }
 #dtp-root .sum-tbl tfoot td{ border-bottom:none;border-top:1.5px solid var(--border2);font-weight:700;background:var(--panel2); }
+#dtp-root .sum-tbl tr.tp-invoiced td{ background:#f3fbf6; }
 #dtp-root .tp-row-rm       { color:var(--muted2);font-size:13px;line-height:1;opacity:.6;cursor:pointer; }
 #dtp-root .tp-row-rm:hover { opacity:1; }
 #dtp-root .tp-toolbar      { display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:10px; }
@@ -89,6 +90,10 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
 #dtp-root .tp-idx-cell     { width:26px;text-align:center;color:var(--muted2);font-family:'DM Mono',monospace;font-size:11px; }
 #dtp-root .tp-cell-input   { width:100%;border:1px solid transparent;background:transparent;font-family:inherit;font-size:12px;color:var(--text);padding:2px 4px;border-radius:4px;outline:none; }
 #dtp-root .tp-cell-input:hover, #dtp-root .tp-cell-input:focus { border-color:var(--border2);background:var(--panel2); }
+#dtp-root .tp-cell-input:disabled { color:var(--muted);cursor:not-allowed; }
+#dtp-root .tp-status-Pending   { color:#e67e22;font-weight:600; }
+#dtp-root .tp-status-Completed { color:#27ae60;font-weight:600; }
+#dtp-root .tp-inv-link     { display:block;font-size:10px;font-family:'DM Mono',monospace;color:var(--accent);margin-top:2px;padding-left:4px; }
 #dtp-root .stat-grid     { display:grid;grid-template-columns:1fr 1fr;gap:5px; }
 #dtp-root .stat-box      { background:var(--panel2);border:1px solid var(--border);border-radius:7px;padding:7px;text-align:center; }
 #dtp-root .stat-val      { font-size:18px;font-weight:700;font-family:'DM Mono',monospace;line-height:1; }
@@ -237,6 +242,17 @@ frappe.pages['dt_treatment_plan'].on_page_show = function () {
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   Visit / Status choices (must match the Select options on the child doctype)
+   ═══════════════════════════════════════════════════════════════════════════*/
+const DTP_VISIT_OPTIONS  = ['Visit 1', 'Visit 2', 'Visit 3'];
+const DTP_STATUS_OPTIONS = ['Pending', 'Completed'];
+
+function dtpEsc(v) {
+	return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
    Deterministic color + category guess for procedures pulled from Item.
    ═══════════════════════════════════════════════════════════════════════════*/
 const DTP_COLOR_PALETTE = [
@@ -292,12 +308,18 @@ class DtpToothState {
 		this.uni  = meta.uni;
 		this.name = meta.name;
 		this.type = meta.type;
-		this.rows = [];   // [{ uid, type(item code), label, color, category, priority, note, fee, insurance_estimate, patient_portion }]
+		this.rows = [];   // [{ uid, type(item code), label, color, category, visit, status, sales_invoice, priority, note, fee, insurance_estimate, patient_portion }]
 	}
 
-	addRow(row) {
-		this.rows = this.rows.filter(r => r.type !== row.type);
+	// dedupe=true: clicking the same item on a tooth replaces it (palette behaviour).
+	// dedupe=false: used when loading saved rows, so the same procedure can exist
+	// on the same tooth for different visits.
+	addRow(row, dedupe = true) {
+		if (dedupe) this.rows = this.rows.filter(r => r.type !== row.type || r.sales_invoice);
 		if (!row.uid) row.uid = 'row_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+		if (row.visit === undefined || !row.visit)   row.visit = 'Visit 1';
+		if (row.status === undefined || !row.status) row.status = 'Pending';
+		if (row.sales_invoice === undefined)      row.sales_invoice = '';
 		if (row.priority === undefined)           row.priority = '';
 		if (row.note === undefined)               row.note = '';
 		if (row.fee === undefined)                row.fee = 0;
@@ -317,12 +339,15 @@ class DtpToothState {
 			label             : match ? (match.status_name || match.name) : code,
 			color             : match ? match.color : dtpHashColor(code),
 			category          : match ? match.category : dtpClassifyProcedure(code),
+			visit             : row.visit || 'Visit 1',
+			status            : row.status || 'Pending',
+			sales_invoice     : row.sales_invoice || '',
 			priority          : row.priority || '',
 			note              : row.note || '',
 			fee               : flt(row.fee),
 			insurance_estimate: row.insurance_estimate || '',
 			patient_portion   : flt(row.patient_portion),
-		});
+		}, false);
 	}
 
 	toDocRows() {
@@ -331,6 +356,9 @@ class DtpToothState {
 			fdi               : this.fdi,      // ← requires "fdi"/"name1" fields on the child doctype
 			name1             : this.name,
 			procedure         : r.type,
+			visit             : r.visit || 'Visit 1',
+			status            : r.status || 'Pending',
+			sales_invoice     : r.sales_invoice || '',   // kept so the server never invoices a row twice
 			priority          : r.priority || '',
 			note              : r.note || '',
 			fee               : flt(r.fee),
@@ -725,9 +753,11 @@ class DentalTreatmentPlanChart {
 		const state = this.teeth[this.selFDI];
 		if (!state) return;
 
-		const already = state.rows.some(r => r.type === this.selItem.id);
-		if (already) {
-			state.rows = state.rows.filter(r => r.type !== this.selItem.id);
+		const existing = state.rows.filter(r => r.type === this.selItem.id);
+		const removable = existing.filter(r => !r.sales_invoice);
+		if (removable.length) {
+			// Toggle off (only rows that haven't been invoiced)
+			state.rows = state.rows.filter(r => !(r.type === this.selItem.id && !r.sales_invoice));
 		} else {
 			state.addRow({
 				type: this.selItem.id, label: this.selItem.label, color: this.selItem.color,
@@ -812,7 +842,7 @@ class DentalTreatmentPlanChart {
 	_showTip(e, meta) {
 		const rows = this.teeth[meta.fdi].rows;
 		const str = rows.length
-			? rows.map(r => `${r.label || r.type}${r.fee ? ' · ' + format_currency(r.fee) : ''}`).join(', ')
+			? rows.map(r => `${r.label || r.type} (${r.visit} · ${r.status})${r.fee ? ' · ' + format_currency(r.fee) : ''}`).join(', ')
 			: 'No procedure planned';
 		this._tip.innerHTML = `<b>${meta.fdi}</b> · ${meta.name}<br><span style="color:#9ca3af;font-size:10px">${str}</span>`;
 		this._tip.style.opacity = '1';
@@ -856,23 +886,39 @@ class DentalTreatmentPlanChart {
 		const totalFee = flat.reduce((sum, r) => sum + flt(r.row.fee), 0);
 		const totalPortion = flat.reduce((sum, r) => sum + flt(r.row.patient_portion), 0);
 
-		const rows = flat.map((r, idx) => `
-            <tr>
+		const rows = flat.map((r, idx) => {
+			const inv  = r.row.sales_invoice;
+			const lock = inv ? 'disabled' : '';
+			const status = r.row.status || 'Pending';
+			return `
+            <tr class="${inv ? 'tp-invoiced' : ''}">
                 <td class="tp-chk-cell"><input type="checkbox" class="dtp-row-chk" data-uid="${r.row.uid}" ${this.selectedRowIds.has(r.row.uid) ? 'checked' : ''}></td>
                 <td class="tp-idx-cell">${idx + 1}</td>
                 <td>
-                    <select class="tp-cell-input dtp-tooth-edit" data-uid="${r.row.uid}">
+                    <select class="tp-cell-input dtp-tooth-edit" data-uid="${r.row.uid}" ${lock}>
                         ${toothOptions.map(fdi => `<option value="${fdi}" ${fdi === r.fdi ? 'selected' : ''}>${fdi}</option>`).join('')}
                     </select>
                 </td>
+                <td>
+                    <select class="tp-cell-input dtp-visit-edit" data-uid="${r.row.uid}" ${lock}>
+                        ${DTP_VISIT_OPTIONS.map(v => `<option value="${v}" ${v === r.row.visit ? 'selected' : ''}>${v}</option>`).join('')}
+                    </select>
+                </td>
                 <td><div class="dtp-item-cell" data-uid="${r.row.uid}"></div></td>
-                <td><input type="text" class="tp-cell-input dtp-priority-edit" data-uid="${r.row.uid}" value="${(r.row.priority || '').replace(/"/g, '&quot;')}" placeholder="1"></td>
-                <td><input type="text" class="tp-cell-input dtp-note-edit" data-uid="${r.row.uid}" value="${(r.row.note || '').replace(/"/g, '&quot;')}" placeholder="Note…"></td>
-                <td><input type="number" step="0.01" class="tp-cell-input dtp-fee-edit" data-uid="${r.row.uid}" value="${flt(r.row.fee)}" style="text-align:right"></td>
-                <td><input type="text" class="tp-cell-input dtp-ins-edit" data-uid="${r.row.uid}" value="${(r.row.insurance_estimate || '').replace(/"/g, '&quot;')}" placeholder="—" style="text-align:right"></td>
-                <td><input type="number" step="0.01" class="tp-cell-input dtp-portion-edit" data-uid="${r.row.uid}" value="${flt(r.row.patient_portion)}" style="text-align:right"></td>
-                <td><span class="tp-row-rm dtp-row-rm" data-uid="${r.row.uid}" title="Delete row">🗑</span></td>
-            </tr>`).join('');
+                <td><input type="text" class="tp-cell-input dtp-priority-edit" data-uid="${r.row.uid}" value="${dtpEsc(r.row.priority)}" placeholder="1"></td>
+                <td><input type="text" class="tp-cell-input dtp-note-edit" data-uid="${r.row.uid}" value="${dtpEsc(r.row.note)}" placeholder="Note…"></td>
+                <td><input type="number" step="0.01" class="tp-cell-input dtp-fee-edit" data-uid="${r.row.uid}" value="${flt(r.row.fee)}" style="text-align:right" ${lock}></td>
+                <td><input type="text" class="tp-cell-input dtp-ins-edit" data-uid="${r.row.uid}" value="${dtpEsc(r.row.insurance_estimate)}" placeholder="—" style="text-align:right" ${lock}></td>
+                <td><input type="number" step="0.01" class="tp-cell-input dtp-portion-edit" data-uid="${r.row.uid}" value="${flt(r.row.patient_portion)}" style="text-align:right" ${lock}></td>
+                <td>
+                    <select class="tp-cell-input dtp-status-edit tp-status-${status}" data-uid="${r.row.uid}" ${lock}>
+                        ${DTP_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === status ? 'selected' : ''}>${s}</option>`).join('')}
+                    </select>
+                    ${inv ? `<a class="tp-inv-link" href="/app/sales-invoice/${encodeURIComponent(inv)}" target="_blank" title="Open invoice">${inv}</a>` : ''}
+                </td>
+                <td>${inv ? '' : `<span class="tp-row-rm dtp-row-rm" data-uid="${r.row.uid}" title="Delete row">🗑</span>`}</td>
+            </tr>`;
+		}).join('');
 
 		wrap.innerHTML = `
             <div class="tp-toolbar">
@@ -891,23 +937,25 @@ class DentalTreatmentPlanChart {
                         <th style="width:26px"></th>
                         <th style="width:26px">#</th>
                         <th style="width:64px">Tooth</th>
+                        <th style="width:84px">Visit</th>
                         <th>Procedure</th>
                         <th style="width:60px">Priority</th>
-                        <th style="width:180px">Note</th>
+                        <th style="width:160px">Note</th>
                         <th style="width:80px">Fee</th>
                         <th style="width:90px">Ins. Est.</th>
                         <th style="width:100px">Patient Portion</th>
+                        <th style="width:110px">Status</th>
                         <th style="width:26px"></th>
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
                 <tfoot>
                     <tr>
-                        <td colspan="6" style="text-align:right">Totals</td>
+                        <td colspan="7" style="text-align:right">Totals</td>
                         <td>${format_currency(totalFee)}</td>
                         <td></td>
                         <td>${format_currency(totalPortion)}</td>
-                        <td></td>
+                        <td colspan="2"></td>
                     </tr>
                 </tfoot>
             </table>` : `<div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">No procedures planned yet — click a tooth, pick a treatment item on the left, or use "＋ Add Row"</div>`}
@@ -964,6 +1012,20 @@ class DentalTreatmentPlanChart {
 			el.addEventListener('change', (e) => this._moveRowTooth(el.dataset.uid, e.target.value));
 		});
 
+		wrap.querySelectorAll('.dtp-visit-edit').forEach(el => {
+			el.addEventListener('change', (e) => {
+				const found = this._findRowByUid(el.dataset.uid);
+				if (found) { found.row.visit = e.target.value; this.render(); }
+			});
+		});
+
+		wrap.querySelectorAll('.dtp-status-edit').forEach(el => {
+			el.addEventListener('change', (e) => {
+				const found = this._findRowByUid(el.dataset.uid);
+				if (found) { found.row.status = e.target.value; this.render(); }
+			});
+		});
+
 		wrap.querySelectorAll('.dtp-item-cell').forEach(cell => {
 			const uid = cell.dataset.uid;
 			const found = this._findRowByUid(uid);
@@ -979,6 +1041,10 @@ class DentalTreatmentPlanChart {
 				render_input: true,
 			});
 			if (found && found.row.type) ctrl.set_value(found.row.type);
+			if (found && found.row.sales_invoice) {
+				ctrl.$input.prop('disabled', true);
+				return;
+			}
 			ctrl.$input.on('change', () => {
 				const val = ctrl.get_value();
 				this._setRowItem(uid, val);
@@ -1025,13 +1091,17 @@ class DentalTreatmentPlanChart {
 	_addBlankRow() {
 		const fdi = this.selFDI || (this.allMeta[0] && this.allMeta[0].fdi);
 		if (!fdi) return;
-		this.teeth[fdi].addRow({ type: '', label: '— Select —', color: '#c8cfd8', category: 'procedure' });
+		this.teeth[fdi].addRow({ type: '', label: '— Select —', color: '#c8cfd8', category: 'procedure' }, false);
 		this.render();
 	}
 
 	_removeRowByUid(uid) {
 		const found = this._findRowByUid(uid);
 		if (!found) return;
+		if (found.row.sales_invoice) {
+			frappe.msgprint({ title: 'Already Invoiced', message: `This row is billed on ${found.row.sales_invoice} and can't be deleted.`, indicator: 'orange' });
+			return;
+		}
 		found.state.rows = found.state.rows.filter(r => r.uid !== uid);
 		this.selectedRowIds.delete(uid);
 		this.render();
@@ -1042,7 +1112,12 @@ class DentalTreatmentPlanChart {
 		this.selectedRowIds.forEach(uid => {
 			const found = this._findRowByUid(uid);
 			if (found) {
-				found.state.rows.push({ ...found.row, uid: 'row_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) });
+				found.state.rows.push({
+					...found.row,
+					uid: 'row_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+					status: 'Pending',
+					sales_invoice: '',
+				});
 			}
 		});
 		this.selectedRowIds = new Set();
@@ -1051,17 +1126,25 @@ class DentalTreatmentPlanChart {
 
 	_deleteSelected() {
 		if (!this.selectedRowIds.size) return;
+		let skipped = 0;
 		this.allMeta.forEach(meta => {
 			const state = this.teeth[meta.fdi];
-			state.rows = state.rows.filter(r => !this.selectedRowIds.has(r.uid));
+			state.rows = state.rows.filter(r => {
+				if (!this.selectedRowIds.has(r.uid)) return true;
+				if (r.sales_invoice) { skipped++; return true; }
+				return false;
+			});
 		});
 		this.selectedRowIds = new Set();
 		this.render();
+		if (skipped) {
+			frappe.show_alert({ message: `${skipped} invoiced row(s) were kept`, indicator: 'orange' });
+		}
 	}
 
 	_moveRowTooth(uid, newFdi) {
 		const found = this._findRowByUid(uid);
-		if (!found || found.fdi === newFdi) return;
+		if (!found || found.fdi === newFdi || found.row.sales_invoice) return;
 		const newState = this.teeth[newFdi];
 		if (!newState) return;
 		found.state.rows = found.state.rows.filter(r => r.uid !== uid);
@@ -1071,7 +1154,7 @@ class DentalTreatmentPlanChart {
 
 	async _setRowItem(uid, itemCode) {
 		const found = this._findRowByUid(uid);
-		if (!found) return;
+		if (!found || found.row.sales_invoice) return;
 
 		if (!itemCode) {
 			found.row.type = '';
@@ -1135,6 +1218,12 @@ class DentalTreatmentPlanChart {
 			if (state.rows.length) procedureRows.push(...state.toDocRows());
 		});
 
+		const missingItem = procedureRows.some(r => !r.procedure && r.status === 'Completed');
+		if (missingItem) {
+			frappe.msgprint({ title: 'Missing Procedure', message: 'A row marked Completed has no procedure item selected.', indicator: 'orange' });
+			return;
+		}
+
 		const fieldValues = {
 			patient: patientId,
 			provider: this.provider_ctrl.get_value() || frappe.session.user,
@@ -1182,8 +1271,8 @@ class DentalTreatmentPlanChart {
 	}
 
 	_afterSave(doc) {
-		this.docname = doc.name;
-		_dtpSet('dtp-badge', doc.name);
+		// Re-apply the saved doc so rows pick up the sales_invoice the server set.
+		this._applyDoc(doc);
 		frappe.show_alert({ message: `Saved: ${doc.name}`, indicator: 'green' });
 	}
 
@@ -1261,36 +1350,42 @@ class DentalTreatmentPlanChart {
 			args: { doctype: this.frm_doctype, name: name },
 			callback: (r) => {
 				if (!r.message) return;
-				const doc = r.message;
-
-				try {
-					this._resetAllTeeth();
-					this.selectedRowIds = new Set();
-					this.selItem = null;
-
-					this.docname = doc.name;
-					this.patient_ctrl.set_value(doc.patient || '');
-					// Show the user who created the plan
-					this.provider_ctrl.set_value(doc.owner || doc.provider || '');
-					document.getElementById('dtp-plan-type').value = doc.plan_type || 'Active';
-					this.plan_date_ctrl.set_value(doc.plan_date || '');
-					document.getElementById('dtp-plan-note').value = doc.plan_note || '';
-
-					(doc.dental_treatment_plan_procedure || []).forEach(row => {
-						const state = this.teethSets.permanent[row.fdi] || this.teethSets.primary[row.fdi];
-						if (state) state.loadFromDocRow(row, this.itemCatalog);
-					});
-
-					_dtpSet('dtp-badge', doc.name);
-					this._renderSelectedItem();
-					this.render();
-					frappe.show_alert({ message: `Loaded ${doc.name}`, indicator: 'green' });
-				} catch (err) {
-					console.error('[DentalTreatmentPlan] _loadPlanByName failed partway through:', err);
-					frappe.msgprint({ title: 'Load Error', message: String(err), indicator: 'red' });
+				if (this._applyDoc(r.message)) {
+					frappe.show_alert({ message: `Loaded ${r.message.name}`, indicator: 'green' });
 				}
 			},
 		});
+	}
+
+	// Puts a saved Dental Treatment Plan doc on screen. Returns true on success.
+	_applyDoc(doc) {
+		try {
+			this._resetAllTeeth();
+			this.selectedRowIds = new Set();
+			this.selItem = null;
+
+			this.docname = doc.name;
+			this.patient_ctrl.set_value(doc.patient || '');
+			// Show the user who created the plan
+			this.provider_ctrl.set_value(doc.owner || doc.provider || '');
+			document.getElementById('dtp-plan-type').value = doc.plan_type || 'Active';
+			this.plan_date_ctrl.set_value(doc.plan_date || '');
+			document.getElementById('dtp-plan-note').value = doc.plan_note || '';
+
+			(doc.dental_treatment_plan_procedure || []).forEach(row => {
+				const state = this.teethSets.permanent[row.fdi] || this.teethSets.primary[row.fdi];
+				if (state) state.loadFromDocRow(row, this.itemCatalog);
+			});
+
+			_dtpSet('dtp-badge', doc.name);
+			this._renderSelectedItem();
+			this.render();
+			return true;
+		} catch (err) {
+			console.error('[DentalTreatmentPlan] _applyDoc failed partway through:', err);
+			frappe.msgprint({ title: 'Load Error', message: String(err), indicator: 'red' });
+			return false;
+		}
 	}
 
 	_resetAllTeeth() {

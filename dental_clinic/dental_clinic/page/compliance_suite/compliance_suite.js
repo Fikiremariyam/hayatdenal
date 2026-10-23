@@ -22,10 +22,14 @@
     { title: "Staff Meetings", folder: "Staff Meetings", color: "#cc9b26" },
     { title: "Health & Safety / COSHH", folder: "Health and Safety - COSHH", color: "#283f92" },
     { title: "Fire", folder: "Fire", color: "#8d734d" },
-    { title: "Infection Control", folder: "Infection Control", color: "#20aae9" },
-    { title: "Radiography", folder: "Radiography", color: "#ec008c" },
-    { title: "Information Governance", folder: "Information Governance", color: "#7459a6" },
-    { title: "Patient Safety", folder: "Patient Safety", color: "#a0c95c" },
+    { title: "Radiation Protection", folder: "Radiation Protection", color: "#20aae9" },
+    { title: "PracticeLogs and Check Lists ", folder: "PracticeLogs and Check Lists", color: "#ec008c" },
+    { title: "Service & Maintenance", folder: "Service and Maintenance", color: "#7459a6" },
+    { title: "Surgery Information", folder: "Surgery Information", color: "#a0c95c" },
+    { title: "Decontamination Room", folder: "Decontamination Room", color: "#6fff01" },
+    { title: "GDPR", folder: "GDPR", color: "#d0ff00" },
+    { title: "Waste", folder: "Waste", color: "#f06413" },
+    
   ];
 
   // Sidebar links
