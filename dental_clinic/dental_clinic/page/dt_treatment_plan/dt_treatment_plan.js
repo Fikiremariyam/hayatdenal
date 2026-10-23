@@ -1205,7 +1205,14 @@ class DentalTreatmentPlanChart {
 	}
 
 	/* ── SAVE ──────────────────────────────────────────────────────────── */
+	// Everything happens here in the browser:
+	//   1. check the child table has the visit / status / sales_invoice fields
+	//   2. save the plan
+	//   3. if there are new Completed rows → create a Sales Invoice for the
+	//      patient's customer, stamp its number on those rows, save again
 	async save() {
+		if (this._saving) return;
+
 		const patientId = this.patient_ctrl.get_value();
 		if (!patientId) {
 			frappe.msgprint({ title: 'No Patient Selected', message: 'Search for and select a patient before saving.', indicator: 'orange' });
@@ -1218,8 +1225,7 @@ class DentalTreatmentPlanChart {
 			if (state.rows.length) procedureRows.push(...state.toDocRows());
 		});
 
-		const missingItem = procedureRows.some(r => !r.procedure && r.status === 'Completed');
-		if (missingItem) {
+		if (procedureRows.some(r => !r.procedure && r.status === 'Completed')) {
 			frappe.msgprint({ title: 'Missing Procedure', message: 'A row marked Completed has no procedure item selected.', indicator: 'orange' });
 			return;
 		}
@@ -1236,44 +1242,142 @@ class DentalTreatmentPlanChart {
 			total_patient_portion: this._parseCurrency(document.getElementById('dtp-total-portion').textContent),
 		};
 
-		frappe.dom.freeze('Saving...');
+		this._saving = true;
+		frappe.dom.freeze(__('Saving...'));
 
 		try {
-			if (this.docname) {
-				// UPDATE — round-trip the full existing doc so no other fields are lost
-				const existing = await frappe.db.get_doc(this.frm_doctype, this.docname);
-				Object.assign(existing, fieldValues);
-
-				frappe.call({
-					method: 'frappe.client.save',
-					args: { doc: existing },
-					callback: (r) => { frappe.dom.unfreeze(); if (r.message) this._afterSave(r.message); },
-					error: () => frappe.dom.unfreeze(),
+			// 1. Make sure the child table can store visit / status / invoice
+			const missing = await this._missingChildFields();
+			if (missing.length) {
+				frappe.msgprint({
+					title: 'Fields Missing',
+					indicator: 'red',
+					message: `Add these fields to <b>${this.child_doctype}</b> first, then reload this page:<br><br>`
+						+ missing.map(f => `• <code>${f}</code>`).join('<br>'),
 				});
-			} else {
-				// INSERT
-				frappe.call({
-					method: 'frappe.client.insert',
-					args: { doc: Object.assign({ doctype: this.frm_doctype }, fieldValues) },
-					callback: (r) => { frappe.dom.unfreeze(); if (r.message) this._afterSave(r.message); },
-					error: () => frappe.dom.unfreeze(),
-				});
+				return;
 			}
-		} catch (err) {
+
+			// 2. Save the plan
+			let savedDoc;
+			try {
+				savedDoc = await this._savePlan(fieldValues);
+			} catch (err) {
+				this._showError('Save Error', err);
+				return;
+			}
+			this._applyDoc(savedDoc);
+			frappe.show_alert({ message: `Saved: ${savedDoc.name}`, indicator: 'green' });
+
+			// 3. Invoice any new Completed rows
+			try {
+				await this._invoiceCompletedRows(savedDoc);
+			} catch (err) {
+				this._showError('Invoice Not Created', err,
+					'The plan was saved. The completed rows will be invoiced the next time you save.');
+			}
+		} finally {
 			frappe.dom.unfreeze();
-			console.error('[DentalTreatmentPlan] save failed:', err);
-			frappe.msgprint({ title: 'Save Error', message: String(err), indicator: 'red' });
+			this._saving = false;
+		}
+	}
+
+	async _savePlan(fieldValues) {
+		let r;
+		if (this.docname) {
+			// UPDATE — round-trip the full existing doc so no other fields are lost
+			const existing = await frappe.db.get_doc(this.frm_doctype, this.docname);
+			Object.assign(existing, fieldValues);
+			r = await frappe.call({ method: 'frappe.client.save', args: { doc: existing } });
+		} else {
+			// INSERT
+			r = await frappe.call({
+				method: 'frappe.client.insert',
+				args: { doc: Object.assign({ doctype: this.frm_doctype }, fieldValues) },
+			});
+		}
+		if (!r || !r.message) throw new Error('The server did not return the saved plan.');
+		return r.message;
+	}
+
+	async _invoiceCompletedRows(doc) {
+		const rows = (doc.dental_treatment_plan_procedure || [])
+			.filter(r => r.status === 'Completed' && !r.sales_invoice && r.procedure);
+		if (!rows.length) return;
+
+		// Customer linked to the patient
+		const res = await frappe.db.get_value('Patient', doc.patient, 'customer');
+		const customer = res && res.message && res.message.customer;
+		if (!customer) {
+			throw new Error(`Patient ${doc.patient} has no linked Customer. Open the patient, set the Customer field (or use "Create Customer"), then save the plan again.`);
+		}
+
+		await this._loadMeta('Sales Invoice');
+		const today = frappe.datetime.get_today();
+
+		const si = {
+			doctype: 'Sales Invoice',
+			customer: customer,
+			posting_date: today,
+			due_date: today,
+			remarks: `Auto-created from Dental Treatment Plan ${doc.name}`,
+			items: rows.map(r => {
+				let desc = `Tooth ${r.fdi || '-'} · ${r.visit || ''}`;
+				if (r.note) desc += ` · ${r.note}`;
+				return {
+					item_code: r.procedure,
+					qty: 1,
+					// Bill the patient portion; fall back to the full fee if no portion entered
+					rate: flt(r.patient_portion) || flt(r.fee) || 0,
+					description: desc,
+				};
+			}),
+		};
+		if (frappe.meta.has_field('Sales Invoice', 'patient')) si.patient = doc.patient;
+
+		const inv = await frappe.call({ method: 'frappe.client.insert', args: { doc: si } });
+		if (!inv || !inv.message) throw new Error('The server did not return the new invoice.');
+		const invName = inv.message.name;
+
+		// Stamp the invoice on the rows so they are never billed twice
+		rows.forEach(r => { r.sales_invoice = invName; });
+		const r2 = await frappe.call({ method: 'frappe.client.save', args: { doc: doc } });
+		if (r2 && r2.message) this._applyDoc(r2.message);
+
+		frappe.msgprint({
+			title: 'Invoice Created',
+			indicator: 'green',
+			message: `Sales Invoice <a href="/app/sales-invoice/${encodeURIComponent(invName)}">${invName}</a> was created as a draft for ${rows.length} completed procedure(s).`,
+		});
+	}
+
+	async _missingChildFields() {
+		await this._loadMeta(this.child_doctype);
+		return ['visit', 'status', 'sales_invoice']
+			.filter(f => !frappe.meta.has_field(this.child_doctype, f));
+	}
+
+	_loadMeta(doctype) {
+		return new Promise(resolve => frappe.model.with_doctype(doctype, () => resolve()));
+	}
+
+	_showError(title, err, extra = '') {
+		console.error(`[DentalTreatmentPlan] ${title}:`, err);
+		// Server exceptions are already shown by Frappe's own dialog; only show
+		// our own message for plain JavaScript errors.
+		if (err instanceof Error) {
+			frappe.msgprint({
+				title: title,
+				indicator: 'red',
+				message: frappe.utils.escape_html(err.message) + (extra ? `<br><br>${extra}` : ''),
+			});
+		} else if (extra) {
+			frappe.show_alert({ message: extra, indicator: 'orange' }, 8);
 		}
 	}
 
 	_parseCurrency(text) {
 		return flt((text || '0').replace(/[^0-9.-]/g, ''));
-	}
-
-	_afterSave(doc) {
-		// Re-apply the saved doc so rows pick up the sales_invoice the server set.
-		this._applyDoc(doc);
-		frappe.show_alert({ message: `Saved: ${doc.name}`, indicator: 'green' });
 	}
 
 	/* ── NEW / LOAD HISTORY ────────────────────────────────────────────── */
