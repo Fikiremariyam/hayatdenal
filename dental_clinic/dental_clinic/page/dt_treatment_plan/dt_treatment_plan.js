@@ -61,10 +61,10 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
 #dtp-root .tooth-cell    { display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:2px 4px 0;border-radius:8px;transition:background .12s;position:relative; }
 #dtp-root .tooth-cell:hover{ background:rgba(26,110,245,.06); }
 #dtp-root .tooth-cell.selected{ background:var(--accent-light);outline:2px solid var(--accent);outline-offset:-1px;z-index:1; }
-#dtp-root .tooth-num-fdi { font-family:'DM Mono',monospace;font-size:10px;font-weight:500;color:var(--muted);margin-bottom:2px;line-height:1; }
-#dtp-root .tooth-num-uni { font-family:'DM Mono',monospace;font-size:8px;color:var(--muted2);margin-bottom:2px;line-height:1; }
-#dtp-root .lower-row .tooth-num-fdi{ order:3;margin-bottom:0;margin-top:2px; }
-#dtp-root .lower-row .tooth-num-uni{ order:4; }
+#dtp-root .tooth-num-main{ font-family:'DM Mono',monospace;font-size:10px;font-weight:600;color:var(--muted);margin-bottom:2px;line-height:1; }
+#dtp-root .tooth-num-alt { font-family:'DM Mono',monospace;font-size:8px;color:var(--muted2);margin-bottom:2px;line-height:1; }
+#dtp-root .lower-row .tooth-num-main{ order:3;margin-bottom:0;margin-top:2px; }
+#dtp-root .lower-row .tooth-num-alt { order:4; }
 #dtp-root .tooth-svg-wrap{ position:relative; }
 #dtp-root .tooth-svg-wrap svg{ display:block; }
 #dtp-root .tooth-badge   { position:absolute;top:-4px;right:-4px;width:13px;height:13px;border-radius:50%;border:1.5px solid #fff;font-size:7px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;z-index:2; }
@@ -102,7 +102,6 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
 #dtp-root .notes-lbl     { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:7px;display:block; }
 #dtp-root .dp-textarea   { width:100%;border:1.5px solid var(--border);border-radius:6px;padding:7px 10px;font-family:inherit;font-size:12px;color:var(--text);background:var(--panel2);outline:none;resize:none; }
 #dtp-root .dp-textarea:focus{ border-color:var(--accent); }
-#dtp-root .totals-sig-row { display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start; }
 #dtp-root .totals-stack   { display:flex;flex-direction:column;gap:10px; }
 #dtp-root .total-card     { background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 12px; }
 #dtp-root .total-card-lbl { font-size:12px;color:var(--muted); }
@@ -144,7 +143,7 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
       <div class="pal-section">
         <div class="pal-label">Numbering</div>
         <button class="pal-btn" id="dtp-num-toggle" style="font-family:'DM Mono',monospace;font-size:11px">
-          <span style="font-size:13px">🔢</span>FDI / Universal
+          <span style="font-size:13px">🔢</span>UL/UR · FDI
         </button>
       </div>
       <div class="pal-sep"></div>
@@ -163,14 +162,14 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Upper — Maxillary</div>
-          <div style="font-size:10px;color:var(--muted2)">Right → Left · FDI 18–28</div>
+          <div style="font-size:10px;color:var(--muted2)">UL8 → UL1 · UR1 → UR8</div>
         </div>
         <div class="teeth-row" id="dtp-upper-row"></div>
       </div>
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Lower — Mandibular</div>
-          <div style="font-size:10px;color:var(--muted2)">Right → Left · FDI 48–38</div>
+          <div style="font-size:10px;color:var(--muted2)">LL8 → LL1 · LR1 → LR8</div>
         </div>
         <div class="teeth-row lower-row" id="dtp-lower-row"></div>
       </div>
@@ -179,14 +178,14 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Upper — Maxillary (Primary)</div>
-          <div style="font-size:10px;color:var(--muted2)">Right → Left · FDI 55–65</div>
+          <div style="font-size:10px;color:var(--muted2)">ULE → ULA · URA → URE</div>
         </div>
         <div class="teeth-row" id="dtp-upper-row-child"></div>
       </div>
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Lower — Mandibular (Primary)</div>
-          <div style="font-size:10px;color:var(--muted2)">Right → Left · FDI 85–75</div>
+          <div style="font-size:10px;color:var(--muted2)">LLE → LLA · LRA → LRE</div>
         </div>
         <div class="teeth-row lower-row" id="dtp-lower-row-child"></div>
       </div>
@@ -210,16 +209,8 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
 
       <div class="totals-stack">
         <div class="total-card">
-          <div class="total-card-lbl">Total Insurance Estimate</div>
-          <div class="total-card-val" id="dtp-total-ins">0</div>
-        </div>
-        <div class="total-card">
           <div class="total-card-lbl">Total Fee</div>
           <div class="total-card-val" id="dtp-total-fee">0</div>
-        </div>
-        <div class="total-card">
-          <div class="total-card-lbl">Total Patient Portion</div>
-          <div class="total-card-val" id="dtp-total-portion">0</div>
         </div>
       </div>
 
@@ -305,10 +296,10 @@ const DTP_TREATMENT_PRIORITY = [
 class DtpToothState {
 	constructor(meta) {
 		this.fdi  = meta.fdi;
-		this.uni  = meta.uni;
+		this.code = meta.code;
 		this.name = meta.name;
 		this.type = meta.type;
-		this.rows = [];   // [{ uid, type(item code), label, color, category, visit, status, sales_invoice, priority, note, fee, insurance_estimate, patient_portion }]
+		this.rows = [];   // [{ uid, type(item code), label, color, category, visit, status, sales_invoice, note, fee }]
 	}
 
 	// dedupe=true: clicking the same item on a tooth replaces it (palette behaviour).
@@ -317,14 +308,11 @@ class DtpToothState {
 	addRow(row, dedupe = true) {
 		if (dedupe) this.rows = this.rows.filter(r => r.type !== row.type || r.sales_invoice);
 		if (!row.uid) row.uid = 'row_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-		if (row.visit === undefined || !row.visit)   row.visit = 'Visit 1';
-		if (row.status === undefined || !row.status) row.status = 'Pending';
-		if (row.sales_invoice === undefined)      row.sales_invoice = '';
-		if (row.priority === undefined)           row.priority = '';
-		if (row.note === undefined)               row.note = '';
-		if (row.fee === undefined)                row.fee = 0;
-		if (row.insurance_estimate === undefined) row.insurance_estimate = '';
-		if (row.patient_portion === undefined)    row.patient_portion = 0;
+		if (!row.visit)  row.visit = 'Visit 1';
+		if (!row.status) row.status = 'Pending';
+		if (row.sales_invoice === undefined) row.sales_invoice = '';
+		if (row.note === undefined)          row.note = '';
+		if (row.fee === undefined)           row.fee = 0;
 		this.rows.push(row);
 	}
 
@@ -335,35 +323,29 @@ class DtpToothState {
 		if (!code) return;
 		const match = catalog.find(s => s.name === code);
 		this.addRow({
-			type              : code,
-			label             : match ? (match.status_name || match.name) : code,
-			color             : match ? match.color : dtpHashColor(code),
-			category          : match ? match.category : dtpClassifyProcedure(code),
-			visit             : row.visit || 'Visit 1',
-			status            : row.status || 'Pending',
-			sales_invoice     : row.sales_invoice || '',
-			priority          : row.priority || '',
-			note              : row.note || '',
-			fee               : flt(row.fee),
-			insurance_estimate: row.insurance_estimate || '',
-			patient_portion   : flt(row.patient_portion),
+			type         : code,
+			label        : match ? (match.status_name || match.name) : code,
+			color        : match ? match.color : dtpHashColor(code),
+			category     : match ? match.category : dtpClassifyProcedure(code),
+			visit        : row.visit || 'Visit 1',
+			status       : row.status || 'Pending',
+			sales_invoice: row.sales_invoice || '',
+			note         : row.note || '',
+			fee          : flt(row.fee),
 		}, false);
 	}
 
 	toDocRows() {
 		return this.rows.map(r => ({
-			doctype           : 'Dental Treatment Plan Procedure',
-			fdi               : this.fdi,      // ← requires "fdi"/"name1" fields on the child doctype
-			name1             : this.name,
-			procedure         : r.type,
-			visit             : r.visit || 'Visit 1',
-			status            : r.status || 'Pending',
-			sales_invoice     : r.sales_invoice || '',   // kept so the server never invoices a row twice
-			priority          : r.priority || '',
-			note              : r.note || '',
-			fee               : flt(r.fee),
-			insurance_estimate: r.insurance_estimate || '',
-			patient_portion   : flt(r.patient_portion),
+			doctype      : 'Dental Treatment Plan Procedure',
+			fdi          : this.fdi,      // FDI number is still stored so old plans keep loading
+			name1        : this.name,
+			procedure    : r.type,
+			visit        : r.visit || 'Visit 1',
+			status       : r.status || 'Pending',
+			sales_invoice: r.sales_invoice || '',   // kept so the server never invoices a row twice
+			note         : r.note || '',
+			fee          : flt(r.fee),
 		}));
 	}
 }
@@ -511,74 +493,87 @@ class DtpToothSVG {
 
 /* ───────────────────────────────────────────────────────────────────────────
    DentalTreatmentPlanChart — main controller
+   Display order:  UL8 … UL1 | UR1 … UR8   (top)
+                   LL8 … LL1 | LR1 … LR8   (bottom)
+   FDI numbers are kept internally so saved data stays compatible.
 ─────────────────────────────────────────────────────────────────────────────*/
 class DentalTreatmentPlanChart {
 
 	static UPPER_META = [
-		{fdi:'18',uni:'1', name:'Upper Right 3rd Molar',    type:'molar'},
-		{fdi:'17',uni:'2', name:'Upper Right 2nd Molar',    type:'molar'},
-		{fdi:'16',uni:'3', name:'Upper Right 1st Molar',    type:'molar'},
-		{fdi:'15',uni:'4', name:'Upper Right 2nd Premolar', type:'premolar'},
-		{fdi:'14',uni:'5', name:'Upper Right 1st Premolar', type:'premolar'},
-		{fdi:'13',uni:'6', name:'Upper Right Canine',       type:'canine'},
-		{fdi:'12',uni:'7', name:'Upper Right Lateral',      type:'incisor'},
-		{fdi:'11',uni:'8', name:'Upper Right Central',      type:'incisor'},
-		{fdi:'21',uni:'9', name:'Upper Left Central',       type:'incisor'},
-		{fdi:'22',uni:'10',name:'Upper Left Lateral',       type:'incisor'},
-		{fdi:'23',uni:'11',name:'Upper Left Canine',        type:'canine'},
-		{fdi:'24',uni:'12',name:'Upper Left 1st Premolar',  type:'premolar'},
-		{fdi:'25',uni:'13',name:'Upper Left 2nd Premolar',  type:'premolar'},
-		{fdi:'26',uni:'14',name:'Upper Left 1st Molar',     type:'molar'},
-		{fdi:'27',uni:'15',name:'Upper Left 2nd Molar',     type:'molar'},
-		{fdi:'28',uni:'16',name:'Upper Left 3rd Molar',     type:'molar'},
+		{fdi:'28',code:'UL8',name:'Upper Left 3rd Molar',     type:'molar'},
+		{fdi:'27',code:'UL7',name:'Upper Left 2nd Molar',     type:'molar'},
+		{fdi:'26',code:'UL6',name:'Upper Left 1st Molar',     type:'molar'},
+		{fdi:'25',code:'UL5',name:'Upper Left 2nd Premolar',  type:'premolar'},
+		{fdi:'24',code:'UL4',name:'Upper Left 1st Premolar',  type:'premolar'},
+		{fdi:'23',code:'UL3',name:'Upper Left Canine',        type:'canine'},
+		{fdi:'22',code:'UL2',name:'Upper Left Lateral',       type:'incisor'},
+		{fdi:'21',code:'UL1',name:'Upper Left Central',       type:'incisor'},
+		{fdi:'11',code:'UR1',name:'Upper Right Central',      type:'incisor'},
+		{fdi:'12',code:'UR2',name:'Upper Right Lateral',      type:'incisor'},
+		{fdi:'13',code:'UR3',name:'Upper Right Canine',       type:'canine'},
+		{fdi:'14',code:'UR4',name:'Upper Right 1st Premolar', type:'premolar'},
+		{fdi:'15',code:'UR5',name:'Upper Right 2nd Premolar', type:'premolar'},
+		{fdi:'16',code:'UR6',name:'Upper Right 1st Molar',    type:'molar'},
+		{fdi:'17',code:'UR7',name:'Upper Right 2nd Molar',    type:'molar'},
+		{fdi:'18',code:'UR8',name:'Upper Right 3rd Molar',    type:'molar'},
 	];
 
 	static LOWER_META = [
-		{fdi:'48',uni:'32',name:'Lower Right 3rd Molar',    type:'molar'},
-		{fdi:'47',uni:'31',name:'Lower Right 2nd Molar',    type:'molar'},
-		{fdi:'46',uni:'30',name:'Lower Right 1st Molar',    type:'molar'},
-		{fdi:'45',uni:'29',name:'Lower Right 2nd Premolar', type:'premolar'},
-		{fdi:'44',uni:'28',name:'Lower Right 1st Premolar', type:'premolar'},
-		{fdi:'43',uni:'27',name:'Lower Right Canine',       type:'canine'},
-		{fdi:'42',uni:'26',name:'Lower Right Lateral',      type:'incisor'},
-		{fdi:'41',uni:'25',name:'Lower Right Central',      type:'incisor'},
-		{fdi:'31',uni:'24',name:'Lower Left Central',       type:'incisor'},
-		{fdi:'32',uni:'23',name:'Lower Left Lateral',       type:'incisor'},
-		{fdi:'33',uni:'22',name:'Lower Left Canine',        type:'canine'},
-		{fdi:'34',uni:'21',name:'Lower Left 1st Premolar',  type:'premolar'},
-		{fdi:'35',uni:'20',name:'Lower Left 2nd Premolar',  type:'premolar'},
-		{fdi:'36',uni:'19',name:'Lower Left 1st Molar',     type:'molar'},
-		{fdi:'37',uni:'18',name:'Lower Left 2nd Molar',     type:'molar'},
-		{fdi:'38',uni:'17',name:'Lower Left 3rd Molar',     type:'molar'},
+		{fdi:'38',code:'LL8',name:'Lower Left 3rd Molar',     type:'molar'},
+		{fdi:'37',code:'LL7',name:'Lower Left 2nd Molar',     type:'molar'},
+		{fdi:'36',code:'LL6',name:'Lower Left 1st Molar',     type:'molar'},
+		{fdi:'35',code:'LL5',name:'Lower Left 2nd Premolar',  type:'premolar'},
+		{fdi:'34',code:'LL4',name:'Lower Left 1st Premolar',  type:'premolar'},
+		{fdi:'33',code:'LL3',name:'Lower Left Canine',        type:'canine'},
+		{fdi:'32',code:'LL2',name:'Lower Left Lateral',       type:'incisor'},
+		{fdi:'31',code:'LL1',name:'Lower Left Central',       type:'incisor'},
+		{fdi:'41',code:'LR1',name:'Lower Right Central',      type:'incisor'},
+		{fdi:'42',code:'LR2',name:'Lower Right Lateral',      type:'incisor'},
+		{fdi:'43',code:'LR3',name:'Lower Right Canine',       type:'canine'},
+		{fdi:'44',code:'LR4',name:'Lower Right 1st Premolar', type:'premolar'},
+		{fdi:'45',code:'LR5',name:'Lower Right 2nd Premolar', type:'premolar'},
+		{fdi:'46',code:'LR6',name:'Lower Right 1st Molar',    type:'molar'},
+		{fdi:'47',code:'LR7',name:'Lower Right 2nd Molar',    type:'molar'},
+		{fdi:'48',code:'LR8',name:'Lower Right 3rd Molar',    type:'molar'},
 	];
 
 	static UPPER_META_CHILD = [
-		{fdi:'55',uni:'A',name:'Upper Right 2nd Primary Molar', type:'molar'},
-		{fdi:'54',uni:'B',name:'Upper Right 1st Primary Molar', type:'molar'},
-		{fdi:'53',uni:'C',name:'Upper Right Primary Canine',    type:'canine'},
-		{fdi:'52',uni:'D',name:'Upper Right Primary Lateral',   type:'incisor'},
-		{fdi:'51',uni:'E',name:'Upper Right Primary Central',   type:'incisor'},
-		{fdi:'61',uni:'F',name:'Upper Left Primary Central',    type:'incisor'},
-		{fdi:'62',uni:'G',name:'Upper Left Primary Lateral',    type:'incisor'},
-		{fdi:'63',uni:'H',name:'Upper Left Primary Canine',     type:'canine'},
-		{fdi:'64',uni:'I',name:'Upper Left 1st Primary Molar',  type:'molar'},
-		{fdi:'65',uni:'J',name:'Upper Left 2nd Primary Molar',  type:'molar'},
+		{fdi:'65',code:'ULE',name:'Upper Left 2nd Primary Molar',  type:'molar'},
+		{fdi:'64',code:'ULD',name:'Upper Left 1st Primary Molar',  type:'molar'},
+		{fdi:'63',code:'ULC',name:'Upper Left Primary Canine',     type:'canine'},
+		{fdi:'62',code:'ULB',name:'Upper Left Primary Lateral',    type:'incisor'},
+		{fdi:'61',code:'ULA',name:'Upper Left Primary Central',    type:'incisor'},
+		{fdi:'51',code:'URA',name:'Upper Right Primary Central',   type:'incisor'},
+		{fdi:'52',code:'URB',name:'Upper Right Primary Lateral',   type:'incisor'},
+		{fdi:'53',code:'URC',name:'Upper Right Primary Canine',    type:'canine'},
+		{fdi:'54',code:'URD',name:'Upper Right 1st Primary Molar', type:'molar'},
+		{fdi:'55',code:'URE',name:'Upper Right 2nd Primary Molar', type:'molar'},
 	];
 
 	static LOWER_META_CHILD = [
-		{fdi:'85',uni:'T',name:'Lower Right 2nd Primary Molar', type:'molar'},
-		{fdi:'84',uni:'S',name:'Lower Right 1st Primary Molar', type:'molar'},
-		{fdi:'83',uni:'R',name:'Lower Right Primary Canine',    type:'canine'},
-		{fdi:'82',uni:'Q',name:'Lower Right Primary Lateral',   type:'incisor'},
-		{fdi:'81',uni:'P',name:'Lower Right Primary Central',   type:'incisor'},
-		{fdi:'71',uni:'O',name:'Lower Left Primary Central',    type:'incisor'},
-		{fdi:'72',uni:'N',name:'Lower Left Primary Lateral',    type:'incisor'},
-		{fdi:'73',uni:'M',name:'Lower Left Primary Canine',     type:'canine'},
-		{fdi:'74',uni:'L',name:'Lower Left 1st Primary Molar',  type:'molar'},
-		{fdi:'75',uni:'K',name:'Lower Left 2nd Primary Molar',  type:'molar'},
+		{fdi:'75',code:'LLE',name:'Lower Left 2nd Primary Molar',  type:'molar'},
+		{fdi:'74',code:'LLD',name:'Lower Left 1st Primary Molar',  type:'molar'},
+		{fdi:'73',code:'LLC',name:'Lower Left Primary Canine',     type:'canine'},
+		{fdi:'72',code:'LLB',name:'Lower Left Primary Lateral',    type:'incisor'},
+		{fdi:'71',code:'LLA',name:'Lower Left Primary Central',    type:'incisor'},
+		{fdi:'81',code:'LRA',name:'Lower Right Primary Central',   type:'incisor'},
+		{fdi:'82',code:'LRB',name:'Lower Right Primary Lateral',   type:'incisor'},
+		{fdi:'83',code:'LRC',name:'Lower Right Primary Canine',    type:'canine'},
+		{fdi:'84',code:'LRD',name:'Lower Right 1st Primary Molar', type:'molar'},
+		{fdi:'85',code:'LRE',name:'Lower Right 2nd Primary Molar', type:'molar'},
 	];
 
-	static MIDLINE_AFTER = { permanent: ['11', '41'], primary: ['51', '81'] };
+	static MIDLINE_AFTER = { permanent: ['21', '31'], primary: ['61', '71'] };
+
+	// FDI → UL/UR/LL/LR code (e.g. '28' → 'UL8')
+	static codeFor(fdi) {
+		const all = [
+			...DentalTreatmentPlanChart.UPPER_META,       ...DentalTreatmentPlanChart.LOWER_META,
+			...DentalTreatmentPlanChart.UPPER_META_CHILD, ...DentalTreatmentPlanChart.LOWER_META_CHILD,
+		];
+		const m = all.find(x => x.fdi === String(fdi));
+		return m ? m.code : (fdi || '-');
+	}
 
 	constructor() {
 		this.frm_doctype = 'Dental Treatment Plan';
@@ -598,7 +593,7 @@ class DentalTreatmentPlanChart {
 		this.selItem = null;
 
 		this.selFDI = null;
-		this.useFDI = true;
+		this.useFDI = false;   // false = show UL8/UR1… codes, true = show FDI numbers
 
 		this._tip = document.getElementById('dtp-tip');
 	}
@@ -783,10 +778,11 @@ class DentalTreatmentPlanChart {
 		if (!row) return;
 		row.innerHTML = '';
 
-		const rLabel = document.createElement('div');
-		rLabel.className = 'grid-side-label';
-		rLabel.textContent = 'R';
-		row.appendChild(rLabel);
+		// Left quadrant is drawn first, so "L" sits on the left side
+		const lLabel = document.createElement('div');
+		lLabel.className = 'grid-side-label';
+		lLabel.textContent = 'L';
+		row.appendChild(lLabel);
 
 		metaList.forEach(meta => {
 			row.appendChild(this._buildToothCell(meta, isUpper));
@@ -797,16 +793,16 @@ class DentalTreatmentPlanChart {
 			}
 		});
 
-		const lLabel = document.createElement('div');
-		lLabel.className = 'grid-side-label';
-		lLabel.textContent = 'L';
-		row.appendChild(lLabel);
+		const rLabel = document.createElement('div');
+		rLabel.className = 'grid-side-label';
+		rLabel.textContent = 'R';
+		row.appendChild(rLabel);
 	}
 
 	_buildToothCell(meta, isUpper) {
 		const state = this.teeth[meta.fdi];
-		const num = this.useFDI ? meta.fdi : meta.uni;
-		const alt = this.useFDI ? `U:${meta.uni}` : `FDI:${meta.fdi}`;
+		const num = this.useFDI ? meta.fdi : meta.code;
+		const alt = this.useFDI ? meta.code : `FDI ${meta.fdi}`;
 		const sel = this.selFDI === meta.fdi;
 
 		const fc = state.rows[0];
@@ -818,7 +814,7 @@ class DentalTreatmentPlanChart {
 		el.className = `tooth-cell${sel ? ' selected' : ''}`;
 		el.id = `dtpt-${meta.fdi}`;
 
-		const numH = `<div class="tooth-num-fdi">${num}</div><div class="tooth-num-uni">${alt}</div>`;
+		const numH = `<div class="tooth-num-main">${num}</div><div class="tooth-num-alt">${alt}</div>`;
 		const svgH = `<div class="tooth-svg-wrap">${DtpToothSVG.render(meta, isUpper, state.rows)}${badge}</div>`;
 		el.innerHTML = isUpper ? (numH + svgH) : (svgH + numH);
 
@@ -844,7 +840,7 @@ class DentalTreatmentPlanChart {
 		const str = rows.length
 			? rows.map(r => `${r.label || r.type} (${r.visit} · ${r.status})${r.fee ? ' · ' + format_currency(r.fee) : ''}`).join(', ')
 			: 'No procedure planned';
-		this._tip.innerHTML = `<b>${meta.fdi}</b> · ${meta.name}<br><span style="color:#9ca3af;font-size:10px">${str}</span>`;
+		this._tip.innerHTML = `<b>${meta.code}</b> · ${meta.name}<br><span style="color:#9ca3af;font-size:10px">${str}</span>`;
 		this._tip.style.opacity = '1';
 		this._tip.style.left = (e.clientX + 14) + 'px';
 		this._tip.style.top = (e.clientY - 8) + 'px';
@@ -856,7 +852,7 @@ class DentalTreatmentPlanChart {
 		if (!btn) return;
 		btn.addEventListener('click', () => {
 			this.useFDI = !this.useFDI;
-			btn.innerHTML = `<span style="font-size:13px">🔢</span>${this.useFDI ? 'FDI / Universal' : 'Universal / FDI'}`;
+			btn.innerHTML = `<span style="font-size:13px">🔢</span>${this.useFDI ? 'FDI · UL/UR' : 'UL/UR · FDI'}`;
 			this.render();
 		});
 	}
@@ -875,7 +871,7 @@ class DentalTreatmentPlanChart {
 		const wrap = document.getElementById('dtp-summary-wrap');
 		if (!wrap) return;
 
-		const toothOptions = this.allMeta.map(m => m.fdi);
+		const toothOptions = this.allMeta.map(m => ({ fdi: m.fdi, code: m.code }));
 		const flat = [];
 		this.allMeta.forEach(meta => {
 			this.teeth[meta.fdi].rows.forEach(r => flat.push({ fdi: meta.fdi, row: r }));
@@ -884,7 +880,6 @@ class DentalTreatmentPlanChart {
 		const nSel = this.selectedRowIds.size;
 		const allChecked = flat.length > 0 && nSel === flat.length;
 		const totalFee = flat.reduce((sum, r) => sum + flt(r.row.fee), 0);
-		const totalPortion = flat.reduce((sum, r) => sum + flt(r.row.patient_portion), 0);
 
 		const rows = flat.map((r, idx) => {
 			const inv  = r.row.sales_invoice;
@@ -896,20 +891,17 @@ class DentalTreatmentPlanChart {
                 <td class="tp-idx-cell">${idx + 1}</td>
                 <td>
                     <select class="tp-cell-input dtp-tooth-edit" data-uid="${r.row.uid}" ${lock}>
-                        ${toothOptions.map(fdi => `<option value="${fdi}" ${fdi === r.fdi ? 'selected' : ''}>${fdi}</option>`).join('')}
+                        ${toothOptions.map(t => `<option value="${t.fdi}" ${t.fdi === r.fdi ? 'selected' : ''}>${t.code}</option>`).join('')}
                     </select>
                 </td>
+                <td><div class="dtp-item-cell" data-uid="${r.row.uid}"></div></td>
                 <td>
                     <select class="tp-cell-input dtp-visit-edit" data-uid="${r.row.uid}" ${lock}>
                         ${DTP_VISIT_OPTIONS.map(v => `<option value="${v}" ${v === r.row.visit ? 'selected' : ''}>${v}</option>`).join('')}
                     </select>
                 </td>
-                <td><div class="dtp-item-cell" data-uid="${r.row.uid}"></div></td>
-                <td><input type="text" class="tp-cell-input dtp-priority-edit" data-uid="${r.row.uid}" value="${dtpEsc(r.row.priority)}" placeholder="1"></td>
                 <td><input type="text" class="tp-cell-input dtp-note-edit" data-uid="${r.row.uid}" value="${dtpEsc(r.row.note)}" placeholder="Note…"></td>
                 <td><input type="number" step="0.01" class="tp-cell-input dtp-fee-edit" data-uid="${r.row.uid}" value="${flt(r.row.fee)}" style="text-align:right" ${lock}></td>
-                <td><input type="text" class="tp-cell-input dtp-ins-edit" data-uid="${r.row.uid}" value="${dtpEsc(r.row.insurance_estimate)}" placeholder="—" style="text-align:right" ${lock}></td>
-                <td><input type="number" step="0.01" class="tp-cell-input dtp-portion-edit" data-uid="${r.row.uid}" value="${flt(r.row.patient_portion)}" style="text-align:right" ${lock}></td>
                 <td>
                     <select class="tp-cell-input dtp-status-edit tp-status-${status}" data-uid="${r.row.uid}" ${lock}>
                         ${DTP_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === status ? 'selected' : ''}>${s}</option>`).join('')}
@@ -936,14 +928,11 @@ class DentalTreatmentPlanChart {
                     <tr>
                         <th style="width:26px"></th>
                         <th style="width:26px">#</th>
-                        <th style="width:64px">Tooth</th>
-                        <th style="width:84px">Visit</th>
+                        <th style="width:70px">Tooth</th>
                         <th>Procedure</th>
-                        <th style="width:60px">Priority</th>
-                        <th style="width:160px">Note</th>
-                        <th style="width:80px">Fee</th>
-                        <th style="width:90px">Ins. Est.</th>
-                        <th style="width:100px">Patient Portion</th>
+                        <th style="width:90px">Visit</th>
+                        <th style="width:200px">Note</th>
+                        <th style="width:90px">Fee</th>
                         <th style="width:110px">Status</th>
                         <th style="width:26px"></th>
                     </tr>
@@ -951,10 +940,8 @@ class DentalTreatmentPlanChart {
                 <tbody>${rows}</tbody>
                 <tfoot>
                     <tr>
-                        <td colspan="7" style="text-align:right">Totals</td>
+                        <td colspan="6" style="text-align:right">Total</td>
                         <td>${format_currency(totalFee)}</td>
-                        <td></td>
-                        <td>${format_currency(totalPortion)}</td>
                         <td colspan="2"></td>
                     </tr>
                 </tfoot>
@@ -1051,13 +1038,6 @@ class DentalTreatmentPlanChart {
 			});
 		});
 
-		wrap.querySelectorAll('.dtp-priority-edit').forEach(el => {
-			el.addEventListener('change', (e) => {
-				const found = this._findRowByUid(el.dataset.uid);
-				if (found) { found.row.priority = e.target.value; this.render(); }
-			});
-		});
-
 		// Note is stored on every keystroke without re-render (keeps focus).
 		wrap.querySelectorAll('.dtp-note-edit').forEach(el => {
 			el.addEventListener('input', (e) => {
@@ -1070,20 +1050,6 @@ class DentalTreatmentPlanChart {
 			el.addEventListener('change', (e) => {
 				const found = this._findRowByUid(el.dataset.uid);
 				if (found) { found.row.fee = flt(e.target.value); this.render(); }
-			});
-		});
-
-		wrap.querySelectorAll('.dtp-ins-edit').forEach(el => {
-			el.addEventListener('change', (e) => {
-				const found = this._findRowByUid(el.dataset.uid);
-				if (found) { found.row.insurance_estimate = e.target.value; this.render(); }
-			});
-		});
-
-		wrap.querySelectorAll('.dtp-portion-edit').forEach(el => {
-			el.addEventListener('change', (e) => {
-				const found = this._findRowByUid(el.dataset.uid);
-				if (found) { found.row.patient_portion = flt(e.target.value); this.render(); }
 			});
 		});
 	}
@@ -1191,17 +1157,12 @@ class DentalTreatmentPlanChart {
 
 	/* ── TOTALS ────────────────────────────────────────────────────────── */
 	recalculateTotals() {
-		let totalFee = 0, totalPortion = 0, totalIns = 0;
+		let totalFee = 0;
 		this.allMeta.forEach(meta => {
-			this.teeth[meta.fdi].rows.forEach(r => {
-				totalFee += flt(r.fee);
-				totalPortion += flt(r.patient_portion);
-				totalIns += flt(r.insurance_estimate);
-			});
+			this.teeth[meta.fdi].rows.forEach(r => { totalFee += flt(r.fee); });
 		});
+		this._totalFee = totalFee;
 		_dtpSet('dtp-total-fee', format_currency(totalFee));
-		_dtpSet('dtp-total-portion', format_currency(totalPortion));
-		_dtpSet('dtp-total-ins', format_currency(totalIns));
 	}
 
 	/* ── SAVE ──────────────────────────────────────────────────────────── */
@@ -1230,6 +1191,7 @@ class DentalTreatmentPlanChart {
 			return;
 		}
 
+		this.recalculateTotals();
 		const fieldValues = {
 			patient: patientId,
 			provider: this.provider_ctrl.get_value() || frappe.session.user,
@@ -1237,9 +1199,7 @@ class DentalTreatmentPlanChart {
 			plan_date: this.plan_date_ctrl.get_value(),
 			dental_treatment_plan_procedure: procedureRows,
 			plan_note: document.getElementById('dtp-plan-note').value,
-			total_insurance_estimate: this._parseCurrency(document.getElementById('dtp-total-ins').textContent),
-			total_fee: this._parseCurrency(document.getElementById('dtp-total-fee').textContent),
-			total_patient_portion: this._parseCurrency(document.getElementById('dtp-total-portion').textContent),
+			total_fee: flt(this._totalFee),
 		};
 
 		this._saving = true;
@@ -1322,13 +1282,12 @@ class DentalTreatmentPlanChart {
 			due_date: today,
 			remarks: `Auto-created from Dental Treatment Plan ${doc.name}`,
 			items: rows.map(r => {
-				let desc = `Tooth ${r.fdi || '-'} · ${r.visit || ''}`;
+				let desc = `Tooth ${DentalTreatmentPlanChart.codeFor(r.fdi)} · ${r.visit || ''}`;
 				if (r.note) desc += ` · ${r.note}`;
 				return {
 					item_code: r.procedure,
 					qty: 1,
-					// Bill the patient portion; fall back to the full fee if no portion entered
-					rate: flt(r.patient_portion) || flt(r.fee) || 0,
+					rate: flt(r.fee) || 0,
 					description: desc,
 				};
 			}),
@@ -1374,10 +1333,6 @@ class DentalTreatmentPlanChart {
 		} else if (extra) {
 			frappe.show_alert({ message: extra, indicator: 'orange' }, 8);
 		}
-	}
-
-	_parseCurrency(text) {
-		return flt((text || '0').replace(/[^0-9.-]/g, ''));
 	}
 
 	/* ── NEW / LOAD HISTORY ────────────────────────────────────────────── */
