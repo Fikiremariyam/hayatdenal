@@ -33,15 +33,6 @@
     { title: "Waste", folder: "Waste", color: "#f06413" },
   ];
 
-  // Sidebar links
-  const NAV = [
-    { label: "Dashboard", route: "dental-compliance" },
-    { label: "Compliance Suite", route: "compliance_suite", active: true },
-    { label: "Calendar", route: "List/Event/Calendar/Default" },
-    { label: "CPD", route: "List/Staff Training Record" },
-    { label: "Online Forms", route: "List/Web Form" },
-  ];
-
   // DocTypes whose records can sit inside a folder, like files.
   // Each DocType needs a Link field `compliance_folder` (Options: File).
   //   title_field: field shown in the tree (falls back to the record name)
@@ -298,9 +289,8 @@
       this.page = frappe.ui.make_app_page({
         parent: wrapper,
         title: __("Compliance Suite"),
-        single_column: false,
+        single_column: true,
       });
-      this.makeSidebar();
       this.makeLayout();
       this.bindEvents();
       this.renderGrid();
@@ -311,24 +301,6 @@
     }
 
     // ---------- Layout ----------
-    makeSidebar() {
-      const $s = $(this.page.sidebar).empty();
-      $s.html(`
-        <ul class="list-unstyled sidebar-menu standard-sidebar-section">
-          ${NAV.map((n) => `
-            <li class="standard-sidebar-item ${n.active ? "selected" : ""}">
-              <a class="item-anchor" data-route="${n.route}" style="cursor:pointer">
-                <span class="sidebar-item-label">${__(n.label)}</span>
-              </a>
-            </li>`).join("")}
-        </ul>`);
-      $s.on("click", "[data-route]", (e) => {
-        const route = e.currentTarget.dataset.route;
-        if (route === "compliance_suite") this.renderGrid();
-        else frappe.set_route(route.split("/"));
-      });
-    }
-
     makeLayout() {
       const key = [
         ["folder", "Folder"], ["pdf", "PDF"],
@@ -573,11 +545,7 @@
         return;
       }
 
-      const createNew = (doctype) => {
-        d.hide();
-        this._returnTo = $f;
-        frappe.new_doc(doctype, { [LINK_FIELD]: folder });
-      };
+      const typeOf = (doctype) => types.find((t) => t.doctype === doctype) || types[0];
 
       const d = new frappe.ui.Dialog({
         title: __("Attach Form to {0}", [esc($f.data("item").file_name)]),
@@ -590,38 +558,55 @@
             default: types[0].doctype,
             reqd: 1,
             hidden: types.length === 1 ? 1 : 0,
-            onchange: () => d.set_value("form", ""),
+            onchange: () => d.set_value("existing", ""),
           },
           {
-            fieldname: "form",
+            fieldname: "title",
+            label: __("Title"),
+            fieldtype: "Data",
+            description: __("A new form with this title is created in this folder."),
+          },
+          { fieldtype: "Section Break", label: __("Or attach an existing form"), collapsible: 1 },
+          {
+            fieldname: "existing",
             label: __("Existing Form"),
             fieldtype: "Dynamic Link",
             options: "form_type",
-            description: __("Pick a form to put in this folder, or use Create New."),
           },
         ],
         primary_action_label: __("Attach"),
         primary_action: async (v) => {
-          if (!v.form) {
-            frappe.msgprint(__("Choose a form, or click Create New."));
+          const title = (v.title || "").trim();
+          if (!title && !v.existing) {
+            frappe.msgprint(__("Enter a title, or choose an existing form."));
             return;
           }
+          const t = typeOf(v.form_type);
+          d.disable_primary_action();
           try {
-            await call("frappe.client.set_value", {
-              doctype: v.form_type,
-              name: v.form,
-              fieldname: LINK_FIELD,
-              value: folder,
-            });
+            if (title) {
+              // Create the record directly in this folder (name = title)
+              const doc = { doctype: t.doctype, [LINK_FIELD]: folder };
+              doc[t.title === "name" ? "title" : t.title] = title;
+              await call("frappe.client.insert", { doc });
+            } else {
+              await call("frappe.client.set_value", {
+                doctype: t.doctype,
+                name: v.existing,
+                fieldname: LINK_FIELD,
+                value: folder,
+              });
+            }
             d.hide();
-            frappe.show_alert({ message: __("Form attached"), indicator: "green" });
+            frappe.show_alert({ message: title ? __("Form created") : __("Form attached"), indicator: "green" });
             this.refresh($f);
           } catch (e) {
+            // Frappe already shows the server error (e.g. title already used)
             console.error(e);
+          } finally {
+            d.enable_primary_action();
           }
         },
-        secondary_action_label: __("Create New"),
-        secondary_action: () => createNew(d.get_value("form_type")),
       });
       d.show();
     }
