@@ -4,6 +4,8 @@
 //
 // Documents are stored in Frappe's own File doctype under:
 //   Home/Compliance/<Category>/<sub folders>/<files>
+// DocType records (e.g. Dental Compliance Form) are attached to a folder through
+// a Link field `compliance_folder` (Options: File) on that DocType.
 // No Python code is needed.
 // =============================================================================
 (() => {
@@ -29,7 +31,6 @@
     { title: "Decontamination Room", folder: "Decontamination Room", color: "#6fff01" },
     { title: "GDPR", folder: "GDPR", color: "#d0ff00" },
     { title: "Waste", folder: "Waste", color: "#f06413" },
-    
   ];
 
   // Sidebar links
@@ -41,10 +42,17 @@
     { label: "Online Forms", route: "List/Web Form" },
   ];
 
-  // Optional "DC Template" rows: records of these DocTypes that have a Link field
-  // `compliance_folder` (Options: File) show inside the folder they point to.
-  // Skipped automatically if the DocType or field doesn't exist.
-  const TEMPLATE_DOCTYPES = [{ doctype: "Policy Document", title_field: "title" }];
+  // DocTypes whose records can sit inside a folder, like files.
+  // Each DocType needs a Link field `compliance_folder` (Options: File).
+  //   title_field: field shown in the tree (falls back to the record name)
+  //   kind:        icon / style ("dc" = DC Template, "form" = Compliance Form)
+  // A DocType is skipped automatically if it or the field doesn't exist,
+  // or if the user can't read it.
+  const LINKED_DOCTYPES = [
+    { doctype: "Policy Document", title_field: "title", kind: "dc" },
+    { doctype: "Dental Compliance Form", title_field: "title", kind: "form" },
+  ];
+  const LINK_FIELD = "compliance_folder";
 
   const ALLOWED_TYPES = [
     ".pdf", ".doc", ".docx", ".dot", ".dotx", ".odt", ".rtf", ".txt",
@@ -106,12 +114,16 @@
   .cs-page .cs-node.open > .cs-row .cs-caret { transform:rotate(90deg); }
   .cs-page .cs-row.cs-dc { background:#3a8fd9; color:#fff; }
   .cs-page .cs-row.cs-dc:hover { background:#2f7bbf; }
+  .cs-page .cs-row.cs-form { background:#f2faf2; box-shadow:inset 3px 0 0 #45ad4b; }
+  .cs-page .cs-row.cs-form:hover { background:#e4f4e4; }
 
   .cs-page .cs-actions { display:inline-flex; gap:4px; margin-left:12px; opacity:0; transition:opacity .12s; }
   .cs-page .cs-row:hover .cs-actions, .cs-page .cs-row.selected .cs-actions { opacity:1; }
   .cs-page .cs-act { border:0; background:transparent; padding:3px; border-radius:3px; cursor:pointer; line-height:0; }
   .cs-page .cs-act svg { width:16px; height:16px; fill:#555; }
   .cs-page .cs-act:hover { background:#dde9f5; }
+  .cs-page .cs-row.cs-dc .cs-act svg { fill:#fff; }
+  .cs-page .cs-row.cs-dc .cs-act:hover { background:rgba(255,255,255,.2); }
   .cs-page .cs-del:hover svg { fill:#c62828; }
   .cs-page .cs-muted { color:#999; font-size:13px; padding:8px 10px; list-style:none; }
 
@@ -144,6 +156,7 @@
   };
   const LOCK = '<svg class="cs-lock" viewBox="0 0 24 24"><path d="M18 8h-1V6a5 5 0 0 0-10 0v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zM9 6a3 3 0 0 1 6 0v2H9zm3 11a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>';
   const UPLOAD = '<svg viewBox="0 0 24 24"><path d="M11 16V7.8l-3.6 3.6L6 10l6-6 6 6-1.4 1.4L13 7.8V16zM5 20v-2h14v2z"/></svg>';
+  const ATTACH = '<svg viewBox="0 0 24 24"><path d="M5 3h11l3 3v7h-2V7h-3V5H7v14h6v2H5zm3 5h6v2H8zm0 4h6v2H8zm10 3h2v3h3v2h-3v3h-2v-3h-3v-2h3z"/></svg>';
   const TRASH = '<svg viewBox="0 0 24 24"><path d="M7 21a2 2 0 0 1-2-2V6H4V4h5V3h6v1h5v2h-1v13a2 2 0 0 1-2 2zM17 6H7v13h10zM9 17h2V8H9zm4 0h2V8h-2z"/></svg>';
 
   // ===========================================================================
@@ -155,6 +168,12 @@
     new Promise((resolve, reject) =>
       frappe.call({ method, args, callback: (r) => resolve(r.message), error: reject })
     );
+
+  // Is a folder path inside a category this user may open?
+  const folderAllowed = (folder) => {
+    const cat = CATEGORIES.find((c) => folder === `${ROOT}/${c.folder}` || folder.startsWith(`${ROOT}/${c.folder}/`));
+    return !cat || canOpen(cat);
+  };
 
   const EXT_KIND = {
     pdf: "pdf",
@@ -188,18 +207,33 @@
     }
   }
 
-  async function templateDoctypes() {
-    if (templateDoctypes.cache) return templateDoctypes.cache;
+  // DocTypes from LINKED_DOCTYPES that exist, are readable and have the link field.
+  async function linkedDoctypes() {
+    if (linkedDoctypes.cache) return linkedDoctypes.cache;
     const ok = [];
     const readable = (frappe.boot.user && frappe.boot.user.can_read) || [];
-    for (const t of TEMPLATE_DOCTYPES) {
+    for (const t of LINKED_DOCTYPES) {
       if (!readable.includes(t.doctype)) continue;
-      await new Promise((res) => frappe.model.with_doctype(t.doctype, res));
-      if (frappe.meta.has_field(t.doctype, "compliance_folder")) ok.push(t);
+      try {
+        await new Promise((res) => frappe.model.with_doctype(t.doctype, res));
+      } catch (e) {
+        continue;
+      }
+      if (!frappe.meta.has_field(t.doctype, LINK_FIELD)) continue;
+      const title = t.title_field && frappe.meta.has_field(t.doctype, t.title_field) ? t.title_field : "name";
+      ok.push({ ...t, title, canWrite: frappe.model.can_write(t.doctype) });
     }
-    templateDoctypes.cache = ok;
+    linkedDoctypes.cache = ok;
     return ok;
   }
+
+  const linkedItem = (t, r) => ({
+    name: r.name,
+    file_name: r[t.title] || r.name,
+    kind: t.kind,
+    doctype: t.doctype,
+    canWrite: t.canWrite,
+  });
 
   async function getChildren(folder) {
     const files = await frappe.db.get_list("File", {
@@ -210,21 +244,21 @@
     });
     const items = files.map((f) => ({ ...f, kind: f.is_folder ? "folder" : kindOf(f.file_name) }));
 
-    for (const t of await templateDoctypes()) {
+    for (const t of await linkedDoctypes()) {
+      const fields = t.title === "name" ? ["name"] : ["name", t.title];
       const rows = await frappe.db.get_list(t.doctype, {
-        filters: { compliance_folder: folder },
-        fields: ["name", t.title_field],
+        filters: { [LINK_FIELD]: folder },
+        fields,
+        order_by: `${t.title} asc`,
         limit: 500,
       });
-      rows.forEach((r) =>
-        items.push({ name: r.name, file_name: r[t.title_field] || r.name, kind: "dc", doctype: t.doctype })
-      );
+      rows.forEach((r) => items.push(linkedItem(t, r)));
     }
     return items;
   }
 
   async function searchFiles(q) {
-    const rows = await frappe.db.get_list("File", {
+    const files = await frappe.db.get_list("File", {
       filters: [
         ["folder", "like", `${ROOT}/%`],
         ["is_folder", "=", 0],
@@ -234,12 +268,26 @@
       order_by: "file_name asc",
       limit: 50,
     });
-    return rows
-      .filter((r) => {
-        const cat = CATEGORIES.find((c) => r.folder === `${ROOT}/${c.folder}` || r.folder.startsWith(`${ROOT}/${c.folder}/`));
-        return !cat || canOpen(cat);
-      })
-      .map((r) => ({ ...r, kind: kindOf(r.file_name), path: r.folder.slice(ROOT.length + 1) }));
+    const results = files.map((r) => ({ ...r, kind: kindOf(r.file_name) }));
+
+    for (const t of await linkedDoctypes()) {
+      const fields = ["name", LINK_FIELD];
+      if (t.title !== "name") fields.push(t.title);
+      const rows = await frappe.db.get_list(t.doctype, {
+        filters: [
+          [LINK_FIELD, "like", `${ROOT}/%`],
+          [t.title, "like", `%${q}%`],
+        ],
+        fields,
+        limit: 50,
+      });
+      rows.forEach((r) => results.push({ ...linkedItem(t, r), folder: r[LINK_FIELD] }));
+    }
+
+    return results
+      .filter((r) => folderAllowed(r.folder))
+      .map((r) => ({ ...r, path: r.folder.slice(ROOT.length + 1) }))
+      .sort((a, b) => a.file_name.localeCompare(b.file_name));
   }
 
   // ===========================================================================
@@ -257,6 +305,9 @@
       this.bindEvents();
       this.renderGrid();
       ensureFolders().catch((e) => console.error("Compliance Suite: could not create folders", e));
+      linkedDoctypes().then((types) => {
+        this.canAttach = types.some((t) => t.canWrite);
+      });
     }
 
     // ---------- Layout ----------
@@ -283,13 +334,13 @@
         ["folder", "Folder"], ["pdf", "PDF"],
         ["sheet", "Spreadsheet"], ["template", "Template"],
         ["doc", "Document"], ["dc", "DC Template"],
-        ["form", "Online Form"],
+        ["form", "Compliance Form"],
       ];
       this.$wrap = $(`
         <div class="cs-page">
           <div class="cs-top">
             <form class="cs-search">
-              <input type="search" class="cs-q" placeholder="${__("Search for documents or templates...")}">
+              <input type="search" class="cs-q" placeholder="${__("Search for documents, forms or templates...")}">
               <button type="submit" class="cs-search-btn">${__("Search")}</button>
             </form>
             <div class="cs-key">
@@ -318,10 +369,16 @@
       this.$body.on("click", ".cs-back", () => this.renderGrid());
       this.$body.on("click", ".cs-new-folder", () => this.newFolder());
       this.$body.on("click", ".cs-upload", () => this.upload());
+      this.$body.on("click", ".cs-attach-form", () => this.attachForm());
       this.$body.on("click", ".cs-add", (e) => {
         e.stopPropagation();
         this.select(nodeOf(e));
         this.upload();
+      });
+      this.$body.on("click", ".cs-add-form", (e) => {
+        e.stopPropagation();
+        this.select(nodeOf(e));
+        this.attachForm();
       });
       this.$body.on("click", ".cs-del", (e) => {
         e.stopPropagation();
@@ -353,12 +410,14 @@
         </div>`);
     }
 
-    openCategory(cat) {
+    async openCategory(cat) {
       if (!cat) return;
       if (!canOpen(cat)) {
         frappe.msgprint(__("You don't have access to {0}.", [esc(cat.title)]));
         return;
       }
+      const types = await linkedDoctypes();
+      this.canAttach = types.some((t) => t.canWrite);
       this.renderTree(cat);
     }
 
@@ -371,6 +430,7 @@
           <span class="cs-sel-label"></span>
           <div class="cs-bar-btns">
             <button class="btn btn-default btn-sm cs-new-folder">${__("New Folder")}</button>
+            ${this.canAttach ? `<button class="btn btn-default btn-sm cs-attach-form">${__("Attach Form")}</button>` : ""}
             <button class="btn btn-primary btn-sm cs-upload">${__("Upload Files")}</button>
           </div>
         </div>
@@ -383,13 +443,21 @@
 
     makeNode(item, isRoot = false) {
       const isFolder = item.kind === "folder";
+      const isLinked = !!item.doctype;
       const actions = [];
-      if (isFolder) actions.push(`<button class="cs-act cs-add" title="${__("Upload here")}">${UPLOAD}</button>`);
-      if (!isRoot && item.kind !== "dc") actions.push(`<button class="cs-act cs-del" title="${__("Delete")}">${TRASH}</button>`);
+      if (isFolder) {
+        actions.push(`<button class="cs-act cs-add" title="${__("Upload here")}">${UPLOAD}</button>`);
+        if (this.canAttach) actions.push(`<button class="cs-act cs-add-form" title="${__("Attach form here")}">${ATTACH}</button>`);
+      }
+      if (!isRoot && (!isLinked || item.canWrite)) {
+        const title = isLinked ? __("Remove from folder") : __("Delete");
+        actions.push(`<button class="cs-act cs-del" title="${title}">${TRASH}</button>`);
+      }
 
+      const rowClass = item.kind === "dc" ? " cs-dc" : item.kind === "form" ? " cs-form" : "";
       const $li = $(`
         <li class="cs-node" data-kind="${item.kind}">
-          <div class="cs-row${item.kind === "dc" ? " cs-dc" : ""}" tabindex="0">
+          <div class="cs-row${rowClass}" tabindex="0">
             ${isFolder ? '<span class="cs-caret"></span>' : ""}
             ${ICONS[item.kind] || ICONS.file}
             <span class="cs-label"></span>
@@ -451,7 +519,7 @@
 
     openItem(item) {
       if (!item) return;
-      if (item.kind === "dc") frappe.set_route("Form", item.doctype, item.name);
+      if (item.doctype) frappe.set_route("Form", item.doctype, item.name);
       else if (item.file_url) window.open(item.file_url, "_blank");
     }
 
@@ -494,15 +562,104 @@
       });
     }
 
+    // Attach an existing form record to the selected folder, or create a new one in it.
+    async attachForm() {
+      const $f = this.$selected;
+      if (!$f) return;
+      const folder = $f.data("item").name;
+      const types = (await linkedDoctypes()).filter((t) => t.canWrite);
+      if (!types.length) {
+        frappe.msgprint(__("No form types are set up for attaching."));
+        return;
+      }
+
+      const createNew = (doctype) => {
+        d.hide();
+        this._returnTo = $f;
+        frappe.new_doc(doctype, { [LINK_FIELD]: folder });
+      };
+
+      const d = new frappe.ui.Dialog({
+        title: __("Attach Form to {0}", [esc($f.data("item").file_name)]),
+        fields: [
+          {
+            fieldname: "form_type",
+            label: __("Form Type"),
+            fieldtype: "Select",
+            options: types.map((t) => t.doctype).join("\n"),
+            default: types[0].doctype,
+            reqd: 1,
+            hidden: types.length === 1 ? 1 : 0,
+            onchange: () => d.set_value("form", ""),
+          },
+          {
+            fieldname: "form",
+            label: __("Existing Form"),
+            fieldtype: "Dynamic Link",
+            options: "form_type",
+            description: __("Pick a form to put in this folder, or use Create New."),
+          },
+        ],
+        primary_action_label: __("Attach"),
+        primary_action: async (v) => {
+          if (!v.form) {
+            frappe.msgprint(__("Choose a form, or click Create New."));
+            return;
+          }
+          try {
+            await call("frappe.client.set_value", {
+              doctype: v.form_type,
+              name: v.form,
+              fieldname: LINK_FIELD,
+              value: folder,
+            });
+            d.hide();
+            frappe.show_alert({ message: __("Form attached"), indicator: "green" });
+            this.refresh($f);
+          } catch (e) {
+            console.error(e);
+          }
+        },
+        secondary_action_label: __("Create New"),
+        secondary_action: () => createNew(d.get_value("form_type")),
+      });
+      d.show();
+    }
+
     remove($li) {
       const item = $li.data("item");
+      const $parent = $li.parent().closest(".cs-node");
+      const done = () => {
+        if (this.$selected && this.$selected.is($li)) this.select($parent);
+        this.refresh($parent);
+      };
+
+      if (item.doctype) {
+        // Linked record: only take it out of the folder, never delete the record.
+        frappe.confirm(
+          __("Remove {0} from this folder? The form itself is not deleted.", [`<b>${esc(item.file_name)}</b>`]),
+          () =>
+            call("frappe.client.set_value", {
+              doctype: item.doctype,
+              name: item.name,
+              fieldname: LINK_FIELD,
+              value: "",
+            }).then(done)
+        );
+        return;
+      }
+
       frappe.confirm(__("Delete {0}?", [`<b>${esc(item.file_name)}</b>`]), () => {
-        call("frappe.client.delete", { doctype: "File", name: item.name }).then(() => {
-          const $parent = $li.parent().closest(".cs-node");
-          if (this.$selected && this.$selected.is($li)) this.select($parent);
-          this.refresh($parent);
-        });
+        call("frappe.client.delete", { doctype: "File", name: item.name }).then(done);
       });
+    }
+
+    // Called when the user comes back to this page (e.g. after saving a new form)
+    onShow() {
+      if (this._returnTo && this._returnTo.closest("body").length) {
+        this.refresh(this._returnTo);
+      }
+      this._returnTo = null;
     }
 
     // ---------- Search ----------
@@ -553,5 +710,8 @@
 
   pageWrapper.on_page_load = function (wrapper) {
     wrapper.compliance_suite = new ComplianceSuite(wrapper);
+  };
+  pageWrapper.on_page_show = function (wrapper) {
+    if (wrapper.compliance_suite) wrapper.compliance_suite.onShow();
   };
 })();
