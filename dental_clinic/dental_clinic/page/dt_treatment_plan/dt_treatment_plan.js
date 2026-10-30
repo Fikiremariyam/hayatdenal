@@ -26,19 +26,26 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
 #dtp-root .dtp-body       { display:flex; min-height:calc(100vh - 160px); }
 #dtp-root .dtp-palette    { width:192px;min-width:192px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto; }
 #dtp-root .dtp-main       { flex:1;overflow:auto;padding:18px 20px;display:flex;flex-direction:column;gap:14px; }
-#dtp-root .dtp-pt-bar     { background:var(--panel);border-bottom:1px solid var(--border);padding:9px 16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap; }
+#dtp-root .dtp-pt-bar     { background:var(--panel);border-bottom:1px solid var(--border);padding:12px 18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap; }
 #dtp-root .dtp-pt-name    { font-size:15px;font-weight:700;min-width:200px; }
 #dtp-root .dtp-provider   { min-width:200px; }
-#dtp-root .dtp-badge      { background:var(--accent-light);color:var(--accent);font-size:10px;font-weight:600;padding:3px 10px;border-radius:20px;letter-spacing:.04em; }
 #dtp-root .dtp-plan-type  { border:1.5px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;background:var(--panel2); }
 #dtp-root .dtp-plan-date-wrap { min-width:130px; }
 #dtp-root .dtp-field-lbl  { font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin-bottom:2px;display:block; }
+
+/* Document title block (top right) */
+#dtp-root .dtp-doc-head     { margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px;padding:2px 0 2px 18px;border-left:1px solid var(--border); }
+#dtp-root .dtp-doc-kicker   { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--muted2); }
+#dtp-root .dtp-doc-row      { display:flex;align-items:center;gap:10px; }
+#dtp-root .dtp-doc-name     { font-size:21px;font-weight:700;letter-spacing:-.01em;line-height:1.15;color:var(--text);font-family:'DM Mono',ui-monospace,monospace; }
+#dtp-root .dtp-doc-name.is-new { font-family:inherit;color:var(--muted); }
+#dtp-root .dtp-doc-status   { display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;white-space:nowrap; }
+#dtp-root .dtp-doc-status::before { content:'';width:7px;height:7px;border-radius:50%;background:currentColor; }
+#dtp-root .dtp-doc-status.is-new   { background:#fff4e5;color:#c0610a; }
+#dtp-root .dtp-doc-status.is-saved { background:#e7f6ee;color:#1e8449; }
+
 #dtp-root .pal-section   { padding:11px 12px 7px; }
 #dtp-root .pal-label     { font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted2);margin-bottom:7px;display:block; }
-#dtp-root .pal-sep       { height:1px;background:var(--border);margin:3px 12px 6px; }
-#dtp-root .pal-btn       { display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border-radius:7px;border:1.5px solid transparent;background:var(--panel2);cursor:pointer;font-size:12px;font-weight:500;color:var(--text);transition:all .13s;margin-bottom:3px;text-align:left;font-family:inherit; }
-#dtp-root .pal-btn:hover { border-color:var(--border2);background:#fff; }
-#dtp-root .pal-btn.active{ border-color:currentColor; }
 #dtp-root .pal-dot       { width:11px;height:11px;border-radius:3px;flex-shrink:0; }
 #dtp-root .pal-rate      { margin-left:auto;font-size:10px;color:var(--muted2);font-family:'DM Mono',monospace; }
 #dtp-root .pal-selected  { display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;background:var(--accent-light);border:1.5px solid var(--accent);font-size:12px;font-weight:600; }
@@ -46,9 +53,6 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
 #dtp-root .pal-selected-clear { margin-left:auto;cursor:pointer;color:var(--muted);font-size:14px;line-height:1;padding:0 2px; }
 #dtp-root .pal-selected-clear:hover { color:#e74c3c; }
 #dtp-root .pal-empty-hint { font-size:11px;color:var(--muted2);padding:4px 2px;line-height:1.4; }
-#dtp-root .obs-search    { width:100%;box-sizing:border-box;border:1.5px solid var(--border);border-radius:7px;padding:6px 9px;font-size:12px;font-family:inherit;color:var(--text);background:var(--panel2);outline:none;margin-bottom:7px; }
-#dtp-root .obs-search:focus{ border-color:var(--accent); }
-#dtp-root .obs-list      { max-height:220px;overflow-y:auto;padding-right:2px; }
 #dtp-root .arch-block    { background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:var(--shadow); }
 #dtp-root .arch-bar      { background:var(--panel2);border-bottom:1px solid var(--border);padding:7px 14px;display:flex;align-items:center;gap:10px; }
 #dtp-root .arch-title    { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-family:'DM Mono',monospace; }
@@ -61,10 +65,8 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
 #dtp-root .tooth-cell    { display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:2px 4px 0;border-radius:8px;transition:background .12s;position:relative; }
 #dtp-root .tooth-cell:hover{ background:rgba(26,110,245,.06); }
 #dtp-root .tooth-cell.selected{ background:var(--accent-light);outline:2px solid var(--accent);outline-offset:-1px;z-index:1; }
-#dtp-root .tooth-num-main{ font-family:'DM Mono',monospace;font-size:10px;font-weight:600;color:var(--muted);margin-bottom:2px;line-height:1; }
-#dtp-root .tooth-num-alt { font-family:'DM Mono',monospace;font-size:8px;color:var(--muted2);margin-bottom:2px;line-height:1; }
-#dtp-root .lower-row .tooth-num-main{ order:3;margin-bottom:0;margin-top:2px; }
-#dtp-root .lower-row .tooth-num-alt { order:4; }
+#dtp-root .tooth-num-main{ font-family:'DM Mono',monospace;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:3px;line-height:1; }
+#dtp-root .lower-row .tooth-num-main{ margin-bottom:0;margin-top:3px; }
 #dtp-root .tooth-svg-wrap{ position:relative; }
 #dtp-root .tooth-svg-wrap svg{ display:block; }
 #dtp-root .tooth-badge   { position:absolute;top:-4px;right:-4px;width:13px;height:13px;border-radius:50%;border:1.5px solid #fff;font-size:7px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;z-index:2; }
@@ -94,10 +96,6 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
 #dtp-root .tp-status-Pending   { color:#e67e22;font-weight:600; }
 #dtp-root .tp-status-Completed { color:#27ae60;font-weight:600; }
 #dtp-root .tp-inv-link     { display:block;font-size:10px;font-family:'DM Mono',monospace;color:var(--accent);margin-top:2px;padding-left:4px; }
-#dtp-root .stat-grid     { display:grid;grid-template-columns:1fr 1fr;gap:5px; }
-#dtp-root .stat-box      { background:var(--panel2);border:1px solid var(--border);border-radius:7px;padding:7px;text-align:center; }
-#dtp-root .stat-val      { font-size:18px;font-weight:700;font-family:'DM Mono',monospace;line-height:1; }
-#dtp-root .stat-lbl      { font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted2); }
 #dtp-root .notes-card    { background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px; }
 #dtp-root .notes-lbl     { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:7px;display:block; }
 #dtp-root .dp-textarea   { width:100%;border:1.5px solid var(--border);border-radius:6px;padding:7px 10px;font-family:inherit;font-size:12px;color:var(--text);background:var(--panel2);outline:none;resize:none; }
@@ -128,7 +126,14 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
       </select>
     </div>
     <div class="dtp-plan-date-wrap" id="dtp-plan-date"></div>
-    <div class="dtp-badge" id="dtp-badge" style="margin-left:auto;">New Plan</div>
+
+    <div class="dtp-doc-head">
+      <div class="dtp-doc-kicker">Treatment Plan</div>
+      <div class="dtp-doc-row">
+        <div class="dtp-doc-name is-new" id="dtp-doc-name">New Treatment Plan</div>
+        <span class="dtp-doc-status is-new" id="dtp-doc-status">Not Saved</span>
+      </div>
+    </div>
   </div>
 
   <div class="dtp-body">
@@ -139,21 +144,6 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
         <div id="dtp-item-search-link" style="margin-bottom:7px;"></div>
         <div id="dtp-item-selected"></div>
       </div>
-      <div class="pal-sep"></div>
-      <div class="pal-section">
-        <div class="pal-label">Numbering</div>
-        <button class="pal-btn" id="dtp-num-toggle" style="font-family:'DM Mono',monospace;font-size:11px">
-          <span style="font-size:13px">🔢</span>UL/UR · FDI
-        </button>
-      </div>
-      <div class="pal-sep"></div>
-      <div class="pal-section">
-        <div class="pal-label">Summary</div>
-        <div class="stat-grid">
-          <div class="stat-box"><div class="stat-val" style="color:#27ae60" id="dtp-st-h">0</div><div class="stat-lbl">No treatment</div></div>
-          <div class="stat-box"><div class="stat-val" style="color:var(--accent)" id="dtp-st-fl">0</div><div class="stat-lbl">Planned</div></div>
-        </div>
-      </div>
     </div>
 
     <div class="dtp-main">
@@ -162,14 +152,14 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Upper — Maxillary</div>
-          <div style="font-size:10px;color:var(--muted2)">UL8 → UL1 · UR1 → UR8</div>
+          <div style="font-size:10px;color:var(--muted2)">UR8 → UR1 · UL1 → UL8</div>
         </div>
         <div class="teeth-row" id="dtp-upper-row"></div>
       </div>
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Lower — Mandibular</div>
-          <div style="font-size:10px;color:var(--muted2)">LL8 → LL1 · LR1 → LR8</div>
+          <div style="font-size:10px;color:var(--muted2)">LR8 → LR1 · LL1 → LL8</div>
         </div>
         <div class="teeth-row lower-row" id="dtp-lower-row"></div>
       </div>
@@ -178,14 +168,14 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Upper — Maxillary (Primary)</div>
-          <div style="font-size:10px;color:var(--muted2)">ULE → ULA · URA → URE</div>
+          <div style="font-size:10px;color:var(--muted2)">UR5 → UR1 · UL1 → UL5</div>
         </div>
         <div class="teeth-row" id="dtp-upper-row-child"></div>
       </div>
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Lower — Mandibular (Primary)</div>
-          <div style="font-size:10px;color:var(--muted2)">LLE → LLA · LRA → LRE</div>
+          <div style="font-size:10px;color:var(--muted2)">LR5 → LR1 · LL1 → LL5</div>
         </div>
         <div class="teeth-row lower-row" id="dtp-lower-row-child"></div>
       </div>
@@ -193,7 +183,7 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
       <div class="arch-block">
         <div class="arch-bar">
           <div class="arch-title">Dental Treatment Plan Procedure</div>
-          <div style="font-size:10px;color:var(--muted2);margin-left:auto">Edit directly, or add/remove rows below</div>
+          <div style="font-size:10px;color:var(--muted2);margin-left:auto">Edit directly, or add/remove rows below · sorted by visit</div>
         </div>
         <div style="padding:10px 14px;overflow-x:auto" id="dtp-summary-wrap">
           <div style="padding:18px;text-align:center;font-size:12px;color:var(--muted2)">
@@ -233,10 +223,24 @@ frappe.pages['dt_treatment_plan'].on_page_show = function () {
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   Visit / Status choices (must match the Select options on the child doctype)
+   Visit / Status choices.
+   Visits are loaded at start-up from the "visit" field on the child doctype:
+     • Select field → its options (in the order defined there)
+     • Link field   → every record of the linked doctype
+   The list below is only a fallback if that lookup fails.
    ═══════════════════════════════════════════════════════════════════════════*/
-const DTP_VISIT_OPTIONS  = ['Visit 1', 'Visit 2', 'Visit 3'];
+let dtpVisitOptions = ['Visit 1', 'Visit 2', 'Visit 3'];
 const DTP_STATUS_OPTIONS = ['Pending', 'Completed'];
+
+function dtpDefaultVisit() {
+	return dtpVisitOptions[0] || 'Visit 1';
+}
+
+// Sort key for a visit: its position in the visit list; unknown visits go last.
+function dtpVisitIndex(v) {
+	const i = dtpVisitOptions.indexOf(v);
+	return i === -1 ? dtpVisitOptions.length : i;
+}
 
 function dtpEsc(v) {
 	return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -308,7 +312,7 @@ class DtpToothState {
 	addRow(row, dedupe = true) {
 		if (dedupe) this.rows = this.rows.filter(r => r.type !== row.type || r.sales_invoice);
 		if (!row.uid) row.uid = 'row_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-		if (!row.visit)  row.visit = 'Visit 1';
+		if (!row.visit)  row.visit = dtpDefaultVisit();
 		if (!row.status) row.status = 'Pending';
 		if (row.sales_invoice === undefined) row.sales_invoice = '';
 		if (row.note === undefined)          row.note = '';
@@ -327,7 +331,7 @@ class DtpToothState {
 			label        : match ? (match.status_name || match.name) : code,
 			color        : match ? match.color : dtpHashColor(code),
 			category     : match ? match.category : dtpClassifyProcedure(code),
-			visit        : row.visit || 'Visit 1',
+			visit        : row.visit || dtpDefaultVisit(),
 			status       : row.status || 'Pending',
 			sales_invoice: row.sales_invoice || '',
 			note         : row.note || '',
@@ -335,24 +339,28 @@ class DtpToothState {
 		}, false);
 	}
 
-	toDocRows() {
-		return this.rows.map(r => ({
+	toDocRow(r) {
+		return {
 			doctype      : 'Dental Treatment Plan Procedure',
 			fdi          : this.fdi,      // FDI number is still stored so old plans keep loading
 			name1        : this.name,
 			procedure    : r.type,
-			visit        : r.visit || 'Visit 1',
+			visit        : r.visit || dtpDefaultVisit(),
 			status       : r.status || 'Pending',
 			sales_invoice: r.sales_invoice || '',   // kept so the server never invoices a row twice
 			note         : r.note || '',
 			fee          : flt(r.fee),
-		}));
+		};
+	}
+
+	toDocRows() {
+		return this.rows.map(r => this.toDocRow(r));
 	}
 }
 
 
 /* ───────────────────────────────────────────────────────────────────────────
-   ToothSVG — full anatomical morphology (unchanged from the dental-chart page).
+   ToothSVG — full anatomical morphology (unchanged).
 ─────────────────────────────────────────────────────────────────────────────*/
 class DtpToothSVG {
 
@@ -493,86 +501,93 @@ class DtpToothSVG {
 
 /* ───────────────────────────────────────────────────────────────────────────
    DentalTreatmentPlanChart — main controller
-   Display order:  UL8 … UL1 | UR1 … UR8   (top)
-                   LL8 … LL1 | LR1 … LR8   (bottom)
+   Display order (dentist's view, patient's right on the left of the screen):
+                   UR8 … UR1 | UL1 … UL8   (top)
+                   LR8 … LR1 | LL1 … LL8   (bottom)
+   Primary teeth use the same style: UR5 … UR1 | UL1 … UL5.
    FDI numbers are kept internally so saved data stays compatible.
 ─────────────────────────────────────────────────────────────────────────────*/
 class DentalTreatmentPlanChart {
 
 	static UPPER_META = [
-		{fdi:'28',code:'UL8',name:'Upper Left 3rd Molar',     type:'molar'},
-		{fdi:'27',code:'UL7',name:'Upper Left 2nd Molar',     type:'molar'},
-		{fdi:'26',code:'UL6',name:'Upper Left 1st Molar',     type:'molar'},
-		{fdi:'25',code:'UL5',name:'Upper Left 2nd Premolar',  type:'premolar'},
-		{fdi:'24',code:'UL4',name:'Upper Left 1st Premolar',  type:'premolar'},
-		{fdi:'23',code:'UL3',name:'Upper Left Canine',        type:'canine'},
-		{fdi:'22',code:'UL2',name:'Upper Left Lateral',       type:'incisor'},
-		{fdi:'21',code:'UL1',name:'Upper Left Central',       type:'incisor'},
-		{fdi:'11',code:'UR1',name:'Upper Right Central',      type:'incisor'},
-		{fdi:'12',code:'UR2',name:'Upper Right Lateral',      type:'incisor'},
-		{fdi:'13',code:'UR3',name:'Upper Right Canine',       type:'canine'},
-		{fdi:'14',code:'UR4',name:'Upper Right 1st Premolar', type:'premolar'},
-		{fdi:'15',code:'UR5',name:'Upper Right 2nd Premolar', type:'premolar'},
-		{fdi:'16',code:'UR6',name:'Upper Right 1st Molar',    type:'molar'},
-		{fdi:'17',code:'UR7',name:'Upper Right 2nd Molar',    type:'molar'},
 		{fdi:'18',code:'UR8',name:'Upper Right 3rd Molar',    type:'molar'},
+		{fdi:'17',code:'UR7',name:'Upper Right 2nd Molar',    type:'molar'},
+		{fdi:'16',code:'UR6',name:'Upper Right 1st Molar',    type:'molar'},
+		{fdi:'15',code:'UR5',name:'Upper Right 2nd Premolar', type:'premolar'},
+		{fdi:'14',code:'UR4',name:'Upper Right 1st Premolar', type:'premolar'},
+		{fdi:'13',code:'UR3',name:'Upper Right Canine',       type:'canine'},
+		{fdi:'12',code:'UR2',name:'Upper Right Lateral',      type:'incisor'},
+		{fdi:'11',code:'UR1',name:'Upper Right Central',      type:'incisor'},
+		{fdi:'21',code:'UL1',name:'Upper Left Central',       type:'incisor'},
+		{fdi:'22',code:'UL2',name:'Upper Left Lateral',       type:'incisor'},
+		{fdi:'23',code:'UL3',name:'Upper Left Canine',        type:'canine'},
+		{fdi:'24',code:'UL4',name:'Upper Left 1st Premolar',  type:'premolar'},
+		{fdi:'25',code:'UL5',name:'Upper Left 2nd Premolar',  type:'premolar'},
+		{fdi:'26',code:'UL6',name:'Upper Left 1st Molar',     type:'molar'},
+		{fdi:'27',code:'UL7',name:'Upper Left 2nd Molar',     type:'molar'},
+		{fdi:'28',code:'UL8',name:'Upper Left 3rd Molar',     type:'molar'},
 	];
 
 	static LOWER_META = [
-		{fdi:'38',code:'LL8',name:'Lower Left 3rd Molar',     type:'molar'},
-		{fdi:'37',code:'LL7',name:'Lower Left 2nd Molar',     type:'molar'},
-		{fdi:'36',code:'LL6',name:'Lower Left 1st Molar',     type:'molar'},
-		{fdi:'35',code:'LL5',name:'Lower Left 2nd Premolar',  type:'premolar'},
-		{fdi:'34',code:'LL4',name:'Lower Left 1st Premolar',  type:'premolar'},
-		{fdi:'33',code:'LL3',name:'Lower Left Canine',        type:'canine'},
-		{fdi:'32',code:'LL2',name:'Lower Left Lateral',       type:'incisor'},
-		{fdi:'31',code:'LL1',name:'Lower Left Central',       type:'incisor'},
-		{fdi:'41',code:'LR1',name:'Lower Right Central',      type:'incisor'},
-		{fdi:'42',code:'LR2',name:'Lower Right Lateral',      type:'incisor'},
-		{fdi:'43',code:'LR3',name:'Lower Right Canine',       type:'canine'},
-		{fdi:'44',code:'LR4',name:'Lower Right 1st Premolar', type:'premolar'},
-		{fdi:'45',code:'LR5',name:'Lower Right 2nd Premolar', type:'premolar'},
-		{fdi:'46',code:'LR6',name:'Lower Right 1st Molar',    type:'molar'},
-		{fdi:'47',code:'LR7',name:'Lower Right 2nd Molar',    type:'molar'},
 		{fdi:'48',code:'LR8',name:'Lower Right 3rd Molar',    type:'molar'},
+		{fdi:'47',code:'LR7',name:'Lower Right 2nd Molar',    type:'molar'},
+		{fdi:'46',code:'LR6',name:'Lower Right 1st Molar',    type:'molar'},
+		{fdi:'45',code:'LR5',name:'Lower Right 2nd Premolar', type:'premolar'},
+		{fdi:'44',code:'LR4',name:'Lower Right 1st Premolar', type:'premolar'},
+		{fdi:'43',code:'LR3',name:'Lower Right Canine',       type:'canine'},
+		{fdi:'42',code:'LR2',name:'Lower Right Lateral',      type:'incisor'},
+		{fdi:'41',code:'LR1',name:'Lower Right Central',      type:'incisor'},
+		{fdi:'31',code:'LL1',name:'Lower Left Central',       type:'incisor'},
+		{fdi:'32',code:'LL2',name:'Lower Left Lateral',       type:'incisor'},
+		{fdi:'33',code:'LL3',name:'Lower Left Canine',        type:'canine'},
+		{fdi:'34',code:'LL4',name:'Lower Left 1st Premolar',  type:'premolar'},
+		{fdi:'35',code:'LL5',name:'Lower Left 2nd Premolar',  type:'premolar'},
+		{fdi:'36',code:'LL6',name:'Lower Left 1st Molar',     type:'molar'},
+		{fdi:'37',code:'LL7',name:'Lower Left 2nd Molar',     type:'molar'},
+		{fdi:'38',code:'LL8',name:'Lower Left 3rd Molar',     type:'molar'},
 	];
 
 	static UPPER_META_CHILD = [
-		{fdi:'65',code:'ULE',name:'Upper Left 2nd Primary Molar',  type:'molar'},
-		{fdi:'64',code:'ULD',name:'Upper Left 1st Primary Molar',  type:'molar'},
-		{fdi:'63',code:'ULC',name:'Upper Left Primary Canine',     type:'canine'},
-		{fdi:'62',code:'ULB',name:'Upper Left Primary Lateral',    type:'incisor'},
-		{fdi:'61',code:'ULA',name:'Upper Left Primary Central',    type:'incisor'},
-		{fdi:'51',code:'URA',name:'Upper Right Primary Central',   type:'incisor'},
-		{fdi:'52',code:'URB',name:'Upper Right Primary Lateral',   type:'incisor'},
-		{fdi:'53',code:'URC',name:'Upper Right Primary Canine',    type:'canine'},
-		{fdi:'54',code:'URD',name:'Upper Right 1st Primary Molar', type:'molar'},
-		{fdi:'55',code:'URE',name:'Upper Right 2nd Primary Molar', type:'molar'},
+		{fdi:'55',code:'UR5',name:'Upper Right 2nd Primary Molar', type:'molar',   primary:true},
+		{fdi:'54',code:'UR4',name:'Upper Right 1st Primary Molar', type:'molar',   primary:true},
+		{fdi:'53',code:'UR3',name:'Upper Right Primary Canine',    type:'canine',  primary:true},
+		{fdi:'52',code:'UR2',name:'Upper Right Primary Lateral',   type:'incisor', primary:true},
+		{fdi:'51',code:'UR1',name:'Upper Right Primary Central',   type:'incisor', primary:true},
+		{fdi:'61',code:'UL1',name:'Upper Left Primary Central',    type:'incisor', primary:true},
+		{fdi:'62',code:'UL2',name:'Upper Left Primary Lateral',    type:'incisor', primary:true},
+		{fdi:'63',code:'UL3',name:'Upper Left Primary Canine',     type:'canine',  primary:true},
+		{fdi:'64',code:'UL4',name:'Upper Left 1st Primary Molar',  type:'molar',   primary:true},
+		{fdi:'65',code:'UL5',name:'Upper Left 2nd Primary Molar',  type:'molar',   primary:true},
 	];
 
 	static LOWER_META_CHILD = [
-		{fdi:'75',code:'LLE',name:'Lower Left 2nd Primary Molar',  type:'molar'},
-		{fdi:'74',code:'LLD',name:'Lower Left 1st Primary Molar',  type:'molar'},
-		{fdi:'73',code:'LLC',name:'Lower Left Primary Canine',     type:'canine'},
-		{fdi:'72',code:'LLB',name:'Lower Left Primary Lateral',    type:'incisor'},
-		{fdi:'71',code:'LLA',name:'Lower Left Primary Central',    type:'incisor'},
-		{fdi:'81',code:'LRA',name:'Lower Right Primary Central',   type:'incisor'},
-		{fdi:'82',code:'LRB',name:'Lower Right Primary Lateral',   type:'incisor'},
-		{fdi:'83',code:'LRC',name:'Lower Right Primary Canine',    type:'canine'},
-		{fdi:'84',code:'LRD',name:'Lower Right 1st Primary Molar', type:'molar'},
-		{fdi:'85',code:'LRE',name:'Lower Right 2nd Primary Molar', type:'molar'},
+		{fdi:'85',code:'LR5',name:'Lower Right 2nd Primary Molar', type:'molar',   primary:true},
+		{fdi:'84',code:'LR4',name:'Lower Right 1st Primary Molar', type:'molar',   primary:true},
+		{fdi:'83',code:'LR3',name:'Lower Right Primary Canine',    type:'canine',  primary:true},
+		{fdi:'82',code:'LR2',name:'Lower Right Primary Lateral',   type:'incisor', primary:true},
+		{fdi:'81',code:'LR1',name:'Lower Right Primary Central',   type:'incisor', primary:true},
+		{fdi:'71',code:'LL1',name:'Lower Left Primary Central',    type:'incisor', primary:true},
+		{fdi:'72',code:'LL2',name:'Lower Left Primary Lateral',    type:'incisor', primary:true},
+		{fdi:'73',code:'LL3',name:'Lower Left Primary Canine',     type:'canine',  primary:true},
+		{fdi:'74',code:'LL4',name:'Lower Left 1st Primary Molar',  type:'molar',   primary:true},
+		{fdi:'75',code:'LL5',name:'Lower Left 2nd Primary Molar',  type:'molar',   primary:true},
 	];
 
-	static MIDLINE_AFTER = { permanent: ['21', '31'], primary: ['61', '71'] };
+	// Midline is drawn after the last right-side tooth (UR1 / LR1)
+	static MIDLINE_AFTER = { permanent: ['11', '41'], primary: ['51', '81'] };
 
-	// FDI → UL/UR/LL/LR code (e.g. '28' → 'UL8')
-	static codeFor(fdi) {
-		const all = [
+	static allMetaStatic() {
+		return [
 			...DentalTreatmentPlanChart.UPPER_META,       ...DentalTreatmentPlanChart.LOWER_META,
 			...DentalTreatmentPlanChart.UPPER_META_CHILD, ...DentalTreatmentPlanChart.LOWER_META_CHILD,
 		];
-		const m = all.find(x => x.fdi === String(fdi));
-		return m ? m.code : (fdi || '-');
+	}
+
+	// FDI → display label (e.g. '18' → 'UR8', '55' → 'UR5 (Primary)')
+	static codeFor(fdi) {
+		const m = DentalTreatmentPlanChart.allMetaStatic().find(x => x.fdi === String(fdi));
+		if (!m) return fdi || '-';
+		return m.primary ? `${m.code} (Primary)` : m.code;
 	}
 
 	constructor() {
@@ -593,17 +608,11 @@ class DentalTreatmentPlanChart {
 		this.selItem = null;
 
 		this.selFDI = null;
-		this.useFDI = false;   // false = show UL8/UR1… codes, true = show FDI numbers
 
 		this._tip = document.getElementById('dtp-tip');
 	}
 
-	get allMeta() {
-		return [
-			...DentalTreatmentPlanChart.UPPER_META,       ...DentalTreatmentPlanChart.LOWER_META,
-			...DentalTreatmentPlanChart.UPPER_META_CHILD, ...DentalTreatmentPlanChart.LOWER_META_CHILD,
-		];
-	}
+	get allMeta() { return DentalTreatmentPlanChart.allMetaStatic(); }
 	get teeth() { return { ...this.teethSets.permanent, ...this.teethSets.primary }; }
 
 	/* ── init ──────────────────────────────────────────────────────────── */
@@ -642,12 +651,56 @@ class DentalTreatmentPlanChart {
 			render_input: true,
 		});
 
-		this._bindNumberingToggle();
 		this._bindTooltip();
 		this._renderSelectedItem();
+		this._setDocTitle(null);
 
 		this.render();
 		this.applyRouteOptions();
+		this._loadVisitOptions();
+	}
+
+	/* ── VISIT OPTIONS (from the child doctype's "visit" field) ───────── */
+	async _loadVisitOptions() {
+		try {
+			await this._loadMeta(this.child_doctype);
+			const df = frappe.meta.get_docfield(this.child_doctype, 'visit');
+			if (!df) return;
+
+			let opts = [];
+			if (df.fieldtype === 'Select') {
+				opts = (df.options || '').split('\n').map(s => s.trim()).filter(Boolean);
+			} else if (df.fieldtype === 'Link' && df.options) {
+				const list = await frappe.db.get_list(df.options, { fields: ['name'], limit: 1000 });
+				opts = (list || []).map(x => x.name)
+					.sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+			}
+
+			if (opts.length) {
+				dtpVisitOptions = opts;
+				this.render();
+			}
+		} catch (err) {
+			console.warn('[DentalTreatmentPlan] Could not load visit options, using defaults:', err);
+		}
+	}
+
+	/* ── DOCUMENT TITLE (top right) ───────────────────────────────────── */
+	_setDocTitle(name) {
+		const nameEl = document.getElementById('dtp-doc-name');
+		const statEl = document.getElementById('dtp-doc-status');
+		if (!nameEl || !statEl) return;
+		if (name) {
+			nameEl.textContent = name;
+			nameEl.classList.remove('is-new');
+			statEl.textContent = 'Saved';
+			statEl.className = 'dtp-doc-status is-saved';
+		} else {
+			nameEl.textContent = 'New Treatment Plan';
+			nameEl.classList.add('is-new');
+			statEl.textContent = 'Not Saved';
+			statEl.className = 'dtp-doc-status is-new';
+		}
 	}
 
 	/* ── PATIENT PASSED FROM THE PATIENT FORM ─────────────────────────── */
@@ -717,7 +770,7 @@ class DentalTreatmentPlanChart {
 		wrap.innerHTML = `
             <div class="pal-selected" style="color:${this.selItem.color}">
                 <span class="pal-dot" style="background:${this.selItem.color}"></span>
-                <span>${this.selItem.label}</span>
+                <span>${dtpEsc(this.selItem.label)}</span>
                 ${this.selItem.rate ? `<span class="pal-rate">${format_currency(this.selItem.rate)}</span>` : ''}
                 <span class="pal-selected-clear" id="dtp-clear-selected-item" title="Clear selection">✕</span>
             </div>`;
@@ -768,7 +821,6 @@ class DentalTreatmentPlanChart {
 		this._renderArch(DentalTreatmentPlanChart.LOWER_META,       'dtp-lower-row',       false, 'permanent');
 		this._renderArch(DentalTreatmentPlanChart.UPPER_META_CHILD, 'dtp-upper-row-child', true,  'primary');
 		this._renderArch(DentalTreatmentPlanChart.LOWER_META_CHILD, 'dtp-lower-row-child', false, 'primary');
-		this._renderStats();
 		this._renderTable();
 		this.recalculateTotals();
 	}
@@ -778,11 +830,11 @@ class DentalTreatmentPlanChart {
 		if (!row) return;
 		row.innerHTML = '';
 
-		// Left quadrant is drawn first, so "L" sits on the left side
-		const lLabel = document.createElement('div');
-		lLabel.className = 'grid-side-label';
-		lLabel.textContent = 'L';
-		row.appendChild(lLabel);
+		// Right quadrant is drawn first, so "R" sits on the left side
+		const rLabel = document.createElement('div');
+		rLabel.className = 'grid-side-label';
+		rLabel.textContent = 'R';
+		row.appendChild(rLabel);
 
 		metaList.forEach(meta => {
 			row.appendChild(this._buildToothCell(meta, isUpper));
@@ -793,28 +845,26 @@ class DentalTreatmentPlanChart {
 			}
 		});
 
-		const rLabel = document.createElement('div');
-		rLabel.className = 'grid-side-label';
-		rLabel.textContent = 'R';
-		row.appendChild(rLabel);
+		const lLabel = document.createElement('div');
+		lLabel.className = 'grid-side-label';
+		lLabel.textContent = 'L';
+		row.appendChild(lLabel);
 	}
 
 	_buildToothCell(meta, isUpper) {
 		const state = this.teeth[meta.fdi];
-		const num = this.useFDI ? meta.fdi : meta.code;
-		const alt = this.useFDI ? meta.code : `FDI ${meta.fdi}`;
 		const sel = this.selFDI === meta.fdi;
 
 		const fc = state.rows[0];
 		const badge = fc
-			? `<div class="tooth-badge" style="background:${fc.color || '#1a6ef5'};${isUpper ? '' : 'bottom:-4px;top:auto'}">${(fc.label || fc.type || '?').charAt(0).toUpperCase()}</div>`
+			? `<div class="tooth-badge" style="background:${fc.color || '#1a6ef5'};${isUpper ? '' : 'bottom:-4px;top:auto'}">${dtpEsc((fc.label || fc.type || '?').charAt(0).toUpperCase())}</div>`
 			: '';
 
 		const el = document.createElement('div');
 		el.className = `tooth-cell${sel ? ' selected' : ''}`;
 		el.id = `dtpt-${meta.fdi}`;
 
-		const numH = `<div class="tooth-num-main">${num}</div><div class="tooth-num-alt">${alt}</div>`;
+		const numH = `<div class="tooth-num-main">${meta.code}</div>`;
 		const svgH = `<div class="tooth-svg-wrap">${DtpToothSVG.render(meta, isUpper, state.rows)}${badge}</div>`;
 		el.innerHTML = isUpper ? (numH + svgH) : (svgH + numH);
 
@@ -825,20 +875,10 @@ class DentalTreatmentPlanChart {
 		return el;
 	}
 
-	_renderStats() {
-		let none = 0, planned = 0;
-		this.allMeta.forEach(meta => {
-			if (this.teeth[meta.fdi].rows.length) planned++;
-			else none++;
-		});
-		_dtpSet('dtp-st-h', none);
-		_dtpSet('dtp-st-fl', planned);
-	}
-
 	_showTip(e, meta) {
 		const rows = this.teeth[meta.fdi].rows;
 		const str = rows.length
-			? rows.map(r => `${r.label || r.type} (${r.visit} · ${r.status})${r.fee ? ' · ' + format_currency(r.fee) : ''}`).join(', ')
+			? rows.map(r => `${dtpEsc(r.label || r.type)} (${dtpEsc(r.visit)} · ${r.status})${r.fee ? ' · ' + format_currency(r.fee) : ''}`).join(', ')
 			: 'No procedure planned';
 		this._tip.innerHTML = `<b>${meta.code}</b> · ${meta.name}<br><span style="color:#9ca3af;font-size:10px">${str}</span>`;
 		this._tip.style.opacity = '1';
@@ -846,16 +886,6 @@ class DentalTreatmentPlanChart {
 		this._tip.style.top = (e.clientY - 8) + 'px';
 	}
 	_hideTip() { this._tip.style.opacity = '0'; }
-
-	_bindNumberingToggle() {
-		const btn = document.getElementById('dtp-num-toggle');
-		if (!btn) return;
-		btn.addEventListener('click', () => {
-			this.useFDI = !this.useFDI;
-			btn.innerHTML = `<span style="font-size:13px">🔢</span>${this.useFDI ? 'FDI · UL/UR' : 'UL/UR · FDI'}`;
-			this.render();
-		});
-	}
 
 	_bindTooltip() {
 		document.addEventListener('mousemove', e => {
@@ -866,16 +896,40 @@ class DentalTreatmentPlanChart {
 		});
 	}
 
+	/* ── ROWS, SORTED BY VISIT ────────────────────────────────────────── */
+	// All procedure rows as one list, ordered by visit (in the order of the
+	// visit options), then by tooth position, then by the order they were added.
+	_flatRows() {
+		const flat = [];
+		this.allMeta.forEach(meta => {
+			this.teeth[meta.fdi].rows.forEach(r => flat.push({ fdi: meta.fdi, row: r, ord: flat.length }));
+		});
+		flat.sort((a, b) =>
+			(dtpVisitIndex(a.row.visit) - dtpVisitIndex(b.row.visit))
+			|| String(a.row.visit || '').localeCompare(String(b.row.visit || ''), undefined, { numeric: true })
+			|| (a.ord - b.ord));
+		return flat;
+	}
+
+	_toothOptionsHtml(selectedFdi) {
+		const opt = m => `<option value="${m.fdi}" ${m.fdi === selectedFdi ? 'selected' : ''}>${m.code}</option>`;
+		const perm = [...DentalTreatmentPlanChart.UPPER_META, ...DentalTreatmentPlanChart.LOWER_META].map(opt).join('');
+		const prim = [...DentalTreatmentPlanChart.UPPER_META_CHILD, ...DentalTreatmentPlanChart.LOWER_META_CHILD].map(opt).join('');
+		return `<optgroup label="Permanent">${perm}</optgroup><optgroup label="Primary">${prim}</optgroup>`;
+	}
+
+	_visitOptionsHtml(current) {
+		const list = [...dtpVisitOptions];
+		if (current && !list.includes(current)) list.push(current);   // never lose a saved value
+		return list.map(v => `<option value="${dtpEsc(v)}" ${v === current ? 'selected' : ''}>${dtpEsc(v)}</option>`).join('');
+	}
+
 	/* ── DENTAL TREATMENT PLAN PROCEDURE TABLE ────────────────────────── */
 	_renderTable() {
 		const wrap = document.getElementById('dtp-summary-wrap');
 		if (!wrap) return;
 
-		const toothOptions = this.allMeta.map(m => ({ fdi: m.fdi, code: m.code }));
-		const flat = [];
-		this.allMeta.forEach(meta => {
-			this.teeth[meta.fdi].rows.forEach(r => flat.push({ fdi: meta.fdi, row: r }));
-		});
+		const flat = this._flatRows();
 
 		const nSel = this.selectedRowIds.size;
 		const allChecked = flat.length > 0 && nSel === flat.length;
@@ -891,13 +945,13 @@ class DentalTreatmentPlanChart {
                 <td class="tp-idx-cell">${idx + 1}</td>
                 <td>
                     <select class="tp-cell-input dtp-tooth-edit" data-uid="${r.row.uid}" ${lock}>
-                        ${toothOptions.map(t => `<option value="${t.fdi}" ${t.fdi === r.fdi ? 'selected' : ''}>${t.code}</option>`).join('')}
+                        ${this._toothOptionsHtml(r.fdi)}
                     </select>
                 </td>
                 <td><div class="dtp-item-cell" data-uid="${r.row.uid}"></div></td>
                 <td>
                     <select class="tp-cell-input dtp-visit-edit" data-uid="${r.row.uid}" ${lock}>
-                        ${DTP_VISIT_OPTIONS.map(v => `<option value="${v}" ${v === r.row.visit ? 'selected' : ''}>${v}</option>`).join('')}
+                        ${this._visitOptionsHtml(r.row.visit)}
                     </select>
                 </td>
                 <td><input type="text" class="tp-cell-input dtp-note-edit" data-uid="${r.row.uid}" value="${dtpEsc(r.row.note)}" placeholder="Note…"></td>
@@ -906,7 +960,7 @@ class DentalTreatmentPlanChart {
                     <select class="tp-cell-input dtp-status-edit tp-status-${status}" data-uid="${r.row.uid}" ${lock}>
                         ${DTP_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === status ? 'selected' : ''}>${s}</option>`).join('')}
                     </select>
-                    ${inv ? `<a class="tp-inv-link" href="/app/sales-invoice/${encodeURIComponent(inv)}" target="_blank" title="Open invoice">${inv}</a>` : ''}
+                    ${inv ? `<a class="tp-inv-link" href="/app/sales-invoice/${encodeURIComponent(inv)}" target="_blank" title="Open invoice">${dtpEsc(inv)}</a>` : ''}
                 </td>
                 <td>${inv ? '' : `<span class="tp-row-rm dtp-row-rm" data-uid="${r.row.uid}" title="Delete row">🗑</span>`}</td>
             </tr>`;
@@ -928,9 +982,9 @@ class DentalTreatmentPlanChart {
                     <tr>
                         <th style="width:26px"></th>
                         <th style="width:26px">#</th>
-                        <th style="width:70px">Tooth</th>
+                        <th style="width:80px">Tooth</th>
                         <th>Procedure</th>
-                        <th style="width:90px">Visit</th>
+                        <th style="width:110px">Visit</th>
                         <th style="width:200px">Note</th>
                         <th style="width:90px">Fee</th>
                         <th style="width:110px">Status</th>
@@ -999,6 +1053,7 @@ class DentalTreatmentPlanChart {
 			el.addEventListener('change', (e) => this._moveRowTooth(el.dataset.uid, e.target.value));
 		});
 
+		// Changing the visit re-renders, which re-sorts the table by visit
 		wrap.querySelectorAll('.dtp-visit-edit').forEach(el => {
 			el.addEventListener('change', (e) => {
 				const found = this._findRowByUid(el.dataset.uid);
@@ -1168,7 +1223,7 @@ class DentalTreatmentPlanChart {
 	/* ── SAVE ──────────────────────────────────────────────────────────── */
 	// Everything happens here in the browser:
 	//   1. check the child table has the visit / status / sales_invoice fields
-	//   2. save the plan
+	//   2. save the plan (rows saved in visit order)
 	//   3. if there are new Completed rows → create a Sales Invoice for the
 	//      patient's customer, stamp its number on those rows, save again
 	async save() {
@@ -1180,11 +1235,7 @@ class DentalTreatmentPlanChart {
 			return;
 		}
 
-		const procedureRows = [];
-		this.allMeta.forEach(meta => {
-			const state = this.teeth[meta.fdi];
-			if (state.rows.length) procedureRows.push(...state.toDocRows());
-		});
+		const procedureRows = this._flatRows().map(f => this.teeth[f.fdi].toDocRow(f.row));
 
 		if (procedureRows.some(r => !r.procedure && r.status === 'Completed')) {
 			frappe.msgprint({ title: 'Missing Procedure', message: 'A row marked Completed has no procedure item selected.', indicator: 'orange' });
@@ -1347,7 +1398,7 @@ class DentalTreatmentPlanChart {
 		document.getElementById('dtp-plan-type').value = 'Active';
 		this.plan_date_ctrl.set_value(frappe.datetime.get_today());
 		document.getElementById('dtp-plan-note').value = '';
-		_dtpSet('dtp-badge', 'New Plan');
+		this._setDocTitle(null);
 		this._renderSelectedItem();
 		this.render();
 	}
@@ -1382,11 +1433,11 @@ class DentalTreatmentPlanChart {
 				});
 
 				const rows = list.map(p =>
-					`<div class="dtp-hist-item" data-name="${p.name}" style="display:flex;align-items:center;gap:12px;padding:8px 10px;border:1px solid #e2e6ea;border-radius:6px;margin-bottom:5px;cursor:pointer;font-size:12px;">
-                        <span style="font-family:'DM Mono',monospace;font-weight:600">${p.name}</span>
-                        <span>${p.patient || ''}</span>
+					`<div class="dtp-hist-item" data-name="${dtpEsc(p.name)}" style="display:flex;align-items:center;gap:12px;padding:8px 10px;border:1px solid #e2e6ea;border-radius:6px;margin-bottom:5px;cursor:pointer;font-size:12px;">
+                        <span style="font-family:'DM Mono',monospace;font-weight:600">${dtpEsc(p.name)}</span>
+                        <span>${dtpEsc(p.patient || '')}</span>
                         <span style="color:#6b7a8d">${frappe.datetime.str_to_user(p.plan_date)}</span>
-                        <span style="color:#9aa3af;font-size:11px">${p.plan_type || ''}</span>
+                        <span style="color:#9aa3af;font-size:11px">${dtpEsc(p.plan_type || '')}</span>
                     </div>`
 				).join('');
 
@@ -1436,7 +1487,7 @@ class DentalTreatmentPlanChart {
 				if (state) state.loadFromDocRow(row, this.itemCatalog);
 			});
 
-			_dtpSet('dtp-badge', doc.name);
+			this._setDocTitle(doc.name);
 			this._renderSelectedItem();
 			this.render();
 			return true;
