@@ -7,10 +7,14 @@ frappe.pages['dt_treatment_plan'].on_page_load = function (wrapper) {
 		single_column: true,
 	});
 
-	page.set_primary_action("Save", () => window._dtp?.save(), "save");
-	page.add_menu_item("New Plan", () => window._dtp?.reset());
-	page.add_menu_item("Load History", () => window._dtp?.loadPlanHistory());
-	page.add_menu_item("Recalculate Totals", () => window._dtp?.recalculateTotals());
+	// Toolbar buttons (shown up front, not in the ⋯ menu)
+	page.set_primary_action(__("Save"), () => window._dtp?.save(), "save");
+	page.set_secondary_action(__("New Treatment Plan"), () => window._dtp?.reset(), "add");
+	if (typeof page.add_button === "function") {
+		page.add_button(__("Load History"), () => window._dtp?.loadPlanHistory(), { icon: "list" });
+	} else {
+		page.add_inner_button(__("Load History"), () => window._dtp?.loadPlanHistory());
+	}
 
 	/* ── 2. CSS ─────────────────────────────────────────────────────────── */
 	frappe.dom.set_style(`
@@ -324,13 +328,12 @@ class DtpToothState {
 
 	loadFromDocRow(row, catalog = []) {
 		const code = row.procedure || '';
-		if (!code) return;
-		const match = catalog.find(s => s.name === code);
+		const match = code ? catalog.find(s => s.name === code) : null;
 		this.addRow({
 			type         : code,
-			label        : match ? (match.status_name || match.name) : code,
-			color        : match ? match.color : dtpHashColor(code),
-			category     : match ? match.category : dtpClassifyProcedure(code),
+			label        : !code ? '— Select —' : (match ? (match.status_name || match.name) : code),
+			color        : !code ? '#c8cfd8' : (match ? match.color : dtpHashColor(code)),
+			category     : !code ? 'procedure' : (match ? match.category : dtpClassifyProcedure(code)),
 			visit        : row.visit || dtpDefaultVisit(),
 			status       : row.status || 'Pending',
 			sales_invoice: row.sales_invoice || '',
@@ -590,9 +593,29 @@ class DentalTreatmentPlanChart {
 		return m.primary ? `${m.code} (Primary)` : m.code;
 	}
 
+	// Work out which tooth a saved child row belongs to.
+	// 1) fdi field — accepts "18", 18 or "18.0" (Data / Int / Float fields)
+	// 2) name1 field — the tooth name, e.g. "Upper Right 3rd Molar"
+	static fdiForRow(row) {
+		const all = DentalTreatmentPlanChart.allMetaStatic();
+		if (row.fdi !== undefined && row.fdi !== null && row.fdi !== '') {
+			const f = String(parseInt(row.fdi, 10));
+			if (all.some(m => m.fdi === f)) return f;
+		}
+		if (row.name1) {
+			const n = String(row.name1).trim().toLowerCase();
+			const m = all.find(x => x.name.toLowerCase() === n);
+			if (m) return m.fdi;
+		}
+		return null;
+	}
+
 	constructor() {
 		this.frm_doctype = 'Dental Treatment Plan';
 		this.child_doctype = 'Dental Treatment Plan Procedure';
+		// Fieldname of the child table on the parent. Detected from the doctype
+		// in _detectTableField(); this is only the fallback.
+		this.tableField = 'dental_treatment_plan_procedure';
 		this.docname = null;
 
 		this.selectedRowIds = new Set();
@@ -658,6 +681,24 @@ class DentalTreatmentPlanChart {
 		this.render();
 		this.applyRouteOptions();
 		this._loadVisitOptions();
+		this._detectTableField();
+	}
+
+	/* ── CHILD TABLE FIELDNAME ────────────────────────────────────────── */
+	// Finds the Table field on the parent whose options = the child doctype.
+	// If the hard-coded name is wrong, rows are silently dropped on save and
+	// never come back on load — so we always read it from the doctype.
+	async _detectTableField() {
+		try {
+			await this._loadMeta(this.frm_doctype);
+			const fields = (frappe.get_meta(this.frm_doctype) || {}).fields || [];
+			const tf = fields.find(df => ['Table', 'Table MultiSelect'].includes(df.fieldtype) && df.options === this.child_doctype);
+			if (tf) this.tableField = tf.fieldname;
+			else console.warn(`[DentalTreatmentPlan] No Table field for ${this.child_doctype} on ${this.frm_doctype}`);
+		} catch (err) {
+			console.warn('[DentalTreatmentPlan] Could not detect child table field:', err);
+		}
+		return this.tableField;
 	}
 
 	/* ── VISIT OPTIONS (from the child doctype's "visit" field) ───────── */
@@ -1243,12 +1284,13 @@ class DentalTreatmentPlanChart {
 		}
 
 		this.recalculateTotals();
+		await this._detectTableField();
 		const fieldValues = {
 			patient: patientId,
 			provider: this.provider_ctrl.get_value() || frappe.session.user,
 			plan_type: document.getElementById('dtp-plan-type').value,
 			plan_date: this.plan_date_ctrl.get_value(),
-			dental_treatment_plan_procedure: procedureRows,
+			[this.tableField]: procedureRows,
 			plan_note: document.getElementById('dtp-plan-note').value,
 			total_fee: flt(this._totalFee),
 		};
@@ -1312,7 +1354,7 @@ class DentalTreatmentPlanChart {
 	}
 
 	async _invoiceCompletedRows(doc) {
-		const rows = (doc.dental_treatment_plan_procedure || [])
+		const rows = (doc[this.tableField] || [])
 			.filter(r => r.status === 'Completed' && !r.sales_invoice && r.procedure);
 		if (!rows.length) return;
 
@@ -1363,8 +1405,13 @@ class DentalTreatmentPlanChart {
 
 	async _missingChildFields() {
 		await this._loadMeta(this.child_doctype);
-		return ['visit', 'status', 'sales_invoice']
+		// "fdi" (or at least "name1") is needed so rows can be put back on the right tooth
+		const missing = ['fdi', 'visit', 'status', 'sales_invoice']
 			.filter(f => !frappe.meta.has_field(this.child_doctype, f));
+		if (missing.includes('fdi') && frappe.meta.has_field(this.child_doctype, 'name1')) {
+			return missing.filter(f => f !== 'fdi');
+		}
+		return missing;
 	}
 
 	_loadMeta(doctype) {
@@ -1454,7 +1501,8 @@ class DentalTreatmentPlanChart {
 		});
 	}
 
-	_loadPlanByName(name) {
+	async _loadPlanByName(name) {
+		await this._detectTableField();
 		frappe.call({
 			method: 'frappe.client.get',
 			args: { doctype: this.frm_doctype, name: name },
@@ -1482,10 +1530,21 @@ class DentalTreatmentPlanChart {
 			this.plan_date_ctrl.set_value(doc.plan_date || '');
 			document.getElementById('dtp-plan-note').value = doc.plan_note || '';
 
-			(doc.dental_treatment_plan_procedure || []).forEach(row => {
-				const state = this.teethSets.permanent[row.fdi] || this.teethSets.primary[row.fdi];
+			const childRows = doc[this.tableField] || [];
+			const unmatched = [];
+			childRows.forEach(row => {
+				const fdi = DentalTreatmentPlanChart.fdiForRow(row);
+				const state = fdi && (this.teethSets.permanent[fdi] || this.teethSets.primary[fdi]);
 				if (state) state.loadFromDocRow(row, this.itemCatalog);
+				else unmatched.push(row);
 			});
+			if (unmatched.length) {
+				console.warn('[DentalTreatmentPlan] Rows with no matching tooth:', unmatched);
+				frappe.show_alert({
+					message: `${unmatched.length} procedure row(s) could not be matched to a tooth — check the "fdi" field on ${this.child_doctype}.`,
+					indicator: 'orange',
+				}, 10);
+			}
 
 			this._setDocTitle(doc.name);
 			this._renderSelectedItem();
