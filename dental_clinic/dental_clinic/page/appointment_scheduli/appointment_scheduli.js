@@ -28,6 +28,18 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     ];
     var color_idx_by_prac = {};
 
+    // ── "Arrived" handling ─────────────────────────────────────
+    // Workflow state that means "the patient has arrived". If your workflow
+    // calls it something else (e.g. "In Clinic"), change it here AND in the
+    // Notification / Server Script / field "Mandatory Depends On".
+    var ARRIVED_STATE = 'Arrived';
+    // Custom field on Patient Appointment (Link -> User) holding the user to notify.
+    var NOTIFY_USER_FIELD = 'custom_notify_user';
+
+    function is_arrived_state(s) {
+        return String(s || '').trim().toLowerCase() === ARRIVED_STATE.toLowerCase();
+    }
+
     // Symbol shown on each appointment card for its workflow state, without
     // needing to open the card. A plain first-letter scheme collides here
     // ("Completed Appt" and "Cancelled" both start with C), so these are
@@ -35,6 +47,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     // (e.g. the workflow's own starting state) falls back to its own first
     // letter — see workflow_state_symbol() below.
     var WF_STATE_SYMBOLS = {
+        'arrived': 'R',
         'in clinic': 'B',
         'completed appt': 'C',
         'did not attend': 'D',
@@ -47,6 +60,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     // this list, so any workflow keeps working even with other states.
     var WF_STATE_COLORS = {
         'A': { from: '#2E86C1', to: '#1B5E8C' }, // default/starting state — blue
+        'R': { from: '#0F9D9A', to: '#0B6E6C' }, // Arrived — teal
         'B': { from: '#3E7CB1', to: '#2C5A85' }, // In Clinic — steel blue
         'C': { from: '#2FA36B', to: '#1F7A4E' }, // Completed Appt — green
         'D': { from: '#D98E2B', to: '#B06F1A' }, // Did Not Attend — amber
@@ -204,8 +218,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-appt.clipped-top { border-top: 2px dotted rgba(0,0,0,.3); border-top-left-radius: 0; border-top-right-radius: 0; }
             .cal-appt.clipped-bottom { border-bottom: 2px dotted rgba(0,0,0,.3); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
             .cal-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 13px; }
-            .cal-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 9998; display: flex; align-items: center; justify-content: center; }
-            .cal-modal { background: var(--card-bg); border-radius: 14px; padding: 28px; width: 620px; max-width: 95vw; max-height: 92vh; overflow-y: auto; z-index: 9999; }
+            .cal-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 1020; display: flex; align-items: center; justify-content: center; }
+            .cal-modal { background: var(--card-bg); border-radius: 14px; padding: 28px; width: 620px; max-width: 95vw; max-height: 92vh; overflow-y: auto; }
             .cal-modal h3 { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: var(--text-color); }
             .cal-modal-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border-color); font-size: 13px; }
             .cal-modal-row .k { color: var(--text-muted); }
@@ -903,13 +917,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             };
 
             var call_args = { date: date, practitioner: practitioner, appointment: JSON.stringify(appointment_doc) };
-            console.log('get_availability_data call args', call_args);
 
             frappe.call({
                 method: 'healthcare.healthcare.doctype.patient_appointment.patient_appointment.get_availability_data',
                 args: call_args,
                 callback: function(r) {
-                    console.log('get_availability_data response for', practitioner, date, r.message);
                     var slots = parse_availability_response(r.message, exclude_name);
                     if (!slots.length) { callback(slots); return; }
 
@@ -923,13 +935,10 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         var free = slots.filter(function(s) {
                             return !overlaps_any(s.mins, Number(s.duration) || DEFAULT_DURATION, booked);
                         });
-                        console.log('slot filter', { practitioner: practitioner, date: date,
-                            booked: booked, slots_before: slots.length, slots_after: free.length });
                         callback(free);
                     }, exclude_name);
                 },
-                error: function(r) {
-                    console.log('get_availability_data error', r);
+                error: function() {
                     callback(null);
                 }
             });
@@ -1665,9 +1674,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         company: frappe.defaults.get_default('company')
                         // workflow_state is left unset: Frappe assigns the workflow's
                         // own default state (e.g. "Pending") on insert. We move it on
-                        // to "Scheduled" right after, via the workflow engine below,
-                        // rather than writing the field directly (a raw write is
-                        // rejected as an invalid transition).
+                        // to "Scheduled" right after, via the workflow engine below.
                     }
                 },
                 freeze: true,
@@ -1686,8 +1693,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                         load_schedule();
                     }
 
-                    // Best-effort: if no action currently leads to "Scheduled" (e.g.
-                    // permissions, or the workflow is set up differently), the
+                    // Best-effort: if no action currently leads to "Scheduled", the
                     // appointment still books — it just stays at its default state.
                     get_workflow_transitions(new_doc, function(transitions) {
                         var match = (transitions || []).find(function(t) { return t.next_state === 'Scheduled'; });
@@ -1735,9 +1741,6 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Reschedule ──────────────────────────────────────────────
-    // Same slot picker as booking (duty + real availability), with the
-    // appointment's own current slot treated as free. The appointment keeps
-    // its own duration; the chosen time is re-checked for clashes before saving.
     function can_reschedule(a) {
         if (!a || is_cancelled(a) || a.status === 'Closed') return false;
         return String(a.workflow_state || '').trim().toLowerCase() !== 'completed appt';
@@ -1814,19 +1817,11 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Workflow engine helpers ───────────────────────────────────
-    // Patient Appointment has a real Frappe Workflow attached (its
-    // workflow_state field starts at the workflow's own default state on
-    // insert, e.g. "Pending"). Frappe validates every change to that field
-    // against the Workflow document's own transitions, so a raw field write
-    // (frappe.client.set_value) is rejected with "Workflow State transition
-    // not allowed from X to Y" unless it happens to match one exactly.
-    // Instead we go through the same two calls the desk's own workflow
-    // buttons use: ask which actions are available from the doc's current
-    // state, then apply the one whose next_state is what we want.
-    //
-    // `doc` must be a full-enough document object (doctype + name + current
-    // field values, workflow_state included) — a plain object is fine, it
-    // does not need to be a real frappe.model instance.
+    // Status changes go through the same two calls the desk's own workflow
+    // buttons use: ask which actions are available from the current state,
+    // then apply the one whose next_state is what we want. Note that
+    // apply_workflow reloads the document from the database, so any field
+    // that must be set before the transition has to be SAVED first.
     function get_workflow_transitions(doc, callback) {
         frappe.call({
             method: 'frappe.model.workflow.get_transitions',
@@ -1848,10 +1843,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // Every state of the active Patient Appointment workflow, in the order
-    // they are listed on the Workflow document. Tries the workflow that
-    // Frappe already loads with the doctype's meta first (works for users
-    // without read access to the Workflow doctype), then the server.
-    // Calls back with an array of state names, or null if unknown.
+    // they are listed on the Workflow document.
     var wf_states_cache = null;
     function get_workflow_states(callback) {
         if (wf_states_cache) { callback(wf_states_cache); return; }
@@ -1910,12 +1902,69 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         }
     }
 
+    // ── "Mark Arrived" dialog ──────────────────────────────────
+    // Opened when the Arrived state is clicked. The user to notify is a
+    // mandatory field ON this dialog; the status only changes once it is
+    // filled. It is prefilled with the value already on the appointment,
+    // otherwise with the practitioner's linked User.
+    //   on_ok(user) is called with the chosen user.
+    function open_arrived_dialog(a, on_ok) {
+        var d = new frappe.ui.Dialog({
+            title: 'Mark Patient as ' + ARRIVED_STATE,
+            fields: [
+                { fieldtype: 'HTML', fieldname: 'info' },
+                {
+                    fieldtype: 'Link', fieldname: 'notify_user', label: 'Notify User',
+                    options: 'User', reqd: 1,
+                    description: 'This user gets a notification that the patient has arrived.',
+                    get_query: function() {
+                        return { filters: { enabled: 1, user_type: 'System User' } };
+                    }
+                }
+            ],
+            primary_action_label: 'Mark ' + ARRIVED_STATE + ' & Notify',
+            primary_action: function(v) {
+                var user = (v.notify_user || '').trim();
+                if (!user) {
+                    frappe.msgprint({ message: 'Please select the user to notify.', indicator: 'orange' });
+                    return;
+                }
+                d.hide();
+                on_ok(user);
+            }
+        });
+
+        d.fields_dict.info.$wrapper.html(
+            '<div class="cal-avail-box cal-avail-ok" style="margin-bottom:10px">'
+            + '<b>' + esc(a.patient_name || a.patient || a.name) + '</b><br>'
+            + esc(fmt_ddmmyyyy(a.appointment_date)) + ', ' + esc(fmt_modal_time(a))
+            + ' \u2014 ' + esc(a.practitioner_name || a.practitioner || '')
+            + '</div>'
+        );
+        d.show();
+
+        function fill_from_practitioner() {
+            if (!a.practitioner) return;
+            frappe.db.get_value('Healthcare Practitioner', a.practitioner, 'user_id').then(function(r) {
+                var u = r && r.message && r.message.user_id;
+                if (u && !d.get_value('notify_user')) d.set_value('notify_user', u);
+            });
+        }
+
+        frappe.call({
+            method: 'frappe.client.get_value',
+            args: { doctype: 'Patient Appointment', filters: { name: a.name }, fieldname: NOTIFY_USER_FIELD },
+            silent: true,
+            callback: function(r) {
+                var cur = r && r.message && r.message[NOTIFY_USER_FIELD];
+                if (cur) d.set_value('notify_user', cur);
+                else fill_from_practitioner();
+            },
+            error: function() { fill_from_practitioner(); }
+        });
+    }
+
     // ── Detail modal ───────────────────────────────────────────
-    // The workflow row shows EVERY state of the workflow as a button, in one
-    // row. The engine (get_workflow_transitions) decides which of them are
-    // reachable from the current state for the current user: those are
-    // coloured and clickable; the current state is ringed; the rest are dull
-    // and disabled.
     function show_modal(a) {
         var c = color_for(a.practitioner);
         var bg = document.createElement('div');
@@ -2052,28 +2101,55 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         var cur_btn = box.querySelector('.btn-cal-state.is-current');
         if (cur_btn && cur_btn.scrollIntoView) cur_btn.scrollIntoView({ block: 'nearest', inline: 'center' });
 
+        // Applies a workflow action and refreshes the modal + calendar.
+        function run_transition(btn, t) {
+            var all = box.querySelectorAll('.btn-cal-state');
+            var was_disabled = [];
+            all.forEach(function(b, i) { was_disabled[i] = b.disabled; b.disabled = true; });
+            btn.classList.add('is-busy');
+
+            apply_workflow_action(doc, t.action, function(new_doc) {
+                if (!new_doc) {
+                    frappe.msgprint({ message: 'Could not update the status. Please try again.', indicator: 'red' });
+                    all.forEach(function(b, i) { b.disabled = was_disabled[i]; });
+                    btn.classList.remove('is-busy');
+                    return;
+                }
+                a.workflow_state = new_doc.workflow_state;
+                if (new_doc.status) a.status = new_doc.status;
+                frappe.show_alert({ message: 'Status updated to ' + a.workflow_state, indicator: 'green' });
+                bg.remove();
+                if (!is_cancelled(a)) show_modal(a); // reopen with the row refreshed
+                load_schedule();                     // keep the calendar in sync
+            });
+        }
+
         box.querySelectorAll('.btn-cal-state:not([disabled])').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                var t = action_for[btn.getAttribute('data-state')];
+                var target = btn.getAttribute('data-state');
+                var t = action_for[target];
                 if (!t) return;
-                var all = box.querySelectorAll('.btn-cal-state');
-                var was_disabled = [];
-                all.forEach(function(b, i) { was_disabled[i] = b.disabled; b.disabled = true; });
-                btn.classList.add('is-busy');
 
-                apply_workflow_action(doc, t.action, function(new_doc) {
-                    if (!new_doc) {
-                        frappe.msgprint({ message: 'Could not update the status. Please try again.', indicator: 'red' });
-                        all.forEach(function(b, i) { b.disabled = was_disabled[i]; });
-                        btn.classList.remove('is-busy');
-                        return;
-                    }
-                    a.workflow_state = new_doc.workflow_state;
-                    if (new_doc.status) a.status = new_doc.status;
-                    frappe.show_alert({ message: 'Status updated to ' + a.workflow_state, indicator: 'green' });
-                    bg.remove();
-                    if (!is_cancelled(a)) show_modal(a); // reopen with the row refreshed
-                    load_schedule();                     // keep the calendar in sync (cancelled ones disappear)
+                if (!is_arrived_state(target)) { run_transition(btn, t); return; }
+
+                // Arrived: the user to notify is mandatory and is entered on the
+                // dialog. It is saved first (apply_workflow reloads the doc from
+                // the database), then the state changes, which fires the
+                // "Patient Arrived" Notification to that user.
+                open_arrived_dialog(a, function(user) {
+                    frappe.call({
+                        method: 'frappe.client.set_value',
+                        args: {
+                            doctype: 'Patient Appointment', name: a.name,
+                            fieldname: NOTIFY_USER_FIELD, value: user
+                        },
+                        freeze: true,
+                        freeze_message: 'Saving…',
+                        callback: function(r) {
+                            if (!r.message) return;
+                            run_transition(btn, t);
+                        }
+                    });
                 });
             });
         });
