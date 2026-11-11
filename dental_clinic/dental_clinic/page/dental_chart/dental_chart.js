@@ -55,6 +55,9 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 #dc-root .pal-btn:hover { border-color:var(--border2);background:#fff; }
 #dc-root .pal-btn.active{ border-color:currentColor; }
 #dc-root .pal-dot       { width:11px;height:11px;border-radius:3px;flex-shrink:0; }
+#dc-root .pal-apply-all { border-color:var(--accent);background:var(--accent-light);color:var(--accent);font-weight:600; }
+#dc-root .pal-apply-all:hover { background:var(--accent);color:#fff;border-color:var(--accent); }
+#dc-root .pal-hint      { font-size:10px;color:var(--muted2);line-height:1.35;margin-top:4px; }
 #dc-root .obs-search    { width:100%;box-sizing:border-box;border:1.5px solid var(--border);border-radius:7px;padding:6px 9px;font-size:12px;font-family:inherit;color:var(--text);background:var(--panel2);outline:none;margin-bottom:7px;transition:border-color .13s; }
 #dc-root .obs-search:focus{ border-color:var(--accent); }
 #dc-root .obs-list      { max-height:220px;overflow-y:auto;padding-right:2px; }
@@ -204,6 +207,15 @@ frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
         <div class="pal-label">Observations</div>
         <input type="text" id="dc-obs-search" class="obs-search" placeholder="Search observations…">
         <div id="dc-obs-list" class="obs-list"></div>
+        <div class="pal-hint">Pick an observation, then click a tooth surface (or the tooth number for the whole tooth).</div>
+      </div>
+      <div class="pal-sep"></div>
+
+      <div class="pal-section">
+        <div class="pal-label">Bulk Apply</div>
+        <button class="pal-btn pal-apply-all" id="dc-apply-all-btn">
+          <span style="font-size:13px">🦷</span>Apply to All Teeth
+        </button>
       </div>
       <div class="pal-sep"></div>
 
@@ -730,6 +742,7 @@ class DentalChart {
         this._bindNumberingToggle();
         this._bindTooltip();
         this._bindChartStatus();
+        this._bindApplyAll();
         this._renderChartStatus();
 
         this.render();
@@ -1111,10 +1124,12 @@ class DentalChart {
         const svgH  = `<div class="tooth-svg-wrap">${ToothSVG.render(meta, isUp, state.conditions)}${badge}</div>`;
         el.innerHTML = isUp ? (numH + svgH) : (svgH + numH);
 
-        el.addEventListener('click',       ()  => this._selectTooth(meta.fdi));
+        /* Clicking the tooth (number / outside the surfaces) → whole tooth */
+        el.addEventListener('click',       ()  => this._onToothClick(meta.fdi));
         el.addEventListener('mouseenter',  (e) => this._showTip(e, meta));
         el.addEventListener('mouseleave',  ()  => this._hideTip());
 
+        /* Clicking a surface → that surface only */
         el.querySelectorAll('[data-surface]').forEach(region => {
             region.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1388,12 +1403,30 @@ class DentalChart {
     }
 
     /* ══════════════════════════════════════════════════════════════════════
-       TOOTH SELECTION
+       TOOTH SELECTION / APPLYING OBSERVATIONS
+       An observation is ONLY applied when a tooth or surface is clicked.
+       Picking an observation in the palette never changes any tooth.
     ══════════════════════════════════════════════════════════════════════*/
 
-    _selectTooth(fdi) {
+    /** Click on a tooth (number / outside surfaces) → apply to the whole tooth. */
+    _onToothClick(fdi) {
         this.selFDI = fdi;
-        this.render();
+        if (this.selStatus) {
+            this._applyStatusToTooth(fdi, 'All');
+        } else {
+            this.render();
+        }
+    }
+
+    /** Click on a single surface → apply to that surface only. */
+    _applyToSurface(fdi, surface) {
+        this.selFDI = fdi;
+        if (!this.selStatus) {
+            frappe.show_alert({ message: 'Pick an observation from the left panel first', indicator: 'orange' });
+            this.render();
+            return;
+        }
+        this._applyStatusToTooth(fdi, surface);
     }
 
     _applyStatusToTooth(fdi, surface) {
@@ -1412,6 +1445,7 @@ class DentalChart {
                 c => c.type === this.selStatus.id && c.surface === surface
             );
             if (alreadyApplied) {
+                /* clicking the same observation on the same spot again removes it */
                 state.conditions = state.conditions.filter(
                     c => !(c.type === this.selStatus.id && c.surface === surface)
                 );
@@ -1427,26 +1461,65 @@ class DentalChart {
         this.render();
     }
 
-    _applyCondition() {
-        if (!this.selFDI) {
-            frappe.msgprint({ title: 'No Tooth Selected', message: 'Click a tooth first.', indicator: 'orange' });
-            return;
-        }
+    /** Apply the active observation to every tooth of the chosen dentition. */
+    applyToAllTeeth() {
         if (!this.selStatus) {
-            frappe.msgprint({ title: 'No Observation Selected', message: 'Pick an observation from the left panel first.', indicator: 'orange' });
+            frappe.msgprint({
+                title    : 'No Observation Selected',
+                message  : 'Pick an observation from the left panel first.',
+                indicator: 'orange',
+            });
             return;
         }
-        this._applyStatusToTooth(this.selFDI, 'All');
-    }
 
-    _applyToSurface(fdi, surface) {
-        this.selFDI = fdi;
-        if (!this.selStatus) {
-            frappe.msgprint({ title: 'No Observation Selected', message: 'Pick an observation from the left panel first, then click a surface.', indicator: 'orange' });
-            this.render();
-            return;
-        }
-        this._applyStatusToTooth(fdi, surface);
+        const status = { ...this.selStatus };
+
+        const d = new frappe.ui.Dialog({
+            title : `Apply "${status.label}" to all teeth`,
+            fields: [{
+                fieldtype: 'Select',
+                fieldname: 'dentition',
+                label    : 'Dentition',
+                options  : ['Permanent', 'Primary', 'Both'],
+                default  : 'Permanent',
+                reqd     : 1,
+            }],
+            primary_action_label: 'Apply',
+            primary_action: (values) => {
+                const keys = values.dentition === 'Both'
+                    ? ['permanent', 'primary']
+                    : [values.dentition.toLowerCase()];
+
+                let count = 0;
+                keys.forEach(key => {
+                    Object.values(this.teethSets[key]).forEach(state => {
+                        if (status.isHealthy) {
+                            state.conditions = [];
+                        } else {
+                            /* new object per tooth so each row gets its own uid */
+                            state.addCondition({
+                                type   : status.id,
+                                label  : status.label,
+                                color  : status.color,
+                                surface: 'All',
+                            });
+                        }
+                        count++;
+                    });
+                });
+
+                d.hide();
+                this.summarySelectedIds = new Set();
+                this.render();
+                frappe.show_alert({
+                    message  : status.isHealthy
+                        ? `Cleared ${count} teeth`
+                        : `"${status.label}" applied to ${count} teeth`,
+                    indicator: 'green',
+                });
+            },
+        });
+        d.show();
     }
 
     /* ══════════════════════════════════════════════════════════════════════
@@ -1520,6 +1593,14 @@ class DentalChart {
             btn.addEventListener('click', () => {
                 const doc = this.toothStatusCatalog.find(s => s.name === btn.dataset.id);
                 if (!doc) return;
+
+                /* Clicking the active observation again deselects it */
+                if (this.selStatus && this.selStatus.id === doc.name) {
+                    this.selStatus = null;
+                    this._renderObservationList();
+                    return;
+                }
+
                 const label = doc.status_name || doc.name;
                 this.selStatus = {
                     id       : doc.name,
@@ -1527,10 +1608,16 @@ class DentalChart {
                     color    : doc.color || '#999999',
                     isHealthy: label.trim().toLowerCase() === 'healthy',
                 };
+                /* Only select the observation — do NOT touch any tooth here */
                 this._renderObservationList();
-                if (this.selFDI) this._applyCondition();
             });
         });
+    }
+
+    _bindApplyAll() {
+        const btn = document.getElementById('dc-apply-all-btn');
+        if (!btn) return;
+        btn.addEventListener('click', () => this.applyToAllTeeth());
     }
 
     _bindChartStatus() {
