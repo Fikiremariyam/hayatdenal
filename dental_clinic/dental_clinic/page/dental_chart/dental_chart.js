@@ -1,3 +1,7 @@
+/* Field on "Dental charting_" that links to Healthcare Practitioner.
+   Change this if your fieldname is different (e.g. 'healthcare_practitioner'). */
+const DC_PRACTITIONER_FIELD = 'provider';
+
 frappe.pages['dental-chart'].on_page_load =  function (wrapper) {
 
     /* ── 1. PAGE CHROME ─────────────────────────────────────────────────── */
@@ -422,16 +426,20 @@ class ToothState {
 
 /* ───────────────────────────────────────────────────────────────────────────
    CLASS: PatientInfo
-   Manages the patient link control, the provider (logged-in user) and banner.
+   Manages the patient link control, the provider (Healthcare Practitioner
+   linked to the user who creates the chart) and the banner.
 ─────────────────────────────────────────────────────────────────────────────*/
 class PatientInfo {
+
+    /* user_id → { name, practitioner_name } | null  (cache per page session) */
+    static _practitionerCache = {};
 
     constructor() {
         this.id       = null;
         this.fullName = '—';
         this.dob      = '—';
-        this.provider = frappe.session.user;
-        this._onChangeCb = null;
+        this.practitioner = null;          // Healthcare Practitioner ID
+        this._onChangeCb  = null;
 
         /* Patient link control */
         this._ctrl = frappe.ui.form.make_control({
@@ -451,19 +459,19 @@ class PatientInfo {
             if (val && this._onChangeCb) this._onChangeCb(val);
         });
 
-        /* Provider = the logged-in user who creates the chart (read-only) */
+        /* Provider = Healthcare Practitioner whose User is the chart creator (read-only) */
         this.provider_ctrl = frappe.ui.form.make_control({
             parent: $('.dc-doc-name'),
             df: {
                 fieldtype : 'Link',
-                options   : 'User',
-                label     : 'Provider',
-                fieldname : 'provider',
+                options   : 'Healthcare Practitioner',
+                label     : 'Healthcare Practitioner',
+                fieldname : 'healthcare_practitioner',
                 read_only : 1,
             },
             render_input: true,
         });
-        this.setProvider(frappe.session.user);
+        this.setProviderFromUser(frappe.session.user);
     }
 
     /** Currently linked patient ID (Frappe name). */
@@ -471,9 +479,9 @@ class PatientInfo {
         return this._ctrl.get_value() || null;
     }
 
-    /** Currently shown provider (User ID). */
+    /** Currently shown Healthcare Practitioner ID. */
     get providerValue() {
-        return this.provider_ctrl.get_value() || this.provider || null;
+        return this.provider_ctrl.get_value() || this.practitioner || null;
     }
 
     onChange(cb) {
@@ -484,13 +492,52 @@ class PatientInfo {
         this._ctrl.set_value(patientId);
     }
 
-    /** Show a user as the provider (value = user ID, display = full name). */
-    setProvider(userId) {
-        if (!userId) return;
-        this.provider = userId;
-        this.provider_ctrl.set_value(userId);
-        const fullName = frappe.user.full_name ? frappe.user.full_name(userId) : userId;
-        this._showTitle(this.provider_ctrl, 'User', userId, fullName);
+    /** Find the Healthcare Practitioner whose "User" (user_id) is this user. */
+    static async practitionerForUser(userId) {
+        if (!userId) return null;
+        if (userId in PatientInfo._practitionerCache) return PatientInfo._practitionerCache[userId];
+
+        let result = null;
+        try {
+            const r = await frappe.db.get_value(
+                'Healthcare Practitioner',
+                { user_id: userId },
+                ['name', 'practitioner_name']
+            );
+            if (r && r.message && r.message.name) result = r.message;
+        } catch (err) {
+            console.warn('[DentalChart] practitioner lookup failed:', err);
+        }
+        PatientInfo._practitionerCache[userId] = result;
+        return result;
+    }
+
+    /** Show a Healthcare Practitioner as the provider (value = ID, display = name). */
+    setProvider(practitionerId, practitionerName) {
+        this.practitioner = practitionerId || null;
+        this.provider_ctrl.set_value(practitionerId || '');
+        if (practitionerId) {
+            this._showTitle(this.provider_ctrl, 'Healthcare Practitioner',
+                            practitionerId, practitionerName || practitionerId);
+        }
+    }
+
+    /** Set the provider to the practitioner linked to a user account. */
+    async setProviderFromUser(userId) {
+        const p = await PatientInfo.practitionerForUser(userId);
+        this.setProvider(p ? p.name : null, p ? p.practitioner_name : null);
+        return p;
+    }
+
+    /** Set the provider from a stored practitioner ID (fetches the display name). */
+    async setProviderById(practitionerId) {
+        if (!practitionerId) { this.setProvider(null); return; }
+        let pname = practitionerId;
+        try {
+            const r = await frappe.db.get_value('Healthcare Practitioner', practitionerId, 'practitioner_name');
+            if (r && r.message && r.message.practitioner_name) pname = r.message.practitioner_name;
+        } catch (err) { /* keep the ID as the label */ }
+        this.setProvider(practitionerId, pname);
     }
 
     async load(patientId) {
@@ -819,8 +866,17 @@ class DentalChart {
             const disclaimerEl = document.getElementById('dc-notes-disclaimer');
             if (disclaimerEl) disclaimerEl.value = doc.disclaimer || '';
 
-            /* Provider = the user who created this chart */
-            this.patient.setProvider(doc.owner || doc.provider || frappe.session.user);
+            /* Provider = the Healthcare Practitioner stored on the chart.
+               Older charts that stored a user email (or nothing) fall back to
+               the practitioner linked to the chart's creator. */
+            const storedProvider = doc[DC_PRACTITIONER_FIELD];
+            if (storedProvider && !String(storedProvider).includes('@')) {
+                await this.patient.setProviderById(storedProvider);
+            } else {
+                await this.patient.setProviderFromUser(
+                    storedProvider || doc.owner || frappe.session.user
+                );
+            }
 
             (doc.condition_summary || []).forEach(row => {
                 const state = this.teethSets.permanent[row.fdi] || this.teethSets.primary[row.fdi];
@@ -856,7 +912,7 @@ class DentalChart {
         try {
             const list = await frappe.db.get_list('Dental charting_', {
                 filters : { patient: patientId },
-                fields  : ['name', 'chart_date', 'owner'],
+                fields  : ['name', 'chart_date', 'owner', DC_PRACTITIONER_FIELD],
                 order_by: 'chart_date desc',
                 limit   : 20,
             });
@@ -866,13 +922,30 @@ class DentalChart {
                 return;
             }
 
+            /* Look up practitioner names for the "by …" label in one call */
+            const practIds = [...new Set(list.map(c => c[DC_PRACTITIONER_FIELD]).filter(Boolean))];
+            const practNames = {};
+            if (practIds.length) {
+                try {
+                    const prs = await frappe.db.get_list('Healthcare Practitioner', {
+                        filters          : { name: ['in', practIds] },
+                        fields           : ['name', 'practitioner_name'],
+                        limit_page_length: 0,
+                    });
+                    prs.forEach(p => { practNames[p.name] = p.practitioner_name || p.name; });
+                } catch (e) { /* fall back to IDs */ }
+            }
+
             const d = new frappe.ui.Dialog({
                 title : 'Select a Chart to Load',
                 fields: [{ fieldtype: 'HTML', fieldname: 'chart_list_html' }],
             });
 
             const rows = list.map(c => {
-                const by = frappe.user.full_name ? frappe.user.full_name(c.owner) : c.owner;
+                const pid = c[DC_PRACTITIONER_FIELD];
+                const by  = pid
+                    ? (practNames[pid] || pid)
+                    : (frappe.user.full_name ? frappe.user.full_name(c.owner) : c.owner);
                 return `<div class="hist-item" data-name="${c.name}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e2e6ea;border-radius:6px;margin-bottom:5px;cursor:pointer;font-size:12px;transition:background .13s;"
                      onmouseover="this.style.background='#e8f0fe'" onmouseout="this.style.background=''">
                   <span style="font-family:'DM Mono',monospace;font-weight:600">${c.name}</span>
@@ -914,6 +987,23 @@ class DentalChart {
             return;
         }
 
+        /* Provider must be a Healthcare Practitioner. For a new chart this is
+           the practitioner linked to the logged-in user. */
+        let providerVal = this.patient.providerValue;
+        if (!providerVal) {
+            const p = await this.patient.setProviderFromUser(frappe.session.user);
+            providerVal = p ? p.name : null;
+        }
+        if (!providerVal) {
+            frappe.msgprint({
+                title    : 'No Healthcare Practitioner',
+                message  : `Your user account (<b>${frappe.session.user}</b>) is not linked to a Healthcare Practitioner.<br>
+                            Open your Healthcare Practitioner record and set its <b>User</b> field to your account, then save again.`,
+                indicator: 'orange',
+            });
+            return;
+        }
+
         const conditionRows = [];
         this.allMeta.forEach(meta => {
             const state = this.teethSets.permanent[meta.fdi] || this.teethSets.primary[meta.fdi];
@@ -942,7 +1032,6 @@ class DentalChart {
             }
         });
 
-        const providerVal    = this.patient.providerValue || frappe.session.user;
         const clinicalNotes  = (document.getElementById('dc-notes-clinical')   || {}).value || '';
         const disclaimerText = (document.getElementById('dc-notes-disclaimer') || {}).value || '';
 
@@ -956,13 +1045,13 @@ class DentalChart {
             if (this.savedChartName) {
                 /* UPDATE — round-trip the full existing doc so no other fields are lost */
                 const existing = await frappe.db.get_doc('Dental charting_', this.savedChartName);
-                existing.patient           = patientId;
-                existing.chart_date        = frappe.datetime.get_today();
-                existing.provider          = providerVal;
-                existing.status            = this.chartStatus;
-                existing.clinical_notes    = clinicalNotes;
-                existing.disclaimer        = disclaimerText;
-                existing.condition_summary = conditionRows;
+                existing.patient                 = patientId;
+                existing.chart_date              = frappe.datetime.get_today();
+                existing[DC_PRACTITIONER_FIELD]  = providerVal;
+                existing.status                  = this.chartStatus;
+                existing.clinical_notes          = clinicalNotes;
+                existing.disclaimer              = disclaimerText;
+                existing.condition_summary       = conditionRows;
                 Object.assign(existing, perioFields);
 
                 frappe.call({
@@ -982,14 +1071,14 @@ class DentalChart {
                     method  : 'frappe.client.insert',
                     args    : {
                         doc: {
-                            doctype          : 'Dental charting_',
-                            patient          : patientId,
-                            chart_date       : frappe.datetime.get_today(),
-                            provider         : providerVal,
-                            status           : this.chartStatus,
-                            clinical_notes   : clinicalNotes,
-                            disclaimer       : disclaimerText,
-                            condition_summary: conditionRows,
+                            doctype                 : 'Dental charting_',
+                            patient                 : patientId,
+                            chart_date              : frappe.datetime.get_today(),
+                            [DC_PRACTITIONER_FIELD] : providerVal,
+                            status                  : this.chartStatus,
+                            clinical_notes          : clinicalNotes,
+                            disclaimer              : disclaimerText,
+                            condition_summary       : conditionRows,
                             ...perioFields,
                         },
                     },
@@ -1027,8 +1116,8 @@ class DentalChart {
         const disclaimerEl = document.getElementById('dc-notes-disclaimer');
         if (disclaimerEl) disclaimerEl.value = '';
 
-        /* New chart → provider is whoever is logged in */
-        this.patient.setProvider(frappe.session.user);
+        /* New chart → provider is the practitioner linked to the logged-in user */
+        this.patient.setProviderFromUser(frappe.session.user);
 
         _set('dc-pt-badge', 'New Chart');
         this._renderChartStatus();
@@ -1039,7 +1128,7 @@ class DentalChart {
         const payload = {
             chart   : this.savedChartName,
             patient : this.patient.value,
-            provider: this.patient.providerValue,
+            healthcare_practitioner: this.patient.providerValue,
             exported: new Date().toISOString(),
             state   : {},
             bpe     : { ...this.bpe },
