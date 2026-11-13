@@ -44,11 +44,13 @@
     { doctype: "Dental Compliance Form", title_field: "title", kind: "form" },
   ];
   const LINK_FIELD = "compliance_folder";
-
-  const ALLOWED_TYPES = [
-    ".pdf", ".doc", ".docx", ".dot", ".dotx", ".odt", ".rtf", ".txt",
-    ".xls", ".xlsx", ".xlt", ".xltx", ".csv", ".ods",
-  ];
+  
+const ALLOWED_TYPES = [
+  ".pdf", ".doc", ".docx", ".dot", ".dotx", ".odt", ".rtf", ".txt",
+  ".xls", ".xlsx", ".xlt", ".xltx", ".csv", ".ods",
+  ".ppt", ".pptx", ".odp",
+  ".png", ".jpg", ".jpeg", ".gif", ".webp",
+];
   // ---------------------------------------------------------------------------
 
   // ===========================================================================
