@@ -184,6 +184,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             .cal-day-slot { height: 52px; border-bottom: 1px solid var(--border-color); padding: 2px 4px; cursor: pointer; transition: background .1s; }
             .cal-day-slot:hover { background: var(--subtle-bg); }
             .cal-day-slot.cal-slot-off, .cal-day-slot.cal-slot-off:hover { cursor: not-allowed; background: transparent; }
+            /* Working that day, but this time is outside their Practitioner Schedule */
+            .cal-day-slot.cal-slot-outside { background: repeating-linear-gradient(45deg, rgba(0,0,0,.035) 0 6px, transparent 6px 12px); }
             .cal-lane-head-row { display: grid; border-bottom: 1px solid var(--border-color); background: var(--card-bg); }
             .cal-lane-head-spacer { border-right: 1px solid var(--border-color); }
             .cal-lane-head-group { display: flex; border-right: 1px solid var(--border-color); }
@@ -715,20 +717,147 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
     }
 
     // ── Time-slot grid ───────────────────────────────────────────
-    // Duty Assignment only tells us WHICH dates a practitioner is on duty, not
-    // what hours they work, so the displayed grid is a fixed 8:00–17:30 ladder
-    // and bookability is decided per practitioner per day (see is_day_working).
+    // Duty Assignment tells us WHICH dates a practitioner is on duty; the
+    // HOURS come from their Practitioner Schedule(s) (Healthcare Practitioner
+    // -> practitioner_schedules -> Practitioner Schedule -> time_slots).
+    // The grid spans the earliest start to the latest end of the selected
+    // practitioners' schedules on the visible weekdays, and is widened if an
+    // appointment falls outside that, so nothing is pushed into the all-day row.
     var SLOT_MINUTES = 30;
+    var DEFAULT_GRID_START = 8 * 60;        // used only if no schedule is found
+    var DEFAULT_GRID_END   = 17 * 60 + 30;
     var TIME_SLOTS = [];
     var TIME_SLOT_MINUTES = [];
 
-    function build_time_slots() {
+    // hours_cache[practitioner] = null -> lookup failed
+    //                           = {}   -> no schedule
+    //                           = { "Monday": [{start, end}, ...], ... } (minutes)
+    var hours_cache = {};
+
+    var WEEKDAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    function weekday_name(date) {
+        var p = String(date).split('-');
+        return WEEKDAYS[new Date(p[0], p[1] - 1, p[2]).getDay()];
+    }
+
+    function hours_for(practitioner, date) {
+        var h = hours_cache[practitioner];
+        return (h && h[weekday_name(date)]) || [];
+    }
+
+    // Does [start, end) fall inside this practitioner's schedule that day?
+    // Unknown schedule (failed / none) => treat as inside, so we don't shade.
+    function is_within_hours(practitioner, date, start, end) {
+        var h = hours_cache[practitioner];
+        if (!h || !Object.keys(h).length) return true;
+        return hours_for(practitioner, date).some(function(r) { return start < r.end && r.start < end; });
+    }
+
+    function build_time_slots(dates, ids, appts) {
+        var lo = null, hi = null;
+        function widen(s, e) {
+            lo = (lo === null) ? s : Math.min(lo, s);
+            hi = (hi === null) ? e : Math.max(hi, e);
+        }
+
+        // 1) Schedule hours on the weekdays being shown.
+        (ids || []).forEach(function(id) {
+            (dates || []).forEach(function(d) {
+                hours_for(id, d).forEach(function(r) { widen(r.start, r.end); });
+            });
+        });
+        // 2) Nothing on those weekdays: use the schedule's hours from any day.
+        if (lo === null) {
+            (ids || []).forEach(function(id) {
+                var h = hours_cache[id];
+                if (!h) return;
+                Object.keys(h).forEach(function(k) {
+                    h[k].forEach(function(r) { widen(r.start, r.end); });
+                });
+            });
+        }
+        // 3) No schedule at all: fall back to the old default.
+        if (lo === null) { lo = DEFAULT_GRID_START; hi = DEFAULT_GRID_END; }
+
+        // Never hide an appointment: stretch the grid to cover every one shown.
+        (appts || []).forEach(function(a) {
+            if (!a.appointment_time || is_cancelled(a)) return;
+            var s = time_str_to_minutes(a.appointment_time);
+            widen(s, s + appt_duration(a));
+        });
+
+        lo = Math.max(0, Math.floor(lo / SLOT_MINUTES) * SLOT_MINUTES);
+        hi = Math.min(24 * 60, Math.ceil(hi / SLOT_MINUTES) * SLOT_MINUTES);
+        if (hi <= lo) hi = lo + SLOT_MINUTES;
+
         var minutes = [];
-        for (var mm = 8 * 60; mm < 17 * 60 + 30; mm += SLOT_MINUTES) minutes.push(mm);
+        for (var mm = lo; mm < hi; mm += SLOT_MINUTES) minutes.push(mm);
         TIME_SLOT_MINUTES = minutes;
         TIME_SLOTS = minutes.map(format_time_label);
     }
-    build_time_slots();
+
+    // Reads the practitioner's Practitioner Schedule(s) and caches their
+    // working hours per weekday in hours_cache[practitioner].
+    function fetch_practitioner_hours(practitioner, callback) {
+        frappe.call({
+            method: 'frappe.client.get',
+            args: { doctype: 'Healthcare Practitioner', name: practitioner },
+            silent: true,
+            callback: function(r) {
+                var rows = (r.message && r.message.practitioner_schedules) || [];
+                var names = [];
+                rows.forEach(function(row) {
+                    if (row.schedule && names.indexOf(row.schedule) === -1) names.push(row.schedule);
+                });
+                var hours = {};
+                if (!names.length) { hours_cache[practitioner] = hours; callback(); return; }
+
+                var remaining = names.length;
+                function done() {
+                    if (--remaining > 0) return;
+                    hours_cache[practitioner] = hours;
+                    callback();
+                }
+                names.forEach(function(n) {
+                    frappe.call({
+                        method: 'frappe.client.get',
+                        args: { doctype: 'Practitioner Schedule', name: n },
+                        silent: true,
+                        callback: function(dr) {
+                            var doc = dr.message;
+                            if (doc && !doc.disabled) {
+                                (doc.time_slots || []).forEach(function(ts) {
+                                    if (!ts.day || !ts.from_time || !ts.to_time) return;
+                                    var s = time_str_to_minutes(ts.from_time);
+                                    var e = time_str_to_minutes(ts.to_time);
+                                    if (e <= s) return;
+                                    (hours[ts.day] = hours[ts.day] || []).push({ start: s, end: e });
+                                });
+                            }
+                            done();
+                        },
+                        error: function() { done(); }
+                    });
+                });
+            },
+            error: function() {
+                hours_cache[practitioner] = null;
+                callback();
+            }
+        });
+    }
+
+    function fetch_hours_for_many(ids, callback) {
+        var remaining = ids.length;
+        if (!remaining) { callback(); return; }
+        ids.forEach(function(id) {
+            fetch_practitioner_hours(id, function() {
+                if (--remaining === 0) callback();
+            });
+        });
+    }
+
+    build_time_slots([], [], []);
 
     // ── Appointment block geometry ───────────────────────────────
     var SLOT_HEIGHT_PX   = 52;
@@ -1085,7 +1214,14 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 loaded_appts = appts;
                 render_stats(all_appts, stats);
 
-                fetch_duty_for_many(ids, function() {
+                // Duty Assignment (which days) + Practitioner Schedule (which hours),
+                // fetched in parallel; draw once both are in.
+                var pending = 2;
+                fetch_duty_for_many(ids, after_lookups);
+                fetch_hours_for_many(ids, after_lookups);
+
+                function after_lookups() {
+                    if (--pending > 0) return;
                     if (active_load_key !== key) return; // stale
 
                     var dates = get_week_dates(f, t);
@@ -1121,7 +1257,7 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
 
                     document.getElementById('btn-new-appt').disabled = false;
                     render_calendar(appts, wrap, f, t, notice);
-                });
+                }
             },
             error: function() {
                 if (active_load_key !== key) return;
@@ -1162,6 +1298,9 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
         var grid_tpl = '60px ' + dates.map(function() { return 'minmax(0,1fr)'; }).join(' ');
         var min_w    = 60 + dates.length * Math.max(lanes * LANE_MIN_PX, 110);
 
+        // Time ladder follows the selected practitioners' Practitioner Schedules.
+        build_time_slots(dates, ids, appts);
+
         // working[practitioner][date] -> is that doctor on duty that day
         var working = {};
         ids.forEach(function(id) {
@@ -1169,8 +1308,8 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
             dates.forEach(function(d) { working[id][d] = is_day_working(id, d); });
         });
 
-        // Appointments bucketed per lane ("date|practitioner"); those completely
-        // outside the 08:00–17:30 window go in the all-day row.
+        // Appointments bucketed per lane ("date|practitioner"); only ones with
+        // no time at all end up in the all-day row now.
         var by_lane = {};
         var allday  = {};
         appts.forEach(function(a) {
@@ -1266,7 +1405,10 @@ frappe.pages['appointment-scheduli'].on_page_load = function (wrapper) {
                 html += '<div class="cal-lane' + (ok ? '' : ' cal-lane-off') + '">';
 
                 TIME_SLOTS.forEach(function(ts, si) {
-                    html += '<div class="cal-day-slot' + (ok ? '' : ' cal-slot-off') + '"'
+                    var sm = TIME_SLOT_MINUTES[si];
+                    var outside = ok && !is_within_hours(id, d, sm, sm + SLOT_MINUTES);
+                    html += '<div class="cal-day-slot' + (ok ? '' : ' cal-slot-off') + (outside ? ' cal-slot-outside' : '') + '"'
+                        + (outside ? ' title="Outside ' + esc(name_of(id)) + '\'s schedule"' : '')
                         + ' data-date="' + d + '" data-prac="' + esc(id) + '" data-slot="' + si + '"></div>';
                 });
 
