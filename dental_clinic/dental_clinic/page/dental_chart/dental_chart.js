@@ -930,7 +930,7 @@ class DentalChart {
                     const prs = await frappe.db.get_list('Healthcare Practitioner', {
                         filters          : { name: ['in', practIds] },
                         fields           : ['name', 'practitioner_name'],
-                        limit_page_length: 0,
+                        limit            : 0,
                     });
                     prs.forEach(p => { practNames[p.name] = p.practitioner_name || p.name; });
                 } catch (e) { /* fall back to IDs */ }
@@ -1622,7 +1622,9 @@ class DentalChart {
         try {
             this.toothStatusCatalog = await frappe.db.get_list('Tooth Status', {
                 fields            : ['name', 'status_name', 'color'],
-                limit_page_length : 0,
+                /* frappe.db.get_list sends limit:20 unless "limit" is given,
+                   and that overrides limit_page_length. 0 = no limit. */
+                limit             : 0,
                 order_by          : 'status_name asc',
             });
         } catch (err) {
