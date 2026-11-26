@@ -630,6 +630,10 @@ class DentalTreatmentPlanChart {
 		this.itemCatalog = [];
 		this.selItem = null;
 
+		// Pricing (customer / price list / company) and rates already fetched
+		this._pricingCtx = null;
+		this._rateCache = {};
+
 		this.selFDI = null;
 
 		this._tip = document.getElementById('dtp-tip');
@@ -642,7 +646,11 @@ class DentalTreatmentPlanChart {
 	init() {
 		this.patient_ctrl = frappe.ui.form.make_control({
 			parent: $('#dtp-pt-name'),
-			df: { fieldtype: 'Link', options: 'Patient', label: 'Patient', fieldname: 'patient', placeholder: 'Search patient…', reqd: 1 },
+			df: {
+				fieldtype: 'Link', options: 'Patient', label: 'Patient', fieldname: 'patient', placeholder: 'Search patient…', reqd: 1,
+				// The price list can depend on the patient's customer → refresh pricing
+				onchange: () => this._onPatientChanged(),
+			},
 			render_input: true,
 		});
 
@@ -757,24 +765,174 @@ class DentalTreatmentPlanChart {
 		this.patient_ctrl.set_value(opts.patient);
 	}
 
+	/* ── PRICING (same server calls ERPNext's Sales Invoice form uses) ── */
+	// Patient changed → price list / customer may differ, so drop the cache and
+	// refresh the rate of the item currently selected in the palette.
+	async _onPatientChanged() {
+		const patient = this.patient_ctrl ? this.patient_ctrl.get_value() : null;
+		if (this._pricingCtx && this._pricingCtx.patient === patient) return;
+		this._pricingCtx = null;
+		this._rateCache = {};
+		if (this.selItem) {
+			try {
+				const doc = await this._lookupItem(this.selItem.id);
+				this.selItem.rate = flt(doc.rate);
+				this._renderSelectedItem();
+			} catch (err) {
+				console.warn('[DentalTreatmentPlan] Could not refresh item rate:', err);
+			}
+		}
+	}
+
+	// Works out company, customer and selling price list the way a Sales
+	// Invoice does: erpnext.accounts.party.get_party_details for the customer,
+	// falling back to Selling Settings → "Standard Selling".
+	async _getPricingContext() {
+		const patient = this.patient_ctrl ? (this.patient_ctrl.get_value() || null) : null;
+		if (this._pricingCtx && this._pricingCtx.patient === patient) return this._pricingCtx;
+
+		const today = frappe.datetime.get_today();
+		const company = frappe.defaults.get_user_default('Company')
+			|| frappe.defaults.get_global_default('company') || '';
+
+		let customer = null, price_list = null, price_list_currency = null;
+
+		if (patient) {
+			try {
+				const r = await frappe.db.get_value('Patient', patient, 'customer');
+				customer = (r && r.message && r.message.customer) || null;
+			} catch (e) { /* no customer → default price list */ }
+		}
+
+		if (customer) {
+			try {
+				const r = await frappe.call({
+					method: 'erpnext.accounts.party.get_party_details',
+					args: { party: customer, party_type: 'Customer', company: company, posting_date: today, doctype: 'Sales Invoice' },
+				});
+				const pd = (r && r.message) || {};
+				price_list = pd.selling_price_list || null;
+				price_list_currency = pd.price_list_currency || null;
+			} catch (e) {
+				console.warn('[DentalTreatmentPlan] get_party_details failed, using default price list:', e);
+			}
+		}
+
+		if (!price_list) {
+			try { price_list = await frappe.db.get_single_value('Selling Settings', 'selling_price_list'); } catch (e) { /* ignore */ }
+		}
+		price_list = price_list || 'Standard Selling';
+
+		if (!price_list_currency) {
+			try {
+				const r = await frappe.db.get_value('Price List', price_list, 'currency');
+				price_list_currency = (r && r.message && r.message.currency) || null;
+			} catch (e) { /* ignore */ }
+		}
+		if (!price_list_currency && company) {
+			try {
+				const r = await frappe.db.get_value('Company', company, 'default_currency');
+				price_list_currency = (r && r.message && r.message.default_currency) || null;
+			} catch (e) { /* ignore */ }
+		}
+		price_list_currency = price_list_currency || frappe.defaults.get_default('currency');
+
+		this._pricingCtx = { patient, company, customer, price_list, price_list_currency, today };
+		return this._pricingCtx;
+	}
+
+	// Rate for one item, via erpnext.stock.get_item_details.get_item_details —
+	// the method the Sales Invoice item row calls. It reads Item Price for the
+	// price list and applies Pricing Rules. Fallbacks: Item Price directly,
+	// then Item.standard_rate.
+	async _fetchItemRate(itemCode, standardRate = 0) {
+		const ctx = await this._getPricingContext();
+		const key = `${ctx.customer || ''}|${ctx.price_list}|${itemCode}`;
+		if (key in this._rateCache) return this._rateCache[key];
+
+		let rate = 0;
+
+		if (ctx.company) {
+			const args = {
+				item_code          : itemCode,
+				company            : ctx.company,
+				doctype            : 'Sales Invoice',
+				child_doctype      : 'Sales Invoice Item',
+				customer           : ctx.customer || '',
+				price_list         : ctx.price_list,
+				selling_price_list : ctx.price_list,
+				price_list_currency: ctx.price_list_currency,
+				currency           : ctx.price_list_currency,
+				conversion_rate    : 1,
+				plc_conversion_rate: 1,
+				transaction_date   : ctx.today,
+				posting_date       : ctx.today,
+				qty                : 1,
+				stock_qty          : 1,
+				is_pos             : 0,
+				is_return          : 0,
+				update_stock       : 0,
+				ignore_pricing_rule: 0,
+			};
+			try {
+				// v14/v15 name the parameter "args", v16 names it "ctx";
+				// Frappe drops whichever one the function doesn't take.
+				const r = await frappe.call({
+					method: 'erpnext.stock.get_item_details.get_item_details',
+					args: { args: args, ctx: args },
+				});
+				const d = (r && r.message) || {};
+				let plr = flt(d.price_list_rate);
+				if (flt(d.discount_percentage)) plr = plr * (1 - flt(d.discount_percentage) / 100);
+				else if (flt(d.discount_amount)) plr = plr - flt(d.discount_amount);
+				rate = flt(d.rate) || plr;
+			} catch (err) {
+				console.warn('[DentalTreatmentPlan] get_item_details failed, falling back to Item Price:', err);
+			}
+		} else {
+			console.warn('[DentalTreatmentPlan] No default Company set — reading Item Price directly.');
+		}
+
+		if (!rate) {
+			try {
+				const r = await frappe.db.get_value('Item Price',
+					{ item_code: itemCode, price_list: ctx.price_list, selling: 1 }, 'price_list_rate');
+				rate = flt(r && r.message && r.message.price_list_rate);
+			} catch (e) { /* ignore */ }
+		}
+
+		if (!rate) rate = flt(standardRate);
+
+		this._rateCache[key] = rate;
+		return rate;
+	}
+
+	// Item name / category from cache (or the server) + current price.
+	async _lookupItem(itemCode) {
+		let doc = this.itemCatalog.find(s => s.name === itemCode);
+		if (!doc) {
+			const r = await frappe.db.get_value('Item', itemCode, ['item_name', 'standard_rate']);
+			doc = this._cacheItem({
+				name: itemCode,
+				item_name: (r.message && r.message.item_name) || itemCode,
+				standard_rate: (r.message && r.message.standard_rate) || 0,
+			});
+		}
+		doc.rate = await this._fetchItemRate(itemCode, doc.standard_rate);
+		return doc;
+	}
+
 	/* ── SELECTED ITEM (left palette) ─────────────────────────────────── */
 	async _onItemSearchSelected() {
 		const val = this.item_search_ctrl.get_value();
 		if (!val) return;
 
-		let doc = this.itemCatalog.find(s => s.name === val);
-		if (!doc) {
-			try {
-				const r = await frappe.db.get_value('Item', val, ['item_name', 'standard_rate']);
-				doc = this._cacheItem({
-					name: val,
-					item_name: (r.message && r.message.item_name) || val,
-					standard_rate: (r.message && r.message.standard_rate) || 0,
-				});
-			} catch (err) {
-				console.error('[DentalTreatmentPlan] Could not fetch item:', err);
-				return;
-			}
+		let doc;
+		try {
+			doc = await this._lookupItem(val);
+		} catch (err) {
+			console.error('[DentalTreatmentPlan] Could not fetch item:', err);
+			return;
 		}
 
 		this.selItem = { id: doc.name, label: doc.status_name || doc.name, color: doc.color, category: doc.category, rate: flt(doc.rate) };
@@ -792,7 +950,8 @@ class DentalTreatmentPlanChart {
 			status_name: item_name,
 			category: category,
 			color: (DTP_TREATMENT_COLORS[category] && DTP_TREATMENT_COLORS[category].s) || dtpHashColor(item.name),
-			rate: flt(item.standard_rate),
+			standard_rate: flt(item.standard_rate),
+			rate: flt(item.standard_rate),   // replaced by the price-list rate in _lookupItem()
 		};
 		this.itemCatalog = this.itemCatalog.filter(s => s.name !== doc.name);
 		this.itemCatalog.push(doc);
@@ -1227,20 +1386,12 @@ class DentalTreatmentPlanChart {
 			return;
 		}
 
-		let doc = this.itemCatalog.find(s => s.name === itemCode);
-
-		if (!doc) {
-			try {
-				const r = await frappe.db.get_value('Item', itemCode, ['item_name', 'standard_rate']);
-				doc = this._cacheItem({
-					name: itemCode,
-					item_name: (r.message && r.message.item_name) || itemCode,
-					standard_rate: (r.message && r.message.standard_rate) || 0,
-				});
-			} catch (err) {
-				console.error('[DentalTreatmentPlan] Could not fetch new item:', err);
-				return;
-			}
+		let doc;
+		try {
+			doc = await this._lookupItem(itemCode);
+		} catch (err) {
+			console.error('[DentalTreatmentPlan] Could not fetch new item:', err);
+			return;
 		}
 
 		found.row.type = doc.name;
